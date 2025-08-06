@@ -12,18 +12,18 @@ def export_model(params_car):
 
     model.name = "f1tenth"
 
-    x = ca.MX.sym('x', 7) # state: x, y, phi, vx, vy, omega, delta
-    u = ca.MX.sym('u', 2) # controls: acceleration, steer_rate
-    p = ca.MX.sym('p', 8)
-    #parameters: Bf, Br, Cf, Cr, Df, Dr, Cro, Cd
+    x = ca.MX.sym('x', 8) # state: x, y, phi, vx, vy, omega, delta, acceleration
+    u = ca.MX.sym('u', 2) # control rate: jerk, steer rate
+    p = ca.MX.sym('p', 9)
+    #parameters: Bf, Br, Cf, Cr, Df, Dr, Cro, Cd, Cm
 
     mass = params_car['mass']
     Iz = params_car['Iz'] 
     lf = params_car['lf']
     lr = params_car['lr']
 
-    Frx = (mass * u[0]) - p[6] - p[7] * x[3] * x[3]
-    #nominal force - Cro - cdvx^2
+    Frx = (mass * x[7]) - p[6] - p[8] * x[3] - p[7] * x[3] * x[3]
+    #nominal force - Cro - Cm vx - cd vx^2
 
     alphaf = x[6] - ca.atan2(x[5] * lf + x[4], x[3]+ 1e-8)
     #steer - arctan(omega * lf + vy, vx)
@@ -38,10 +38,15 @@ def export_model(params_car):
     dx3 = (x[5]) #phidot
     dx4 = (Frx - Ffy * ca.sin(x[6])) / mass + x[4] * x[5] #vxdot
     dx5 = (Fry + Ffy * ca.cos(x[6])) / mass - x[3] * x[5] #vydot
-    dx6 = (Ffy * lf * ca.cos(x[6]) - Fry * lr)/ Iz
-    dx7 = u[1] #steerdot
+    dx6 = (Ffy * lf * ca.cos(x[6]) - Fry * lr)/ Iz #omegadot
+    dx7 = u[1] # steer rate
+    dx8 = u[0] # jerk
 
-    f_expl = ca.vertcat(dx1, dx2, dx3, dx4, dx5, dx6, dx7)
+    # inputs: accel, steer, (x[7] and x[6])
+    # input/control rates: jerk and steer rate (u[0] and u[1])
+
+
+    f_expl = ca.vertcat(dx1, dx2, dx3, dx4, dx5, dx6, dx7, dx8)
 
 
     model.f_expl_expr = f_expl
@@ -57,7 +62,7 @@ def create_ocp(model, params_car):
 
     N = 20 #steps
     Tf = 2.0 # total time horizon
-    nx, nu = model.x.size()[0], model.u.size()[0]
+    nx, nu = model.x.size()[0] - 2, model.u.size()[0] 
     ocp.dims.N = N
     ocp.dims.nx = nx
     ocp.dims.nu = nu
@@ -66,17 +71,24 @@ def create_ocp(model, params_car):
     ocp.cost.cost_type = 'NONLINEAR_LS'
     ocp.cost.cost_type_e = 'NONLINEAR_LS'
 
+    w_x = 1.0
+    w_y = 1.0
+    w_xe = 2.0
+    w_ye = 2.0
+    w_steer = 1.0
+    w_accel = 1.0
+    w_jerk = 0
+    w_steer_v = 0
 
-    Q = ca.DM(np.diag([])) # nx, for trajectory deviation
-    R = ca.DM(np.diag([]))  # nu, for control magnitude
-    Rd = ca.DM(np.diag([]))  # nu, for control smoothness
-    Qf = ca.DM(np.diag([]))  # nx, for final state deviation
+    Q = ca.DM(np.diag([w_x, w_y, 0.0, 0.0, 0.0, 0.0])) # nx, for trajectory deviation 6x6
+    R = ca.DM(np.diag([w_steer, w_accel]))  # nu, for control magnitude 2x2
+    Rd = ca.DM(np.diag([w_jerk, w_steer_v]))  # nu, for control smoothness 2x2
+    Qf = ca.DM(np.diag([w_x, w_y, 0.0, 0.0, 0.0, 0.0]))  # nx, for final state deviation 6x6
 
-    ocp.cost.W = ca.block_diag(Q, R, Rd) #nx + nu + nu
+    ocp.cost.W = ca.block_diag(Q, R, Rd) #nx, nu, nu, 10x10
     ocp.cost.W_e = Qf # cost matrix
 
-
-    x_ref = ca.MX.sym('x_ref', nx)  # Reference state
+    x_ref = ca.MX.sym('x_ref', nx + nu)  # Reference state
     u_prev = ca.MX.sym('u_prev', nu)  # Previous control input
     x = model.x
     u = model.u
@@ -91,27 +103,26 @@ def create_ocp(model, params_car):
     ocp.cost.yref_e = np.zeros(ny_e) # terminal objective function reference
 
     ocp.model.cost_y_expr =  ca.vertcat(
-        x - x_ref, #trajectory deviation
-        u, # control magnitude
-        u - u_prev #control smoothness
-    ) # running objective function value
-    ocp.model.cost_y_expr_e = x - x_ref # terminal objective funciton value
+        x - x_ref, # of size nx + nu
+        #trajectory deviation and control magnitude (make sure last 2 values of xref are 0s)
+        u #control smoothness of size nu
+    ) # running objective function value 10 long vector
+    ocp.model.cost_y_expr_e = x[:6] - x_ref[:6] # terminal objective funciton value 6 long
     
-    p_ref = ca.vertcat(x_ref, u_prev)  # reference parameters
-    ocp.model.p = ca.vertcat(model.p, p_ref)  # Combine with existing parameters
-    ocp.dims.np = model.p.size()[0] + p_ref.size()[0]
+    ocp.model.p = ca.vertcat(model.p, x_ref)  # Combine with existing parameters
+    ocp.dims.np = model.p.size()[0] + x_ref.size()[0]
 
-    ocp.constraints.lbx = np.array([params_car['min_v'], params_car['min_steer']])
-    ocp.constraints.ubx = np.array([params_car['max_v'], params_car['max_steer']])
-    ocp.constraints.idxbx = np.array([3, 6])  # vx and delta
-
-    ocp.constraints.lbu = np.array([params_car['min_acc'], -params_car['max_steer_vel']])
-    ocp.constraints.ubu = np.array([params_car['max_acc'], params_car['max_steer_vel']])
-    ocp.constraints.idxbu = np.array([0, 1]) 
+    ocp.constraints.lbx = np.array([params_car['min_v'], params_car['min_steer'], params_car['min_acc']])
+    ocp.constraints.ubx = np.array([params_car['max_v'], params_car['max_steer'], params_car['max_acc']])
+    ocp.constraints.idxbx = np.array([3, 6, 7])  # vx, delta, acceleration, steer_Rate
 
     ocp.constraints.lbx_e = ocp.constraints.lbx
     ocp.constraints.ubx_e = ocp.constraints.ubx
     ocp.constraints.idxbx_e = ocp.constraints.idxbx
+
+    ocp.constraints.lbu = np.array([-params_car['max_steer_vel']])
+    ocp.constraints.ubu = np.array([params_car['max_steer_vel']])
+    ocp.constraints.idxbu = np.array([1])
 
     ocp.solver_options.qp_solver = 'PARTIAL_CONDENSING_HPIPM'
     ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'
