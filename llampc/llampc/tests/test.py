@@ -1,3 +1,6 @@
+import sys
+print sys.path
+
 from llampc.rollout import DynamicBank
 from llampc.rollout import ModelBank
 from llampc.utils import Spline, Spline2D, Projection, Track
