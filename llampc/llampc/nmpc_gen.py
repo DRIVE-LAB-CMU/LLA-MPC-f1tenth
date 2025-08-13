@@ -12,18 +12,18 @@ def export_model(params_car):
 
     model.name = "f1tenth"
 
-    x = ca.MX.sym('x', 8) # state: x, y, phi, vx, vy, omega, delta, acceleration
+    x = ca.MX.sym('x', 8) # state: x, y, phi, vx, vy, omega, acceleration, delta
     u = ca.MX.sym('u', 2) # control rate: jerk, steer rate
-    p = ca.MX.sym('p', 9)
-    #parameters: Bf, Br, Cf, Cr, Df, Dr, Cro, Cd, Cm
+    p = ca.MX.sym('p', 10)
+    #parameters: Bf, Br, Cf, Cr, Df, Dr, Cro, Cd, Ce, Cm
 
     mass = params_car['mass']
     Iz = params_car['Iz'] 
     lf = params_car['lf']
     lr = params_car['lr']
 
-    Frx = (mass * x[7]) - p[6] - p[8] * x[3] - p[7] * x[3] * x[3]
-    #nominal force - Cro - Cm vx - cd vx^2
+    Frx = mass * (x[7] * p[8]  -  p[9] * x[3]) - p[6] - p[7] * x[3] * x[3]
+    #nominal force * Cefficiency - Crolling - Cmotor vx - cdrag vx^2
 
     alphaf = x[6] - ca.atan2(x[5] * lf + x[4], x[3]+ 1e-8)
     #steer - arctan(omega * lf + vy, vx)
@@ -39,8 +39,8 @@ def export_model(params_car):
     dx4 = (Frx - Ffy * ca.sin(x[6])) / mass + x[4] * x[5] #vxdot
     dx5 = (Fry + Ffy * ca.cos(x[6])) / mass - x[3] * x[5] #vydot
     dx6 = (Ffy * lf * ca.cos(x[6]) - Fry * lr)/ Iz #omegadot
-    dx7 = u[1] # steer rate
-    dx8 = u[0] # jerk
+    dx7 = u[0] # steer rate
+    dx8 = u[1] # jerk
 
     # inputs: accel, steer, (x[7] and x[6])
     # input/control rates: jerk and steer rate (u[0] and u[1])
@@ -112,8 +112,8 @@ def create_ocp(model, params_car):
     ocp.model.p = ca.vertcat(model.p, x_ref)  # Combine with existing parameters
     ocp.dims.np = model.p.size()[0] + x_ref.size()[0]
 
-    ocp.constraints.lbx = np.array([params_car['min_v'], params_car['min_steer'], params_car['min_acc']])
-    ocp.constraints.ubx = np.array([params_car['max_v'], params_car['max_steer'], params_car['max_acc']])
+    ocp.constraints.lbx = np.array([params_car['min_v'], params_car['min_acc'], params_car['min_steer'] ])
+    ocp.constraints.ubx = np.array([params_car['max_v'], params_car['max_acc'], params_car['max_steer'] ])
     ocp.constraints.idxbx = np.array([3, 6, 7])  # vx, delta, acceleration, steer_Rate
 
     ocp.constraints.lbx_e = ocp.constraints.lbx

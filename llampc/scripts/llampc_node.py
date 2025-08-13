@@ -8,6 +8,7 @@ from llampc.nmpc_gen import setup_mpc_from_json
 from llampc.params import F110
 from llampc.planner import get_reference_trajectory_segment
 from llampc.utils import Track
+from llampc.rollout import DynamicBank
 
 from nav_msgs.msg import Odometry, Path
 from ackermann_msgs.msg import AckermannDriveStamped
@@ -23,10 +24,9 @@ class MPCNode(Node):
        
 
         self.last_drive_command = np.array([0.0, 0.0]) #vx, steer
-        self.last_drive_command_time = self.get_clock().now()
-        self.cur_drive_command = np.array([0.0, 0.0])
-        self.last_control = np.array([0.0, 0.0]) #acceleration, steer rate
+        self.last_control = np.array([0.0, 0.0]) #acceleration, steer
         self.rates = np.array([0.0, 0.0])
+        self.first_control = False
 
         self.projidx = 0
 
@@ -85,13 +85,47 @@ class MPCNode(Node):
         #     solver_config=solver_config,
         #     params_car=F110
         # )
-        
 
+        params_car = F110()
+
+        variation_dict = {
+            'Bf': .15,   # 15% variation
+            'Br': .15,   # 15% variation
+            'Cf': .15,   # 15% variation
+            'Cr': .15,   # 15% variation
+            'Df': .15,   # 15% variation
+            'Dr': .15,   # 15% variation
+            'Cro': 0.15, # 15% variation
+            'Cd': 0.15,  # 15% variation
+            'Ce': 0.15,  # 15% variation
+            'Cm': 0.15,  # 15% variation
+        }
+
+        mean_dict = {
+            'Bf': 20.0,
+            'Br': 20.0,
+            'Cf': 1.0,
+            'Cr': 1.0,
+            'Df': 0.8,
+            'Dr': 0.8,
+            'Cro': 0.02,
+            'Cd': 0.001,
+            'Ce': 1.0,
+            'Cm': .05, 
+
+        }
+
+        cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
+        self.bank = DynamicBank(
+            params_car['lf'], params_car['lr'], 
+            params_car['mass'], params_car['Iz'], 
+            mean_dict, variation_dict, 
+            2000,
+            cost_weights
+        )
+,
         self.current_state = None
-        self.last_drive_command = np.array([0.0, 0.0])
-        self.lla_params = np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]])
         self.solver = setup_mpc_from_json()
-        self.selected_params = 0
 
     def odom_callback(self, msg):
         x = msg.pose.pose.position.x
@@ -109,19 +143,13 @@ class MPCNode(Node):
         vy = msg.twist.twist.linear.y
         omega = msg.twist.twist.angular.z
 
-        time_diff = (Time.from_msg(msg.header.stamp) - self.last_drive_command_time).nanoseconds / 1e9
-        predicted = self.last_drive_command[1] + self.rates[1] * time_diff
-        target = self.cur_drive_command[1]
-        overshot = self.rates[1] == 0 or (self.rates[1] < 0 and predicted < target) or (self.rates[1] > 0 and predicted > target)
-
-        delta =  predicted if time_diff < self.dt and not overshot else target
-
-        self.current_state = np.array([x, y, phi, vx, vy, omega, delta])
+        self.current_state = np.array([x, y, phi, vx, vy, omega])
         
     def control_callback(self):
         if self.track is None or self.current_state is None:
             return
-
+        self.bank.update_lookback_error(self.current_state)
+       
         x0 = self.current_state[:2]
         v0 = self.current_state[3]
 
@@ -131,16 +159,22 @@ class MPCNode(Node):
         self.projidx = idx
 
         # set initial locked current state
-        self.solver.set(0, "lbx", np.concatenate([self.current_state, np.array([self.params_car["min_acc"]])]))
-        self.solver.set(0, "ubx", np.concatenate([self.current_state, np.array([self.params_car["max_acc"]])]))
+        self.solver.set(0, "lbx", np.concatenate([self.current_state, self.last_control]))
+        self.solver.set(0, "ubx", np.concatenate([self.current_state, self.last_control]))
         
         # Set reference trajectory and previous control for all stages
+        selected_model_index = self.bank.get_best_model()
+        selected_model_params = self.bank.get_model_params_arr(selected_model_index)
         for i in range(self.N):
             # Combine tire parameters with reference state and previous control
             full_params = np.concatenate([
-                self.lla_params[self.selected_params, :],
-                np.concatenate([ref_segment[:, i], np.zeros(6)])]
+                selected_model_params,
+                ref_segment[:, i], 
+                np.zeros(6)
+                ]
+
                  # concatenate 2 for x, y, 6 to fill out rest of state
+                 # make sure to weight non-defined states as 0 cost
                 )
             
             self.solver.set(i, "p", full_params)
@@ -151,7 +185,6 @@ class MPCNode(Node):
         if status == 0:  # Success
             # Get optimal control
             u_opt = self.solver.get(0, "x")[-2:]
-            self.rates = self.solver.get(0, "u")
             
             # Get predicted trajectory for visualization
             predicted_states = []
@@ -159,8 +192,10 @@ class MPCNode(Node):
                 x_pred = self.solver.get(i, "x")[:3]
                 predicted_states.append(x_pred)
             
-            
             self.apply_control(u_opt) # Apply control
+            self.bank.predict_states(self.current_state, u_opt)
+
+
             self.publish_predicted_trajectory(predicted_states) # Publish predicted trajectory
             self.publish_mpc_info(u_opt, status) # Publish MPC info
             
@@ -172,16 +207,12 @@ class MPCNode(Node):
     def apply_control(self, u_opt):
         """Apply optimal control to the vehicle"""
         # u_opt = [steer, acceleration]
-        acceleration = float(u_opt[1])
-        steer = float(u_opt[0])
-        
-        # Integrate steering rate to get steering angle
-
-        self.last_drive_command_time = self.get_clock().now()
+        acceleration = float(u_opt[0])
+        steer = float(u_opt[1])
         
         # Create Ackermann drive message
         drive_msg = AckermannDriveStamped()
-        drive_msg.header.stamp = self.last_drive_command_time.to_msg()
+        drive_msg.header.stamp = self.get_clock.now()
         drive_msg.header.frame_id = "base_link"
         
         # Convert acceleration to speed command (simple integration)
@@ -190,11 +221,10 @@ class MPCNode(Node):
         drive_msg.drive.speed = desired_speed
         drive_msg.drive.steering_angle = steer
 
-        self.last_drive_command = np.array(self.cur_drive_command)
-        self.cur_drive_command[0] = desired_speed
-        self.cur_drive_command[1] = steer
-
         self.cmd_pub.publish(drive_msg) 
+
+        self.last_drive_command = np.array([desired_speed, steer])
+        self.last_control = np.array([acceleration, steer])
         
 
     def publish_predicted_trajectory(self, predicted_states):
