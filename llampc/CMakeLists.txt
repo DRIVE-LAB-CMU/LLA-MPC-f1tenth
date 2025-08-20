@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.5)
-project(pure_pursuit)
+project(llampc)
 
 # Default to C++14
 if(NOT CMAKE_CXX_STANDARD)
@@ -38,9 +38,9 @@ include_directories(
 # Create Cpp executable
 # add_executable(pure_pursuit_node src/pure_pursuit_node.cpp)
 
-ament_target_dependencies(llampc_node
-  rclcpp geometry_msgs ackermann_msgs nav_msgs sensor_msgs std_msgs visualization_msgs tf2_ros
-)
+# ament_target_dependencies(
+#   rclcpp geometry_msgs ackermann_msgs nav_msgs sensor_msgs std_msgs visualization_msgs tf2_ros
+# )
 
 # Install Cpp executables
 # install(TARGETS

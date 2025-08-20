@@ -1,10 +1,11 @@
+#!/usr/bin/env python3
 import numba
 import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.time import Time
 
-from llampc.nmpc_gen import setup_mpc_from_json
+from llampc.nmpc_gen import setup_mpc
 from llampc.params import F110
 from llampc.planner import get_reference_trajectory_segment
 from llampc.utils import Track
@@ -32,7 +33,11 @@ class MPCNode(Node):
 
         # dictionary, prefereably npy, which has waypoints_x, waypoints_y, and velocity
         track_name = self.get_parameter('track_file_name').get_parameter_value().string_value
+
+        print("HELLO")
+        print(track_name)
         self.track = Track(track_name)
+
     
 
         self.odom_subscriber = self.create_subscription(
@@ -68,7 +73,7 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', '')
+        self.declare_parameter('track_file_name', 'sim_track.npz')
 
         self.N = 20 #steps (from nmpc)
         self.Tf = 2.0 # total time horizon (from nmpc)
@@ -121,11 +126,13 @@ class MPCNode(Node):
             params_car['mass'], params_car['Iz'], 
             mean_dict, variation_dict, 
             2000,
+            2,
+            0.2,
             cost_weights
         )
-,
+
         self.current_state = None
-        self.solver = setup_mpc_from_json()
+        self.solver = setup_mpc()
 
     def odom_callback(self, msg):
         x = msg.pose.pose.position.x

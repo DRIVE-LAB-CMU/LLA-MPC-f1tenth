@@ -4,6 +4,7 @@ import numpy as np
 import os
 from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
+from scipy.linalg import block_diag
 
 from llampc.params import F110
 
@@ -15,7 +16,8 @@ def export_model(params_car):
     x = ca.MX.sym('x', 8) # state: x, y, phi, vx, vy, omega, acceleration, delta
     u = ca.MX.sym('u', 2) # control rate: jerk, steer rate
     p = ca.MX.sym('p', 10)
-    #parameters: Bf, Br, Cf, Cr, Df, Dr, Cro, Cd, Ce, Cm
+    x_ref = ca.MX.sym('x_ref', 8)
+    #parameters: Bf, Br, Cf, Cr, Df, Dr, Cro, Cd, Ce, Cm,
 
     mass = params_car['mass']
     Iz = params_car['Iz'] 
@@ -52,7 +54,7 @@ def export_model(params_car):
     model.f_expl_expr = f_expl
     model.x = x
     model.u = u
-    model.p = p
+    model.p = ca.vertcat(p, x_ref)
 
     return model
 
@@ -71,25 +73,28 @@ def create_ocp(model, params_car):
     ocp.cost.cost_type = 'NONLINEAR_LS'
     ocp.cost.cost_type_e = 'NONLINEAR_LS'
 
-    w_x = 1.0
-    w_y = 1.0
+    w_x = 2.0
+    w_y = 50.0
     w_xe = 2.0
-    w_ye = 2.0
-    w_steer = 1.0
+    w_ye = 50.0
+    w_steer = 0.2
     w_accel = 1.0
-    w_jerk = 0
-    w_steer_v = 0
+    w_jerk = 0.05
+    w_steer_v = 0.02
 
-    Q = ca.DM(np.diag([w_x, w_y, 0.0, 0.0, 0.0, 0.0])) # nx, for trajectory deviation 6x6
-    R = ca.DM(np.diag([w_steer, w_accel]))  # nu, for control magnitude 2x2
-    Rd = ca.DM(np.diag([w_jerk, w_steer_v]))  # nu, for control smoothness 2x2
-    Qf = ca.DM(np.diag([w_x, w_y, 0.0, 0.0, 0.0, 0.0]))  # nx, for final state deviation 6x6
+    Q_flat = [w_x, w_y, 0.0, 0.0, 0.0, 0.0]
+    R_flat = [w_steer, w_accel]
+    Rd_flat = [w_jerk, w_steer_v]
 
-    ocp.cost.W = ca.block_diag(Q, R, Rd) #nx, nu, nu, 10x10
+    Q = np.diag(Q_flat) # nx, for trajectory deviation 6x6
+    R = np.diag(R_flat)  # nu, for control magnitude 2x2
+    Rd = np.diag(Rd_flat)  # nu, for control smoothness 2x2
+    Qf = np.diag([w_xe, w_ye, 0.0, 0.0, 0.0, 0.0])  # nx, for final state deviation 6x6
+
+    ocp.cost.W = np.diag(np.concatenate((Q_flat, R_flat, Rd_flat))) #nx, nu, nu, 10x10
     ocp.cost.W_e = Qf # cost matrix
 
-    x_ref = ca.MX.sym('x_ref', nx + nu)  # Reference state
-    u_prev = ca.MX.sym('u_prev', nu)  # Previous control input
+    x_ref = model.p[10:]  # last 8 parameters
     x = model.x
     u = model.u
 
@@ -109,8 +114,9 @@ def create_ocp(model, params_car):
     ) # running objective function value 10 long vector
     ocp.model.cost_y_expr_e = x[:6] - x_ref[:6] # terminal objective funciton value 6 long
     
-    ocp.model.p = ca.vertcat(model.p, x_ref)  # Combine with existing parameters
-    ocp.dims.np = model.p.size()[0] + x_ref.size()[0]
+    ocp.model.p = model.p  # Combine with existing parameters
+    ocp.dims.np = model.p.size()[0]
+    ocp.parameter_values = np.zeros((ocp.dims.np, 1))
 
     ocp.constraints.lbx = np.array([params_car['min_v'], params_car['min_acc'], params_car['min_steer'] ])
     ocp.constraints.ubx = np.array([params_car['max_v'], params_car['max_acc'], params_car['max_steer'] ])
@@ -133,7 +139,8 @@ def create_ocp(model, params_car):
     return ocp
 
 def get_solver_directory(solver_config = "default"):
-    package_dir = Path(get_package_share_directory('f1tenth_mpc'))
+    # package_dir = Path(get_package_share_directory('llampc'))
+    package_dir = Path(__file__).parent.resolve()
     solvers_dir = package_dir / 'solvers' / solver_config
 
     solvers_dir.mkdir(parents=True, exist_ok=True)
@@ -164,26 +171,8 @@ def setup_mpc(json_file='f1tenth_acados_ocp.json', solver_config ="default", bui
     finally:
         os.chdir(original_cwd) 
 
-def setup_mpc_from_json(json_file='f1tenth_acados_ocp.json', solver_config = "default", params_car=F110):
-    solver_dir = get_solver_directory(solver_config)
-    full_json_path = solver_dir / json_file
+def main(args=None):
+    solver = setup_mpc(build=True)
 
-    original_cwd = os.getcwd()
-
-    if not full_json_path.exists():
-        print(f"JSON file {full_json_path} not found. Building solver from scratch...")
-        return setup_mpc(json_file=json_file, solver_config=solver_config, build=True, params_car=params_car)    
-    
-    try:
-        os.chdir(solver_dir)
-        # Load solver from existing JSON (no rebuild needed)
-        solver = AcadosOcpSolver.create_from_json(json_file)
-        print(f"Successfully loaded solver from {json_file}")
-
-        return solver
-    except Exception as e:
-        print(f"Failed to load from JSON: {e}")
-        print("Rebuilding solver from scratch...")
-        return setup_mpc(json_file=json_file, build=True, params_car=params_car)
-    finally:
-        os.chdir(original_cwd)
+if __name__ == '__main__':
+    main()
