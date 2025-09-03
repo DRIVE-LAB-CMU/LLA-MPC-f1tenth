@@ -10,7 +10,7 @@ class DynamicBank(ModelBank):
         self.lr = lr
         self.mass = mass
         self.Iz = Iz
-        self.approx = True
+        self.approx = False
         super().__init__(num_models, history_length, dt, cost_weights)
 
         for key in variation_dict.keys():
@@ -93,10 +93,10 @@ class DynamicBank(ModelBank):
             Fry = 2 * self.Cr * alphar
 
         else:
-            Frx = self.mass * (acc * self.Ce - self.Cm * vx ) - self.Cr0 - self.Cr2 * (vx ** 2)
+            Frx = self.mass * (acc * self.Ce - self.Cm * vx ) - self.Cro - self.Cd * (vx ** 2)
 
-            alphaf = steer - np.arctan2((self.lf*omega + vy), abs(vx))
-            alphar = np.arctan2((self.lr*omega - vy), abs(vx))
+            alphaf = np.where(abs(vx) < 1e-4, 0,  steer - np.arctan2((self.lf*omega + vy), abs(vx)))
+            alphar = np.where(abs(vx) < 1e-4, 0, np.arctan2((self.lr*omega - vy), abs(vx)))
             Ffy = self.Df * np.sin(self.Cf * np.arctan(self.Bf * alphaf))
             Fry = self.Dr * np.sin(self.Cr * np.arctan(self.Br * alphar))
         if return_slip:

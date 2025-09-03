@@ -153,8 +153,8 @@ class MPCNode(Node):
         self.bank = DynamicBank(
             params_car['lf'], params_car['lr'], 
             params_car['mass'], params_car['Iz'], 
-            mean_dict, no_var, 
-            2000,
+            mean_dict, variation_dict, 
+            200,
             2,
             0.2,
             cost_weights
@@ -201,7 +201,7 @@ class MPCNode(Node):
         if self.track is None or self.current_state is None:
             return
         
-        #self.bank.update_lookback_error(self.current_state)
+        self.bank.update_lookback_error(self.current_state)
 
         x0 = self.current_state[:2]
         v0 = self.current_state[3]
@@ -213,7 +213,7 @@ class MPCNode(Node):
 
         self.checkpoint[0] = time.perf_counter_ns()
 
-        # self.publish_ref_trajectory(ref_segment)
+        self.publish_ref_trajectory(ref_segment)
         # print(f"segment: {ref_segment}")
 
         self.checkpoint[1] = time.perf_counter_ns()
@@ -229,7 +229,7 @@ class MPCNode(Node):
 
         # concatenate 2 for x, y, 6 to fill out rest of state
         # make sure to weight non-defined states as 0 cost
-        all_yref = np.zeros(10) #np.concatenate([np.zeros(6), np.zeros(2), np.zeros(2)])
+        # all_yref = np.zeros(10) #np.concatenate([np.zeros(6), np.zeros(2), np.zeros(2)])
 
         for i in range(self.N):
             # Combine tire parameters with reference state and previous control
@@ -243,7 +243,7 @@ class MPCNode(Node):
                 )
             
             self.solver.set(i, "p", full_params)
-            self.solver.set(i, "yref", all_yref)
+            # self.solver.set(i, "yref", all_yref)
         
 
         self.checkpoint[2]= time.perf_counter_ns()
@@ -257,12 +257,12 @@ class MPCNode(Node):
         u_opt = self.solver.get(1, "x")[-2:] # acceleration, delta
         # print(f"CONTROL: {u_opt}")
 
-        # predicted_states = []
-        # for i in range(self.N + 1):
-        #     x_pred = self.solver.get(i, "x")[:3]
-        #     predicted_states.append(x_pred)
+        predicted_states = []
+        for i in range(self.N + 1):
+            x_pred = self.solver.get(i, "x")[:3]
+            predicted_states.append(x_pred)
 
-        # self.publish_predicted_trajectory(predicted_states) # Publish predicted trajectory
+        self.publish_predicted_trajectory(predicted_states) # Publish predicted trajectory
         self.checkpoint[4] = time.perf_counter_ns()
 
 
@@ -305,14 +305,16 @@ class MPCNode(Node):
             # Get predicted trajectory for visualization
             
             self.apply_control(u_opt) # Apply control
-            #self.bank.predict_states(self.current_state, u_opt)
+            # print(f"CURRENT STATE {self.current_state}")
+            self.bank.predict_states(self.current_state, u_opt)
             self.checkpoint[5] = time.perf_counter_ns()
 
             self.count = (self.count + 1) % self.time_window
-            self.time_history[:, self.count] = np.array(self.checkpoint-start)
+            self.time_history[:5, self.count] = np.array(self.checkpoint[1:]-self.checkpoint[:-1])
 
             if(self.count == 0):
-                print(np.max(self.time_history*10e-6, axis = 1))
+                print(selected_model_index)
+            #     print(np.max(self.time_history*10e-6, axis = 1))
 
            
             
