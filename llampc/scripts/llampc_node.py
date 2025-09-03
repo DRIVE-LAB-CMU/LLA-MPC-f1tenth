@@ -13,12 +13,16 @@ from llampc.rollout import DynamicBank
 
 from nav_msgs.msg import Odometry, Path
 from ackermann_msgs.msg import AckermannDriveStamped
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, PoseArray, Pose
 from std_msgs.msg import Float64MultiArray
+
+import time
 
 class MPCNode(Node):
     def __init__(self):
         super().__init__('mpc_node')
+
+        self.get_logger().info("Initializing")
 
         self.declare_params()
         self.initialize_mpc()
@@ -31,25 +35,29 @@ class MPCNode(Node):
 
         self.projidx = 0
 
+        self.count = 0
+        self.time_window = 5
+        self.time_index = 0
+        self.time_history = np.zeros((6, self.time_window))
+        self.maxtime = np.zeros(6)
+        self.checkpoint = np.empty(6)
+
         # dictionary, prefereably npy, which has waypoints_x, waypoints_y, and velocity
         track_name = self.get_parameter('track_file_name').get_parameter_value().string_value
 
-        print("HELLO")
-        print(track_name)
         self.track = Track(track_name)
-
     
 
         self.odom_subscriber = self.create_subscription(
             Odometry,
-            '/odom',
+            self.get_parameter('odom_topic').get_parameter_value().string_value,
             self.odom_callback,
             10
         )
 
 
         self.predicted_path_pub = self.create_publisher(
-            Path,
+            PoseArray,
             '/predicted_path',
             10
         )
@@ -66,17 +74,25 @@ class MPCNode(Node):
             10
         )
 
-        self.control_timer = self.create_timer(0.01, self.control_callback) # run 100 hz
+        self.ref_pub = self.create_publisher(
+            PoseArray,
+            '/ref_trajectory',
+            10
+        )
+
+        self.control_timer = self.create_timer(self.dt, self.control_callback) # run 100 hz
+
 
         self.get_logger().info("F1tenth MPC Initialized")
 
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'sim_track.npz')
+        self.declare_parameter('track_file_name', 'pure_pursuit.npz')
+        self.declare_parameter('odom_topic', '/ego_racecar/odom')
 
         self.N = 20 #steps (from nmpc)
-        self.Tf = 2.0 # total time horizon (from nmpc)
+        self.Tf = 1.0 # total time horizon (from nmpc)
         self.dt = self.Tf / self.N
         self.params_car = F110()
         
@@ -106,9 +122,22 @@ class MPCNode(Node):
             'Cm': 0.15,  # 15% variation
         }
 
+        no_var = {
+            'Bf': 0,
+            'Br': 0,
+            'Cf': 0,
+            'Cr': 0,
+            'Df': 0,
+            'Dr': 0,
+            'Cro': 0,
+            'Cd': 0,
+            'Ce': 0,
+            'Cm': 0,
+        }
+
         mean_dict = {
-            'Bf': 20.0,
-            'Br': 20.0,
+            'Bf': 15.0,
+            'Br': 15.0,
             'Cf': 1.0,
             'Cr': 1.0,
             'Df': 0.8,
@@ -124,7 +153,7 @@ class MPCNode(Node):
         self.bank = DynamicBank(
             params_car['lf'], params_car['lr'], 
             params_car['mass'], params_car['Iz'], 
-            mean_dict, variation_dict, 
+            mean_dict, no_var, 
             2000,
             2,
             0.2,
@@ -132,9 +161,11 @@ class MPCNode(Node):
         )
 
         self.current_state = None
-        self.solver = setup_mpc()
+        self.solver = setup_mpc(self.N, self.Tf, build=True)
 
     def odom_callback(self, msg):
+
+        
         x = msg.pose.pose.position.x
         y = msg.pose.pose.position.y
         
@@ -144,19 +175,34 @@ class MPCNode(Node):
         qz = msg.pose.pose.orientation.z
         qw = msg.pose.pose.orientation.w
 
+        prev_phi = self.current_state[2] if not self.current_state is None else 0
+
         phi = np.arctan2(2.0 * (qw * qz + qx * qy), 1.0 - 2.0 * (qy * qy + qz * qz))
+
+        phi = np.unwrap([prev_phi, phi])[1]
+
+        # print(phi)
         
         vx = msg.twist.twist.linear.x
         vy = msg.twist.twist.linear.y
         omega = msg.twist.twist.angular.z
 
         self.current_state = np.array([x, y, phi, vx, vy, omega])
+        # self.get_logger().info(f"Logging State {self.current_state}")
+
+        
         
     def control_callback(self):
+
+        start = time.perf_counter_ns()
+
+        # print(start)
+
         if self.track is None or self.current_state is None:
             return
-        self.bank.update_lookback_error(self.current_state)
-       
+        
+        #self.bank.update_lookback_error(self.current_state)
+
         x0 = self.current_state[:2]
         v0 = self.current_state[3]
 
@@ -165,13 +211,26 @@ class MPCNode(Node):
         # ref_segment is only 2 large, representing X and Y
         self.projidx = idx
 
+        self.checkpoint[0] = time.perf_counter_ns()
+
+        # self.publish_ref_trajectory(ref_segment)
+        # print(f"segment: {ref_segment}")
+
+        self.checkpoint[1] = time.perf_counter_ns()
+
         # set initial locked current state
+        # print(f"current state: {np.concatenate([self.current_state, self.last_control])}")
         self.solver.set(0, "lbx", np.concatenate([self.current_state, self.last_control]))
         self.solver.set(0, "ubx", np.concatenate([self.current_state, self.last_control]))
         
         # Set reference trajectory and previous control for all stages
         selected_model_index = self.bank.get_best_model()
         selected_model_params = self.bank.get_model_params_arr(selected_model_index)
+
+        # concatenate 2 for x, y, 6 to fill out rest of state
+        # make sure to weight non-defined states as 0 cost
+        all_yref = np.zeros(10) #np.concatenate([np.zeros(6), np.zeros(2), np.zeros(2)])
+
         for i in range(self.N):
             # Combine tire parameters with reference state and previous control
             full_params = np.concatenate([
@@ -180,35 +239,101 @@ class MPCNode(Node):
                 np.zeros(6)
                 ]
 
-                 # concatenate 2 for x, y, 6 to fill out rest of state
-                 # make sure to weight non-defined states as 0 cost
+                 
                 )
             
             self.solver.set(i, "p", full_params)
-            self.solver.set(i, "yref", np.concatenate([np.zeros(6), np.zeros(2), np.zeros(2)]))
+            self.solver.set(i, "yref", all_yref)
+        
 
+        self.checkpoint[2]= time.perf_counter_ns()
+        # print(f"x start: {self.solver.get(0, 'x')}")
+        # print(f"u start: {self.solver.get(0, 'u')}")
+        # print(f"params : {self.solver.get(0, 'p')}")
         status = self.solver.solve()
 
+        self.checkpoint[3] = time.perf_counter_ns()
+
+        u_opt = self.solver.get(1, "x")[-2:] # acceleration, delta
+        # print(f"CONTROL: {u_opt}")
+
+        # predicted_states = []
+        # for i in range(self.N + 1):
+        #     x_pred = self.solver.get(i, "x")[:3]
+        #     predicted_states.append(x_pred)
+
+        # self.publish_predicted_trajectory(predicted_states) # Publish predicted trajectory
+        self.checkpoint[4] = time.perf_counter_ns()
+
+
+        
         if status == 0:  # Success
             # Get optimal control
-            u_opt = self.solver.get(0, "x")[-2:]
+            u_opt = self.solver.get(1, "x")[-2:]
+
+            last = self.solver.get(0, "x")[:]
+
+
+            # if self.on:
+            #     print("FOLLOW")
+            #     for i in range(0, 10):
+            #         print(self.solver.get(i, "x")[:])
+            #     self.on = False
+            # else:
+            #     for i in range(1, 10):
+            #         solved = self.solver.get(i, "x")[:]
+
+            #         if(solved[1] - last[1] > 0.2):
+            #             print("LAST")
+            #             for arr in self.l:
+            #                 print(arr)
+
+            #             print("ISSUE")
+
+            #             for i in range(0, 10):
+            #                 print(self.solver.get(i, "x")[:])
+            #             self.on = True
+            #             return
+                        
+            #         last = np.array(solved)
+
+            # self.l = []
+            # for i in range(0, 10):
+            #     self.l.append(np.array(self.solver.get(i, "x")[:]))
             
+        
             # Get predicted trajectory for visualization
-            predicted_states = []
-            for i in range(self.N + 1):
-                x_pred = self.solver.get(i, "x")[:3]
-                predicted_states.append(x_pred)
             
             self.apply_control(u_opt) # Apply control
-            self.bank.predict_states(self.current_state, u_opt)
+            #self.bank.predict_states(self.current_state, u_opt)
+            self.checkpoint[5] = time.perf_counter_ns()
 
+            self.count = (self.count + 1) % self.time_window
+            self.time_history[:, self.count] = np.array(self.checkpoint-start)
 
-            self.publish_predicted_trajectory(predicted_states) # Publish predicted trajectory
-            self.publish_mpc_info(u_opt, status) # Publish MPC info
+            if(self.count == 0):
+                print(np.max(self.time_history*10e-6, axis = 1))
+
+           
             
         else:
+            self.apply_control([0, 0]) # Brake
             self.get_logger().warn(f"MPC solver failed with status: {status}")
 
+
+    def publish_ref_trajectory(self, ref_trajectory):
+        ref_msg = PoseArray()
+        ref_msg.header.stamp = self.get_clock().now().to_msg()
+        ref_msg.header.frame_id = "map"
+
+        # print(len(ref_trajectory))
+        for x, y in ref_trajectory.T:
+            point = Pose()
+            point.position.x = x
+            point.position.y = y
+            ref_msg.poses.append(point)
+
+        self.ref_pub.publish(ref_msg)
 
 
     def apply_control(self, u_opt):
@@ -219,14 +344,18 @@ class MPCNode(Node):
         
         # Create Ackermann drive message
         drive_msg = AckermannDriveStamped()
-        drive_msg.header.stamp = self.get_clock.now()
+        drive_msg.header.stamp = self.get_clock().now().to_msg()
         drive_msg.header.frame_id = "base_link"
         
         # Convert acceleration to speed command (simple integration)
         desired_speed = max(0.0, self.last_drive_command[0] + acceleration * self.dt)
         
+        
         drive_msg.drive.speed = desired_speed
         drive_msg.drive.steering_angle = steer
+
+        # print(f"SPEED: {desired_speed}")
+        # print(f"STEER: {steer}")
 
         self.cmd_pub.publish(drive_msg) 
 
@@ -236,23 +365,25 @@ class MPCNode(Node):
 
     def publish_predicted_trajectory(self, predicted_states):
         """Publish predicted trajectory for visualization"""
-        path_msg = Path()
+
+        
+        path_msg = PoseArray()
         path_msg.header.stamp = self.get_clock().now().to_msg()
         path_msg.header.frame_id = "map"
         
         for state in predicted_states:
-            pose_stamped = PoseStamped()
-            pose_stamped.header = path_msg.header
-            pose_stamped.pose.position.x = float(state[0])
-            pose_stamped.pose.position.y = float(state[1])
-            pose_stamped.pose.position.z = 0.0
-            
+            pose_unstamped = Pose()
+            pose_unstamped.position.x = float(state[0])
+            pose_unstamped.position.y = float(state[1])
+
             # Convert yaw to quaternion
             yaw = float(state[2])
-            pose_stamped.pose.orientation.w = np.cos(yaw / 2.0)
-            pose_stamped.pose.orientation.z = np.sin(yaw / 2.0)
+            pose_unstamped.orientation.w = np.cos(yaw / 2.0)
+            pose_unstamped.orientation.z = np.sin(yaw / 2.0)
             
-            path_msg.poses.append(pose_stamped)
+            path_msg.poses.append(pose_unstamped)
+
+        # print(f"{predicted_states}")
         
         self.predicted_path_pub.publish(path_msg)
     
@@ -261,7 +392,7 @@ class MPCNode(Node):
         info_msg = Float64MultiArray()
         info_msg.data = [
             float(u_opt[1]),  # acceleration
-            self.cur_drive_command[0], # target speed
+            #self.last_drive_command[0], # target speed
             float(u_opt[0]),  # steer
             float(status),    # solver status
             float(self.solver.get_cost())  # optimal cost

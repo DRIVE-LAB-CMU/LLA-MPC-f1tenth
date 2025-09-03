@@ -29,12 +29,12 @@ class ModelBank:
 
     def predict_states(self, x_t, u_t):
         x_batch, u_batch = self.get_batch(x_t, u_t)
-        self.last_predicted_states = self.integrate_batch(self, x_batch, u_batch, 0, self.dt) #num_models x state_size states
+        self.last_predicted_states = self.integrate_batch(x_batch, u_batch, 0, self.dt) #num_models x state_size states
     
     def update_lookback_error(self, x_t):
         #queue index begins pointing to the outdated index
         self.running_cost -= self.cost_history[:, self.queue_index]
-        cost = np.sum(np.square(x_t - self.last_predicted_states) * self.cost_weights, axis = 1)
+        cost = np.sum(np.square(x_t[:, None] - self.last_predicted_states) * self.cost_weights[:, None], axis = 0)
         self.cost_history[:, self.queue_index] = cost
         self.running_cost += cost
         self.queue_index = (self.queue_index + 1) % self.history_length

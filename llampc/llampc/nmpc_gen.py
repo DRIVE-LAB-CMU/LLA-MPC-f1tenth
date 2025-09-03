@@ -8,7 +8,7 @@ from scipy.linalg import block_diag
 
 from llampc.params import F110
 
-def export_model(params_car):
+def export_model(params_car, linear = False):
     model = AcadosModel()
 
     model.name = "f1tenth"
@@ -24,31 +24,51 @@ def export_model(params_car):
     lf = params_car['lf']
     lr = params_car['lr']
 
-    Frx = mass * (x[7] * p[8]  -  p[9] * x[3]) - p[6] - p[7] * x[3] * x[3]
-    #nominal force * Cefficiency - Crolling - Cmotor vx - cdrag vx^2
+    if not linear: 
+        print("NONLINEAR MODEL USED")
+        Frx = mass * (x[6] * p[8]  -  p[9] * x[3]) - p[6] - p[7] * x[3] * x[3]
+        #nominal force * Cefficiency - Crolling - Cmotor vx - cdrag vx^2
+        
+        alphaf = ca.if_else(x[3] < 1e-4, 0, x[7] - ca.atan2(x[5] * lf + x[4], x[3]))
+        alphar = ca.if_else(x[3] < 1e-4, 0, ca.atan2(x[5] * lr - x[4], x[3]))
+        #arctan(omega * lr - vy, vx)
 
-    alphaf = x[6] - ca.atan2(x[5] * lf + x[4], x[3]+ 1e-8)
-    #steer - arctan(omega * lf + vy, vx)
-    alphar =  ca.atan2(x[5] * lr - x[4], x[3]+ 1e-8)
-    #arctan(omega * lr - vy, vx)
+        Ffy = p[4] * ca.sin(p[2] * ca.atan(p[0] * alphaf))
+        Fry = p[5] * ca.sin(p[3] * ca.atan(p[1] * alphar))
 
-    Ffy = p[4] * ca.sin(p[2] * ca.atan(p[0] * alphaf))
-    Fry = p[5] * ca.sin(p[3] * ca.atan(p[1] * alphar))
+        dx0 = (x[3] * ca.cos(x[2])) - (x[4] * ca.sin(x[2])) #xdot
+        dx1 = (x[3] * ca.sin(x[2])) + (x[4] * ca.cos(x[2])) #ydot
+        dx2 = x[5] #phidot
+        dx3 = (Frx - Ffy * ca.sin(x[7])) / mass + x[4] * x[5] #vxdot
+        dx4 = (Fry + Ffy * ca.cos(x[7])) / mass - x[3] * x[5] #vydot
+        dx5 = (lf * Ffy * ca.cos(x[7]) - lr * Fry) / Iz #omegadot
+        dx6 = u[0] # jerk
+        dx7 = u[1] # steer rate
+    else:
+        print("LINEAR MODEL USED")
+        Frx = mass * (x[6] * p[8]  -  p[9] * x[3]) - p[6] - p[7] * x[3] * x[3]
 
-    dx1 = (x[3] * ca.cos(x[2])) - (x[4] * ca.sin(x[2])) #xdot
-    dx2 = (x[3] * ca.sin(x[2])) + (x[4] * ca.cos(x[2])) #ydot
-    dx3 = (x[5]) #phidot
-    dx4 = (Frx - Ffy * ca.sin(x[6])) / mass + x[4] * x[5] #vxdot
-    dx5 = (Fry + Ffy * ca.cos(x[6])) / mass - x[3] * x[5] #vydot
-    dx6 = (Ffy * lf * ca.cos(x[6]) - Fry * lr)/ Iz #omegadot
-    dx7 = u[0] # steer rate
-    dx8 = u[1] # jerk
+        alphaf = ca.if_else(x[3] < 1e-4, 0, x[7] - ca.atan2(x[5] * lf + x[4], x[3]))
+        alphar = ca.if_else(x[3] < 1e-4, 0, ca.atan2(x[5] * lr - x[4], x[3]))
 
-    # inputs: accel, steer, (x[7] and x[6])
+        Ffy = p[4] * ca.sin(p[2] * ca.atan(p[0] * alphaf))
+        Fry = p[5] * ca.sin(p[3] * ca.atan(p[1] * alphar))
+
+        dx0 = (x[3] * ca.cos(x[2])) - (x[4] * ca.sin(x[2])) #xdot
+        dx1 = (x[3] * ca.sin(x[2])) + (x[4] * ca.cos(x[2])) #ydot
+        dx2 = x[5] #phidot
+        dx3 = ((Frx - Ffy * ca.sin(x[7])) / mass) + (x[4] * x[5]) #vxdot
+        dx4 = ((Fry + Ffy * ca.cos(x[7])) / mass ) - (x[3] * x[5]) #vydot
+        dx5 = (lf * Ffy * ca.cos(x[7]) - lr * Fry) / Iz #omegadot
+        dx6 = u[0] # jerk
+        dx7 = u[1] # steer rate
+
+
+    # inputs: accel, steer, (x[6] and x[7])
     # input/control rates: jerk and steer rate (u[0] and u[1])
 
 
-    f_expl = ca.vertcat(dx1, dx2, dx3, dx4, dx5, dx6, dx7, dx8)
+    f_expl = ca.vertcat(dx0, dx1, dx2, dx3, dx4, dx5, dx6, dx7)
 
 
     model.f_expl_expr = f_expl
@@ -58,12 +78,12 @@ def export_model(params_car):
 
     return model
 
-def create_ocp(model, params_car):
+def create_ocp(model, params_car, steps, horizon):
     ocp = AcadosOcp()
     ocp.model = model
 
-    N = 20 #steps
-    Tf = 2.0 # total time horizon
+    N = steps #steps
+    Tf = horizon # total time horizon
     nx, nu = model.x.size()[0] - 2, model.u.size()[0] 
     ocp.dims.N = N
     ocp.dims.nx = nx
@@ -73,17 +93,16 @@ def create_ocp(model, params_car):
     ocp.cost.cost_type = 'NONLINEAR_LS'
     ocp.cost.cost_type_e = 'NONLINEAR_LS'
 
-    w_x = 2.0
-    w_y = 50.0
-    w_xe = 2.0
-    w_ye = 50.0
-    w_steer = 0.2
-    w_accel = 1.0
-    w_jerk = 0.05
-    w_steer_v = 0.02
-
+    w_x = 1.0
+    w_y = 1.0
+    w_xe = 0
+    w_ye = 0
+    w_steer = .15
+    w_accel = 0.001
+    w_jerk = .001
+    w_steer_v = 0.005
     Q_flat = [w_x, w_y, 0.0, 0.0, 0.0, 0.0]
-    R_flat = [w_steer, w_accel]
+    R_flat = [w_accel, w_steer]
     Rd_flat = [w_jerk, w_steer_v]
 
     Q = np.diag(Q_flat) # nx, for trajectory deviation 6x6
@@ -118,9 +137,13 @@ def create_ocp(model, params_car):
     ocp.dims.np = model.p.size()[0]
     ocp.parameter_values = np.zeros((ocp.dims.np, 1))
 
-    ocp.constraints.lbx = np.array([params_car['min_v'], params_car['min_acc'], params_car['min_steer'] ])
-    ocp.constraints.ubx = np.array([params_car['max_v'], params_car['max_acc'], params_car['max_steer'] ])
-    ocp.constraints.idxbx = np.array([3, 6, 7])  # vx, delta, acceleration, steer_Rate
+    ocp.constraints.lbx = np.array([-1e9, -1e9, -1e9, params_car['min_v'], -1e9, -1e9, params_car['min_acc'], params_car['min_steer'] ])
+    ocp.constraints.ubx = np.array([1e9, 1e9, 1e9, params_car['max_v'], 1e9, 1e9, params_car['max_acc'], params_car['max_steer'] ])
+    ocp.constraints.idxbx = np.arange(8)  # vx, delta, acceleration, steer_Rate
+
+    ocp.constraints.idxbx_0 = np.arange(8) # IMPORTANT FOR RUNTIME
+    ocp.constraints.lbx_0 = np.zeros(8)           # placeholder
+    ocp.constraints.ubx_0 = np.zeros(8)           # placeholder
 
     ocp.constraints.lbx_e = ocp.constraints.lbx
     ocp.constraints.ubx_e = ocp.constraints.ubx
@@ -130,11 +153,24 @@ def create_ocp(model, params_car):
     ocp.constraints.ubu = np.array([params_car['max_steer_vel']])
     ocp.constraints.idxbu = np.array([1])
 
-    ocp.solver_options.qp_solver = 'PARTIAL_CONDENSING_HPIPM'
+    ocp.solver_options.qp_solver = 'FULL_CONDENSING_QPOASES'
     ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'
     ocp.solver_options.integrator_type = 'ERK'
     ocp.solver_options.nlp_solver_type = 'SQP_RTI'
-    ocp.solver_options.nlp_solver_max_iter = 50
+    ocp.solver_options.nlp_solver_max_iter = 1
+
+    # OPTIMIZATION 7: Relaxed tolerances for speed
+    # ocp.solver_options.qp_solver_tol_stat = 1e-4              # Relaxed from 1e-8
+    # ocp.solver_options.qp_solver_tol_eq = 1e-4
+    # ocp.solver_options.qp_solver_tol_ineq = 1e-4
+    # ocp.solver_options.qp_solver_tol_comp = 1e-4
+    
+    ocp.solver_options.qp_solver_iter_max = 50                 # Limit QP iterations
+    ocp.solver_options.print_level = 0                         # No printing
+    # ocp.solver_options.qp_solver_warm_start = 2     
+
+
+    # ocp.solver_options.hpipm_mode = 'SPEED' 
 
     return ocp
 
@@ -148,7 +184,7 @@ def get_solver_directory(solver_config = "default"):
     return solvers_dir
 
 
-def setup_mpc(json_file='f1tenth_acados_ocp.json', solver_config ="default", build=True, params_car=F110):
+def setup_mpc(steps, horizon, json_file='f1tenth_acados_ocp.json', solver_config ="default", build=True, params_car=F110):
     
     solver_dir = get_solver_directory(solver_config)
     full_json_path = solver_dir / json_file
@@ -159,8 +195,8 @@ def setup_mpc(json_file='f1tenth_acados_ocp.json', solver_config ="default", bui
         os.chdir(solver_dir)
         print(f"Generating solver in: {solver_dir}")
         
-        f1tenth_model = export_model(p_car)
-        ocp = create_ocp(f1tenth_model, p_car)
+        f1tenth_model = export_model(p_car, linear = False)
+        ocp = create_ocp(f1tenth_model, p_car, steps, horizon)
         solver = AcadosOcpSolver(ocp, json_file=json_file, build=build)
         
         print(f"Solver generated successfully: {full_json_path}")

@@ -10,6 +10,7 @@ class DynamicBank(ModelBank):
         self.lr = lr
         self.mass = mass
         self.Iz = Iz
+        self.approx = True
         super().__init__(num_models, history_length, dt, cost_weights)
 
         for key in variation_dict.keys():
