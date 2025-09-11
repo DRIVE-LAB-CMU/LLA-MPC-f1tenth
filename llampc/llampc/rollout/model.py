@@ -12,15 +12,16 @@ import matplotlib.pyplot as plt
 
 class ModelBank:
 
-    def __init__(self, num_models, history_length, dt, cost_weights):
+    def __init__(self, num_models, history_length, dt, cost_weights, state_size = 6, sim = False):
         self.num_models = num_models
         self.history_length = history_length
-        self.last_predicted_states = np.zeros((6, self.num_models))
+        self.last_predicted_states = np.zeros((state_size, self.num_models))
         self.running_cost = np.zeros(self.num_models)
         self.cost_history = np.zeros((self.num_models, self.history_length))
         self.queue_index = 0
         self.dt = dt
         self.cost_weights = cost_weights
+        self.sim = sim
     
     def get_batch(self, x_t, u_t):
         x_t_batch = np.tile(x_t.reshape(1, -1), (self.num_models, 1))
@@ -29,7 +30,8 @@ class ModelBank:
 
     def predict_states(self, x_t, u_t):
         x_batch, u_batch = self.get_batch(x_t, u_t)
-        self.last_predicted_states = self.integrate_batch(x_batch, u_batch, 0, self.dt).T #num_models x state_size states
+        integrator = odeintRK4_batch if not self.sim else odeintEuler_batch
+        self.last_predicted_states = self.integrate_batch(x_batch, u_batch, 0, self.dt, integrator).T #num_models x state_size states
         # print(f"PREDICT {self.last_predicted_states.shape}")
     
     def update_lookback_error(self, x_t):
@@ -56,10 +58,10 @@ class ModelBank:
     def get_best_model(self):
         return np.argmin(self.running_cost)
 
-    def integrate_batch(self, x_t_batch, u_t_batch, t_start, t_end):
+    def integrate_batch(self, x_t_batch, u_t_batch, t_start, t_end, integrator = odeintRK4_batch):
         """Batched version of _integrate"""
         fun = self._diffequation
-        odesol = odeintRK4_batch(
+        odesol = integrator(
             fun=fun,
             y0_batch=x_t_batch,
             t=[t_start, t_end],

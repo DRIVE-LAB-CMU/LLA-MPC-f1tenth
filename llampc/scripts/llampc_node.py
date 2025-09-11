@@ -6,10 +6,10 @@ from rclpy.node import Node
 from rclpy.time import Time
 
 from llampc.nmpc_gen import setup_mpc
-from llampc.params import F110
+from llampc.params import F110, F110_sim
 from llampc.planner import get_reference_trajectory_segment
 from llampc.utils import Track
-from llampc.rollout import DynamicBank
+from llampc.rollout import DynamicBank, DynamicSimBank
 
 from nav_msgs.msg import Odometry, Path
 from ackermann_msgs.msg import AckermannDriveStamped
@@ -33,6 +33,7 @@ class MPCNode(Node):
         self.rates = np.array([0.0, 0.0])
         self.first_control = False
 
+        self.sim = True
         self.projidx = 0
 
         self.count = 0
@@ -106,59 +107,94 @@ class MPCNode(Node):
         #     solver_config=solver_config,
         #     params_car=F110
         # )
+        
 
-        params_car = F110()
+        
+        variation_dict = None
+        mean_dict = None
 
-        variation_dict = {
-            'Bf': .15,   # 15% variation
-            'Br': .15,   # 15% variation
-            'Cf': .15,   # 15% variation
-            'Cr': .15,   # 15% variation
-            'Df': .15,   # 15% variation
-            'Dr': .15,   # 15% variation
-            'Cro': 0.15, # 15% variation
-            'Cd': 0.15,  # 15% variation
-            'Ce': 0.15,  # 15% variation
-            'Cm': 0.15,  # 15% variation
-        }
+        if self.sim:
+            params_car = F110()
 
-        no_var = {
-            'Bf': 0,
-            'Br': 0,
-            'Cf': 0,
-            'Cr': 0,
-            'Df': 0,
-            'Dr': 0,
-            'Cro': 0,
-            'Cd': 0,
-            'Ce': 0,
-            'Cm': 0,
-        }
+            variation_dict = {
+                'Bf': .15,   # 15% variation
+                'Br': .15,   # 15% variation
+                'Cf': .15,   # 15% variation
+                'Cr': .15,   # 15% variation
+                'Df': .15,   # 15% variation
+                'Dr': .15,   # 15% variation
+                'Cro': 0.15, # 15% variation
+                'Cd': 0.15,  # 15% variation
+                'Ce': 0.15,  # 15% variation
+                'Cm': 0.15,  # 15% variation
+            }
 
-        mean_dict = {
-            'Bf': 15.0,
-            'Br': 15.0,
-            'Cf': 1.0,
-            'Cr': 1.0,
-            'Df': 0.8,
-            'Dr': 0.8,
-            'Cro': 0.02,
-            'Cd': 0.001,
-            'Ce': 1.0,
-            'Cm': .05, 
+            # variation_dict = {
+            #     'Bf': 0,
+            #     'Br': 0,
+            #     'Cf': 0,
+            #     'Cr': 0,
+            #     'Df': 0,
+            #     'Dr': 0,
+            #     'Cro': 0,
+            #     'Cd': 0,
+            #     'Ce': 0,
+            #     'Cm': 0,
+            # }
 
-        }
+            mean_dict = {
+                'Bf': 15.0,
+                'Br': 15.0,
+                'Cf': 1.0,
+                'Cr': 1.0,
+                'Df': 0.8,
+                'Dr': 0.8,
+                'Cro': 0.02,
+                'Cd': 0.001,
+                'Ce': 1.0,
+                'Cm': .05, 
 
-        cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
-        self.bank = DynamicBank(
-            params_car['lf'], params_car['lr'], 
-            params_car['mass'], params_car['Iz'], 
-            mean_dict, variation_dict, 
-            200,
-            2,
-            0.2,
-            cost_weights
-        )
+            }
+
+            cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
+            self.bank = DynamicBank(
+                params_car['lf'], params_car['lr'], 
+                params_car['mass'], params_car['Iz'], 
+                mean_dict, variation_dict, 
+                200,
+                2,
+                0.2,
+                cost_weights
+            )
+        else:
+            params_car = F110_sim()
+            cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0, 0])
+
+            mean_dict = {
+                'C_Sf': params_car['C_Sf'], 
+                'C_Sr':params_car['C_Sr'],
+                'mu': params_car['mu'],
+            }
+
+            variation_dict = {
+                'C_Sf': .15, 
+                'C_Sr': .15,
+                'mu': .15,
+            }
+
+            # variation_dict = {
+            #     'C_Sf': 0, 
+            #     'C_Sr': 0,
+            #     'mu': 0,
+            # }
+
+            self.bank = DynamicSimBank(
+                params_car['lf'], params_car['lr'],
+                params_car['m'], params_car['I'],
+                params_car["h"], mean_dict,
+                variation_dict, 200, 2, 0.2, cost_weights
+            )
+
 
         self.current_state = None
         self.solver = setup_mpc(self.N, self.Tf, build=True)
@@ -201,7 +237,19 @@ class MPCNode(Node):
         if self.track is None or self.current_state is None:
             return
         
-        self.bank.update_lookback_error(self.current_state)
+        if not self.sim:
+            self.bank.update_lookback_error(self.current_state)
+        else:
+            self.bank.update_lookback_error(
+                np.concatenate(
+                    (
+                        self.current_state[:4],
+                        np.arctan2(self.current_state[4]/self.current_state[3]),
+                        self.current_state[5], 
+                        self.last_control[1]
+                    )
+                )
+            )
 
         x0 = self.current_state[:2]
         v0 = self.current_state[3]
@@ -224,8 +272,25 @@ class MPCNode(Node):
         self.solver.set(0, "ubx", np.concatenate([self.current_state, self.last_control]))
         
         # Set reference trajectory and previous control for all stages
-        selected_model_index = self.bank.get_best_model()
-        selected_model_params = self.bank.get_model_params_arr(selected_model_index)
+
+        selected_model_params = None
+        if self.sim:
+            selected_model_params = {
+                'Bf': 15.0,
+                'Br': 15.0,
+                'Cf': 1.0,
+                'Cr': 1.0,
+                'Df': 0.8,
+                'Dr': 0.8,
+                'Cro': 0.02,
+                'Cd': 0.001,
+                'Ce': 1.0,
+                'Cm': .05, 
+            }
+        else:
+            selected_model_index = self.bank.get_best_model()
+            selected_model_params = self.bank.get_model_params_arr(selected_model_index)
+
 
         # concatenate 2 for x, y, 6 to fill out rest of state
         # make sure to weight non-defined states as 0 cost
@@ -269,44 +334,62 @@ class MPCNode(Node):
         
         if status == 0:  # Success
             # Get optimal control
-            u_opt = self.solver.get(1, "x")[-2:]
-
-            last = self.solver.get(0, "x")[:]
-
-
-            # if self.on:
-            #     print("FOLLOW")
-            #     for i in range(0, 10):
-            #         print(self.solver.get(i, "x")[:])
-            #     self.on = False
-            # else:
-            #     for i in range(1, 10):
-            #         solved = self.solver.get(i, "x")[:]
-
-            #         if(solved[1] - last[1] > 0.2):
-            #             print("LAST")
-            #             for arr in self.l:
-            #                 print(arr)
-
-            #             print("ISSUE")
-
-            #             for i in range(0, 10):
-            #                 print(self.solver.get(i, "x")[:])
-            #             self.on = True
-            #             return
-                        
-            #         last = np.array(solved)
-
-            # self.l = []
-            # for i in range(0, 10):
-            #     self.l.append(np.array(self.solver.get(i, "x")[:]))
-            
-        
-            # Get predicted trajectory for visualization
-            
             self.apply_control(u_opt) # Apply control
+            if not self.sim:
+                #version for our dynamics
+                self.bank.predict_states(self.current_state, u_opt)
+
+
+                # last = self.solver.get(0, "x")[:]
+                # if self.on:
+                #     print("FOLLOW")
+                #     for i in range(0, 10):
+                #         print(self.solver.get(i, "x")[:])
+                #     self.on = False
+                # else:
+                #     for i in range(1, 10):
+                #         solved = self.solver.get(i, "x")[:]
+
+                #         if(solved[1] - last[1] > 0.2):
+                #             print("LAST")
+                #             for arr in self.l:
+                #                 print(arr)
+
+                #             print("ISSUE")
+
+                #             for i in range(0, 10):
+                #                 print(self.solver.get(i, "x")[:])
+                #             self.on = True
+                #             return
+                            
+                #         last = np.array(solved)
+
+                # self.l = []
+                # for i in range(0, 10):
+                #     self.l.append(np.array(self.solver.get(i, "x")[:]))
+                
+            
+                # Get predicted trajectory for visualization
+                
+            
             # print(f"CURRENT STATE {self.current_state}")
-            self.bank.predict_states(self.current_state, u_opt)
+                
+            else:
+                steer_v = self.solver.get(i, "u")[1]
+                self.bank.predict_states(
+                    np.concatenate(
+                        (
+                            self.current_state[:4],
+                            np.arctan2(self.current_state[4]/self.current_state[3]),
+                            self.current_state[5], 
+                            self.last_control[1]
+                        )
+                    ), 
+                    #[x, y, psi, vx, slip, omega, steer
+                    np.concatenate((u_opt[0], steer_v))  # accel + steer velocity
+                )
+
+
             self.checkpoint[5] = time.perf_counter_ns()
 
             self.count = (self.count + 1) % self.time_window
