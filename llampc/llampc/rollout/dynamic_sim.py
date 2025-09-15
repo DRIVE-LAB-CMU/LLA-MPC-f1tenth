@@ -8,7 +8,7 @@ class DynamicSimBank(ModelBank):
         #initializes a bank of models ready for vectorized calculation
         self.lf = lf
         self.lr = lr
-        self.mass = mass
+        self.m = mass
         self.I = I
         self.h = h
         self.approx = False
@@ -67,6 +67,10 @@ class DynamicSimBank(ModelBank):
         else:
             g = 9.81
 
+            
+            # one = -self.mu*self.m/(vx*self.I*(self.lr+self.lf)) *(self.lf**2*self.C_Sf*(g*self.lr-acc*self.h) + self.lr**2*self.C_Sr*(g*self.lf + acc*self.h))*omega
+            # two = self.mu*self.m/(self.I*(self.lr+self.lf))*(self.lr*self.C_Sr*(g*self.lf + acc*self.h) - self.lf*self.C_Sf*(g*self.lr - acc*self.h))*slip
+            # three = (self.mu*self.m/(self.I*(self.lr+self.lf))*self.lf*self.C_Sf*(g*self.lr - acc*self.h)*steer)
             dxdt[:, 0] = vx * np.cos(psi + slip) #x
             dxdt[:, 1] = vx * np.sin(psi + slip) #y
             dxdt[:, 2] = omega # psi
@@ -76,7 +80,7 @@ class DynamicSimBank(ModelBank):
                 +self.mu/(vx*(self.lr+self.lf))*(self.C_Sf*(g*self.lr-acc*self.h))*steer #slip
             dxdt[:, 5] = -self.mu*self.m/(vx*self.I*(self.lr+self.lf)) *(self.lf**2*self.C_Sf*(g*self.lr-acc*self.h) + self.lr**2*self.C_Sr*(g*self.lf + acc*self.h))*omega \
                 +self.mu*self.m/(self.I*(self.lr+self.lf))*(self.lr*self.C_Sr*(g*self.lf + acc*self.h) - self.lf*self.C_Sf*(g*self.lr - acc*self.h))*slip \
-                +self.mu*self.m/(self.I*(self.lr+self.lf))*self.lf*self.C_Sf*(g*self.lr - acc*self.h)*steer, #omega
+                +self.mu*self.m/(self.I*(self.lr+self.lf))*self.lf*self.C_Sf*(g*self.lr - acc*self.h)*steer #omega
             dxdt[:, 6] = steer_rate # steer
         
 

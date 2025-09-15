@@ -30,8 +30,9 @@ class ModelBank:
 
     def predict_states(self, x_t, u_t):
         x_batch, u_batch = self.get_batch(x_t, u_t)
-        integrator = odeintRK4_batch if not self.sim else odeintEuler_batch
+        integrator = odeintRK4_batch #if not self.sim else odeintEuler_batch
         self.last_predicted_states = self.integrate_batch(x_batch, u_batch, 0, self.dt, integrator).T #num_models x state_size states
+
         # print(f"PREDICT {self.last_predicted_states.shape}")
     
     def update_lookback_error(self, x_t):

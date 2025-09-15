@@ -24,16 +24,16 @@ class MPCNode(Node):
 
         self.get_logger().info("Initializing")
 
+        self.sim = False
+
         self.declare_params()
         self.initialize_mpc()
        
-
         self.last_drive_command = np.array([0.0, 0.0]) #vx, steer
         self.last_control = np.array([0.0, 0.0]) #acceleration, steer
         self.rates = np.array([0.0, 0.0])
         self.first_control = False
-
-        self.sim = True
+        
         self.projidx = 0
 
         self.count = 0
@@ -113,7 +113,7 @@ class MPCNode(Node):
         variation_dict = None
         mean_dict = None
 
-        if self.sim:
+        if not self.sim:
             params_car = F110()
 
             variation_dict = {
@@ -161,7 +161,7 @@ class MPCNode(Node):
                 params_car['lf'], params_car['lr'], 
                 params_car['mass'], params_car['Iz'], 
                 mean_dict, variation_dict, 
-                200,
+                10,
                 2,
                 0.2,
                 cost_weights
@@ -176,23 +176,23 @@ class MPCNode(Node):
                 'mu': params_car['mu'],
             }
 
-            variation_dict = {
-                'C_Sf': .15, 
-                'C_Sr': .15,
-                'mu': .15,
-            }
-
             # variation_dict = {
-            #     'C_Sf': 0, 
-            #     'C_Sr': 0,
-            #     'mu': 0,
+            #     'C_Sf': .15, 
+            #     'C_Sr': .15,
+            #     'mu': .15,
             # }
+
+            variation_dict = {
+                'C_Sf': 0, 
+                'C_Sr': 0,
+                'mu': 0,
+            }
 
             self.bank = DynamicSimBank(
                 params_car['lf'], params_car['lr'],
                 params_car['m'], params_car['I'],
                 params_car["h"], mean_dict,
-                variation_dict, 200, 2, 0.2, cost_weights
+                variation_dict, 5, 2, 0.2, cost_weights
             )
 
 
@@ -241,13 +241,16 @@ class MPCNode(Node):
             self.bank.update_lookback_error(self.current_state)
         else:
             self.bank.update_lookback_error(
-                np.concatenate(
-                    (
-                        self.current_state[:4],
-                        np.arctan2(self.current_state[4]/self.current_state[3]),
+                np.array(
+                    [
+                        self.current_state[0],
+                        self.current_state[1],
+                        self.current_state[2],
+                        self.current_state[3],
+                        np.arctan2(self.current_state[4], self.current_state[3]),
                         self.current_state[5], 
                         self.last_control[1]
-                    )
+                    ]
                 )
             )
 
@@ -275,18 +278,19 @@ class MPCNode(Node):
 
         selected_model_params = None
         if self.sim:
-            selected_model_params = {
-                'Bf': 15.0,
-                'Br': 15.0,
-                'Cf': 1.0,
-                'Cr': 1.0,
-                'Df': 0.8,
-                'Dr': 0.8,
-                'Cro': 0.02,
-                'Cd': 0.001,
-                'Ce': 1.0,
-                'Cm': .05, 
-            }
+            selected_model_params = np.array([
+                15.0,
+                15.0,
+                1.0,
+                1.0,
+                0.8,
+                0.8,
+                0.02,
+                0.001,
+                1.0,
+                .05, 
+            ]
+            )
         else:
             selected_model_index = self.bank.get_best_model()
             selected_model_params = self.bank.get_model_params_arr(selected_model_index)
@@ -375,18 +379,22 @@ class MPCNode(Node):
             # print(f"CURRENT STATE {self.current_state}")
                 
             else:
-                steer_v = self.solver.get(i, "u")[1]
+                # print(self.solver.get(0, "u"))
+                steer_v = self.solver.get(0, "u")[1]
                 self.bank.predict_states(
-                    np.concatenate(
-                        (
-                            self.current_state[:4],
-                            np.arctan2(self.current_state[4]/self.current_state[3]),
+                    np.array(
+                        [
+                            self.current_state[0],
+                            self.current_state[1],
+                            self.current_state[2],
+                            self.current_state[3],
+                            np.arctan2(self.current_state[4], self.current_state[3]),
                             self.current_state[5], 
                             self.last_control[1]
-                        )
+                        ]
                     ), 
                     #[x, y, psi, vx, slip, omega, steer
-                    np.concatenate((u_opt[0], steer_v))  # accel + steer velocity
+                    np.array([u_opt[0], steer_v])  # accel + steer velocity
                 )
 
 
@@ -394,10 +402,12 @@ class MPCNode(Node):
 
             self.count = (self.count + 1) % self.time_window
             self.time_history[:5, self.count] = np.array(self.checkpoint[1:]-self.checkpoint[:-1])
-
+        
             if(self.count == 0):
-                print(selected_model_index)
-            #     print(np.max(self.time_history*10e-6, axis = 1))
+                print(self.bank.running_cost)
+                if not self.sim:
+                    print(selected_model_index)
+                # print(np.max(self.time_history*10e-6, axis = 1))
 
            
             
