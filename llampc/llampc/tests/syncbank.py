@@ -18,28 +18,39 @@ class SynchronousBank():
             'mu': self.params_car['mu'],
         }
 
-        # variation_dict = {
-        #     'C_Sf': .15, 
-        #     'C_Sr': .15,
-        #     'mu': .15,
-        # }
-
         variation_dict = {
-            'C_Sf': 0, 
-            'C_Sr': 0,
-            'mu': 0,
+            'C_Sf': .15, 
+            'C_Sr': .15,
+            'mu': .15,
         }
+
+        # variation_dict = {
+        #     'C_Sf': 0.15, 
+        #     'C_Sr': 0.15,
+        #     'mu': 0,
+        # }
 
         self.bank = DynamicSimBank(
             self.params_car['lf'], self.params_car['lr'],
             self.params_car['m'], self.params_car['I'],
-            self.params_car["h"], mean_dict,
-            variation_dict, 1, 2, env_timestep, cost_weights
+            self.params_car["h"], self.params_car,
+            mean_dict,
+            variation_dict, 200, 20, env_timestep, cost_weights
         )
 
         self.current_state = np.empty(7)
         self.update_state()
 
+        self.steer_buffer = np.empty((0, ))
+        self.steer_buffer_size = 2
+
+
+    def get_selected_model_params(self, index):
+        return self.bank.get_model_params_arr(index)
+    
+    def get_selected_model_index(self):
+        return self.bank.get_best_model()
+    
     def predict_states(self, controls):
         self.bank.predict_states(self.current_state, controls)
     
@@ -57,19 +68,31 @@ class SynchronousBank():
         return self.current_state
 
     def update_state(self):
+
         self.current_state = np.array(
                 [
                     self.car.state[0], # x
                     self.car.state[1], # y
-                    self.car.state[4], # yaw angle/psi
+                    np.unwrap([self.current_state[2], self.car.state[4]])[1], # yaw angle/psi
                     self.car.state[3], # vx
                     self.car.state[6],  # slip
                     self.car.state[5], # yaw rate / omega
                     self.car.state[2] # steer
                 ]
             )
+        
 
-    def get_controls(self, speed, steer):
+
+    def get_controls(self, speed, raw_steer):
+        steer = 0.
+        if self.steer_buffer.shape[0] < self.steer_buffer_size:
+            steer = 0.
+            self.steer_buffer = np.append(raw_steer, self.steer_buffer)
+        else:
+            steer = self.steer_buffer[-1]
+            self.steer_buffer = self.steer_buffer[:-1]
+            self.steer_buffer = np.append(raw_steer, self.steer_buffer)
+
         return np.array(
             self.pid(
                 speed, 
@@ -78,6 +101,7 @@ class SynchronousBank():
                 self.current_state[6],
             )
         )
+    
 
     def pid(self, speed, steer, current_speed, current_steer):
         """

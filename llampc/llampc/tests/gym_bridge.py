@@ -239,23 +239,43 @@ class GymBridge(Node):
 
     def drive_timer_callback(self):
         if self.ego_drive_published and not self.has_opp:
-
+            self.bank_wrapper.update_state()
             controls = self.bank_wrapper.get_controls(self.ego_requested_speed, self.ego_steer)
             self.bank_wrapper.predict_states(controls)
+
             
             self.obs, _, self.done, _ = self.env.step(np.array([[self.ego_steer, self.ego_requested_speed]]))
+            
+            
             self.bank_wrapper.update_state_and_error()
                         
-            predicted = self.bank_wrapper.get_predicted_states()
-            self.get_logger().info(f'PREDICTED:\n{predicted}')
-
+            predicted = self.bank_wrapper.get_predicted_states()[:, 0]
             actual = self.bank_wrapper.get_state()
-            self.get_logger().info(f'ACTUAL:\n{actual}')
-            # self.get_logger().info(f'{self.bank_wrapper.car.state}')
 
-            running_cost, cost_history = self.bank_wrapper.get_error_statistics()
-            self.get_logger().info(f'RUNNING COST:\n{running_cost}')
-            self.get_logger().info(f'COST HISTORY:\n{cost_history}')
+            
+
+            diff = np.abs(predicted-actual)
+            diff[3]
+            if(diff.sum() > 0.1):
+                self.get_logger().info(f'STEER:\n{self.ego_steer}')
+                self.get_logger().info(f'STEER PID:\n{controls}')
+                # self.get_logger().info(f'START:\n{start}')
+                self.get_logger().info(f'PREDICTED:\n{predicted}')
+                self.get_logger().info(f'ACTUAL:\n{actual}')
+
+            model_index = self.bank_wrapper.get_selected_model_index()
+            
+            if(model_index != 0):
+                self.get_logger().info(f'SELECTED MODEL:\n{model_index}')
+                gt = self.bank_wrapper.get_selected_model_params(0)
+                diff = np.abs(gt - self.bank_wrapper.get_selected_model_params(model_index))/gt
+                self.get_logger().info(f'VAR:\n{diff}')
+
+                
+
+            # running_cost, cost_history = self.bank_wrapper.get_error_statistics()
+            # self.get_logger().info(f'RUNNING COST:\n{running_cost}')
+            # self.get_logger().info(f'COST HISTORY:\n{cost_history}')
 
 
         elif self.ego_drive_published and self.has_opp and self.opp_drive_published:

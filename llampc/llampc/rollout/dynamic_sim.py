@@ -4,13 +4,14 @@ import numpy as np
 
 
 class DynamicSimBank(ModelBank):
-    def __init__(self, lf, lr, mass, I,  h, mean_dict, variation_dict, num_models, history_length, dt, cost_weights):
+    def __init__(self, lf, lr, mass, I,  h, params_car, mean_dict, variation_dict, num_models, history_length, dt, cost_weights, ground_truth = True):
         #initializes a bank of models ready for vectorized calculation
         self.lf = lf
         self.lr = lr
         self.m = mass
         self.I = I
         self.h = h
+        self.params_car = params_car
         self.approx = False
         super().__init__(num_models, history_length, dt, cost_weights, state_size = 7, sim = True)
 
@@ -21,6 +22,12 @@ class DynamicSimBank(ModelBank):
                 mean_dict[key] * 
                 (np.random.uniform(-variation_dict[key], variation_dict[key], self.num_models) + 1)
             )
+
+        if ground_truth:
+            for key in variation_dict.keys():
+                param_array = getattr(self, key)
+                param_array[0] = mean_dict[key]
+
 
     def get_model_params(self, index):
         return {
@@ -35,22 +42,109 @@ class DynamicSimBank(ModelBank):
             self.C_Sr[index],
             self.mu[index]
         ])
+    
 
 
+    def accl_constraints(self, vel, accl_batch, v_switch, a_max, v_min, v_max):
+        """
+        Batched acceleration constraints.
+
+        Args:
+            vel (np.ndarray): (N,) current velocities
+            accl_batch (np.ndarray): (N,) unconstrained desired accelerations
+            v_switch (float): switching velocity
+            a_max (float): maximum allowed acceleration
+            v_min (float): minimum allowed velocity
+            v_max (float): maximum allowed velocity
+
+        Returns:
+            np.ndarray: (N,) constrained accelerations
+        """
+        pos_limit = np.where(vel > v_switch, a_max * v_switch / vel, a_max)
+
+        # Start with unconstrained
+        constrained_accl = np.copy(accl_batch)
+
+        # Conditions
+        stop_condition = ((vel <= v_min) & (accl_batch <= 0)) | ((vel >= v_max) & (accl_batch >= 0))
+        max_decel = accl_batch <= -a_max
+        max_accel = accl_batch >= pos_limit
+
+        constrained_accl[stop_condition] = 0.0
+        constrained_accl[max_decel] = -a_max
+        constrained_accl[max_accel] = pos_limit[max_accel]
+
+        return constrained_accl
+
+
+    
+    def steering_constraint(self, steering_angle, steering_velocity, s_min, s_max, sv_min, sv_max):
+        """
+        Batched steering velocity constraints.
+
+        Args:
+            steering_angle (np.ndarray): (N,) current steering angles
+            steering_velocity (np.ndarray): (N,) desired steering velocities
+            s_min (float): min steering angle
+            s_max (float): max steering angle
+            sv_min (float): min steering velocity
+            sv_max (float): max steering velocity
+
+        Returns:
+            np.ndarray: (N,) constrained steering velocities
+        """
+        constrained_sv = np.copy(steering_velocity)
+
+        # Conditions
+        stop_condition = ((steering_angle <= s_min) & (steering_velocity <= 0)) | \
+                        ((steering_angle >= s_max) & (steering_velocity >= 0))
+        too_negative = steering_velocity <= sv_min
+        too_positive = steering_velocity >= sv_max
+
+        constrained_sv[stop_condition] = 0.0
+        constrained_sv[too_negative] = sv_min
+        constrained_sv[too_positive] = sv_max
+
+        return constrained_sv
+
+
+
+    
+    
     def _diffequation(self, t, x_batch, u_batch, rates = None):
         """	write dynamics as first order ODE: dxdt = f(x(t))
             x is a 6x1 vector: [x, y, psi, vx, slip, omega, steer]^T
             u is a 2x1 vector: [acc/pwm, steer_rate]^T
             rates is a 
         """
-        acc = u_batch[:, 0]
-        steer_rate = u_batch[:, 1]
 
         psi = x_batch[:, 2]
         vx = x_batch[:, 3]
         slip =  x_batch[:, 4]
         omega = x_batch[:, 5]
         steer = x_batch[:, 6]
+        
+        
+        acc = u_batch[:, 0]
+        steer_rate = u_batch[:, 1]
+
+        acc= self.accl_constraints(
+            vel=vx,
+            accl_batch=acc,
+            v_switch=self.params_car["v_switch"],
+            a_max=self.params_car["a_max"],
+            v_min=self.params_car["v_min"],
+            v_max=self.params_car["v_max"]
+        )
+
+        steer_rate = self.steering_constraint(
+            steering_angle=steer,
+            steering_velocity=steer_rate,
+            s_min=self.params_car["s_min"],
+            s_max=self.params_car["s_max"],
+            sv_min=self.params_car["sv_min"],
+            sv_max=self.params_car["sv_max"]
+        )
 
         base = (self.lr + self.lf)
         dxdt = np.zeros((self.num_models, 7))
