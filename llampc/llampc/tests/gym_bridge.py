@@ -135,7 +135,7 @@ class GymBridge(Node):
             self.ego_scan = list(self.obs['scans'][0])
 
 
-        self.include_bank = True
+        self.include_bank = False
         self.print_debug = False
 
         if self.include_bank:

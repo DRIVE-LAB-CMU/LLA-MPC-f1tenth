@@ -9,12 +9,16 @@ from llampc.nmpc_gen import setup_mpc
 from llampc.params import F110, F110_sim, get_param_dict
 from llampc.planner import get_reference_trajectory_segment
 from llampc.utils import Track
-from llampc.rollout import LBHistory, DynamicSimBank, odeintRK4_batch, DBMPacejkaBank
+from llampc.rollout import odeintRK4BatchIntegrator
+from llampc.rollout import DynamicSimBank,DBMPacejkaBank
+from llampc.rollout import LBHistory
 
 from nav_msgs.msg import Odometry, Path
 from ackermann_msgs.msg import AckermannDriveStamped
 from geometry_msgs.msg import PoseStamped, PoseArray, Pose
 from std_msgs.msg import Float64MultiArray
+
+from numba import njit
 
 import time
 
@@ -24,7 +28,8 @@ class MPCNode(Node):
 
         self.get_logger().info("Initializing")
 
-        self.sim = True
+        self.sim = False
+        self.publish_trajectories = False
 
         self.declare_params()
         self.initialize_mpc()
@@ -111,6 +116,8 @@ class MPCNode(Node):
         variation_dict = None
         mean_dict = None
 
+        state_size = 0
+
         if not self.sim:
             params_car = F110()
 
@@ -156,22 +163,21 @@ class MPCNode(Node):
 
             cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
             
-            num_models = 10
-            param_dict = get_param_dict(mean_dict, variation_dict, num_models)
+            num_models = 7500
+            state_size = 6
+            
 
             self.dynamics_bank = DBMPacejkaBank(
                 params_car['lf'], params_car['lr'], 
                 params_car['mass'], params_car['Iz'], 
-                param_dict['Bf'], param_dict['Br'],
-                param_dict['Cf'], param_dict['Cr'],
-                param_dict['Df'], param_dict['Dr'],
-                param_dict['Cro'], param_dict['Cd'],
-                param_dict['Ce'], param_dict['Cm']
+                get_param_dict(mean_dict, variation_dict, num_models),
             )
             self.lb_history = LBHistory(
-                num_models, 2,
-                0.2, cost_weights,
-                self.dynamics_bank
+                num_models, 10,
+                0.05, cost_weights,
+                self.dynamics_bank,
+                odeintRK4BatchIntegrator(),
+                state_size
             )
         else:
             params_car = F110_sim()
@@ -196,8 +202,7 @@ class MPCNode(Node):
             }
 
             num_models = 10
-
-            param_dict = get_param_dict(mean_dict, variation_dict, num_models)
+            state_size = 7
 
             self.dynamics_bank = DynamicSimBank(
                 params_car['lf'], params_car['lr'],
@@ -207,21 +212,31 @@ class MPCNode(Node):
                 params_car['v_max'], params_car['s_min'],
                 params_car['s_max'], params_car['sv_min'],
                 params_car['sv_max'],
-                param_dict['C_Sf'], param_dict['C_Sr'],
-                param_dict['mu'],
+                get_param_dict(mean_dict, variation_dict, num_models)
             )
 
         
             self.lb_history = LBHistory(
                 num_models, 2,
-                0.2, cost_weights,
+                0.05, cost_weights,
                 self.dynamics_bank,
-                state_size=7
+                odeintRK4BatchIntegrator(),
+                state_size
             )
 
+        self.get_logger().info("Warm starting bank")
+        # warm start bank
+        self.lb_history.predict_states(np.zeros(state_size), np.zeros(2))
+        self.lb_history.update_lookback_error(np.zeros(state_size))
+        self.lb_history.get_best_model()
+        self.lb_history.reset()
+        self.get_logger().info("Bank initialized")
 
+
+        # start solver
         self.current_state = None
         self.solver = setup_mpc(self.N, self.Tf, build=True)
+        self.get_logger().info("Compilation complete")
 
     def odom_callback(self, msg):
 
@@ -254,9 +269,7 @@ class MPCNode(Node):
         
     def control_callback(self):
 
-        start = time.perf_counter_ns()
-
-        # print(start)
+        self.checkpoint[0] = time.perf_counter_ns()
 
         if self.track is None or self.current_state is None:
             return
@@ -286,9 +299,8 @@ class MPCNode(Node):
         # ref_segment is only 2 large, representing X and Y
         self.projidx = idx
 
-        self.checkpoint[0] = time.perf_counter_ns()
-
-        self.publish_ref_trajectory(ref_segment)
+        if(self.publish_trajectories):
+            self.publish_ref_trajectory(ref_segment)
         # print(f"segment: {ref_segment}")
 
         self.checkpoint[1] = time.perf_counter_ns()
@@ -323,20 +335,19 @@ class MPCNode(Node):
         # concatenate 2 for x, y, 6 to fill out rest of state
         # make sure to weight non-defined states as 0 cost
         # all_yref = np.zeros(10) #np.concatenate([np.zeros(6), np.zeros(2), np.zeros(2)])
+        # def build_params
+
+        
+        def construct_params(N, selected_model_params, ref_segment):
+            full_params = np.zeros((N, 20), np.float64)
+            full_params[:, :10] = selected_model_params
+            full_params[:, 12:14] = ref_segment[:2, :N].T #reference x, y
+            return full_params
+        
+        full_params = construct_params(self.N, selected_model_params, ref_segment)
 
         for i in range(self.N):
-            # Combine tire parameters with reference state and previous control
-            full_params = np.concatenate([
-                selected_model_params, # banked models
-                np.zeros(2), # roll and pitch
-                ref_segment[:, i], #reference x, y
-                np.zeros(6) # rest of reference (unweighted) phi, vx, vy, omega, acceleration, delta
-                ]
-
-                 
-                )
-            
-            self.solver.set(i, "p", full_params)
+            self.solver.set(i, "p", full_params[i])
             # self.solver.set(i, "yref", all_yref)
         
 
@@ -351,12 +362,14 @@ class MPCNode(Node):
         u_opt = self.solver.get(1, "x")[-2:] # acceleration, delta
         # print(f"CONTROL: {u_opt}")
 
-        predicted_states = []
-        for i in range(self.N + 1):
-            x_pred = self.solver.get(i, "x")[:3]
-            predicted_states.append(x_pred)
+        if(self.publish_trajectories):
+            predicted_states = []
+            for i in range(self.N + 1):
+                x_pred = self.solver.get(i, "x")[:3]
+                predicted_states.append(x_pred)
 
-        self.publish_predicted_trajectory(predicted_states) # Publish predicted trajectory
+            self.publish_predicted_trajectory(predicted_states) # Publish predicted trajectory
+        
         self.checkpoint[4] = time.perf_counter_ns()
 
 
@@ -402,12 +415,13 @@ class MPCNode(Node):
 
             self.count = (self.count + 1) % self.time_window
             self.time_history[:5, self.count] = np.array(self.checkpoint[1:]-self.checkpoint[:-1])
+            self.time_history[5, self.count] = self.checkpoint[5] - self.checkpoint[0]
         
             if(self.count == 0):
-                print(self.lb_history.running_cost)
-                if not self.sim:
-                    print(selected_model_index)
-                # print(np.max(self.time_history*10e-6, axis = 1))
+                # print(self.lb_history.running_cost)
+                # if not self.sim:
+                #     print(selected_model_index)
+                print(np.max(self.time_history*10e-6, axis = 1))
         else:
             self.apply_control([0, 0]) # Brake
             self.get_logger().warn(f"MPC solver failed with status: {status}")
