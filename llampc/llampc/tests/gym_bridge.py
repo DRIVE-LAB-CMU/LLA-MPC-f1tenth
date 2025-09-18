@@ -136,7 +136,7 @@ class GymBridge(Node):
 
 
         self.include_bank = True
-        self.print_debug = False
+        self.print_debug = True
 
         if self.include_bank:
             sim_car = self.env.sim.agents[self.env.sim.ego_idx]
