@@ -3,7 +3,7 @@
 
 __author__ = 'Achin Jain'
 __email__ = 'achinj@seas.upenn.edu'
-
+import numpy as np
 def F110_sim():
 	return {
 		'mu': 1.0489, 
@@ -77,3 +77,15 @@ def F110():
 		'min_rates': min_rates,
 		}
 	return params
+
+def get_param_dict(mean_dict, variation_dict, num_models, ground_truth = False):
+	param_dict = {}
+	for key in variation_dict.keys():
+		param_dict[key] = mean_dict[key] * (np.random.uniform(-variation_dict[key], variation_dict[key], num_models) + 1)
+	
+	if ground_truth:
+		for key in variation_dict.keys():
+			param_array = param_dict[key]
+			param_array[0] = mean_dict[key]
+			
+	return param_dict

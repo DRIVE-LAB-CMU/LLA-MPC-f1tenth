@@ -1,5 +1,5 @@
-from llampc.rollout import DynamicSimBank
-from llampc.params import F110_sim
+from llampc.rollout import DynamicSimBank, LBHistory
+from llampc.params import F110_sim, get_param_dict
 from . import syncbank
 
 import numpy as np
@@ -30,12 +30,22 @@ class SynchronousBank():
         #     'mu': 0,
         # }
 
-        self.bank = DynamicSimBank(
+        num_models = 200
+        param_dict = get_param_dict(mean_dict, variation_dict, num_models, ground_truth = True)
+
+        self.dynamics_bank = DynamicSimBank(
             self.params_car['lf'], self.params_car['lr'],
             self.params_car['m'], self.params_car['I'],
-            self.params_car["h"], self.params_car,
-            mean_dict,
-            variation_dict, 200, 20, env_timestep, cost_weights
+            self.params_car["h"], self.params_car['v_switch'],
+            self.params_car['a_max'], self.params_car['v_min'],
+            self.params_car['v_max'], self.params_car['s_min'],
+            self.params_car['s_max'], self.params_car['sv_min'],
+            self.params_car['sv_max'],
+            param_dict['C_Sf'], param_dict['C_Sr'],
+            param_dict['mu'],
+        )
+        self.history = LBHistory(
+            num_models, 20, env_timestep, cost_weights, self.dynamics_bank
         )
 
         self.current_state = np.empty(7)
@@ -46,23 +56,23 @@ class SynchronousBank():
 
 
     def get_selected_model_params(self, index):
-        return self.bank.get_model_params_arr(index)
+        return self.dynamics_bank.get_model_params_arr(index)
     
     def get_selected_model_index(self):
-        return self.bank.get_best_model()
+        return self.history.get_best_model()
     
     def predict_states(self, controls):
-        self.bank.predict_states(self.current_state, controls)
+        self.history.predict_states(self.current_state, controls)
     
     def update_state_and_error(self):
         self.update_state()
-        self.bank.update_lookback_error(self.get_state())
+        self.history.update_lookback_error(self.get_state())
 
     def get_error_statistics(self):
-        return self.bank.running_cost, self.bank.cost_history
+        return self.history.running_cost, self.history.cost_history
     
     def get_predicted_states(self):
-        return self.bank.last_predicted_states
+        return self.history.last_predicted_states
 
     def get_state(self):
         return self.current_state

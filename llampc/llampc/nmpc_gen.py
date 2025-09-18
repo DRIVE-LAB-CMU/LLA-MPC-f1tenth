@@ -15,14 +15,17 @@ def export_model(params_car, linear = False):
 
     x = ca.MX.sym('x', 8) # state: x, y, phi, vx, vy, omega, acceleration, delta
     u = ca.MX.sym('u', 2) # control rate: jerk, steer rate
-    p = ca.MX.sym('p', 10)
+    p = ca.MX.sym('p', 12)
+    #parameters: Bf, Br, Cf, Cr, Df, Dr, Cro, Cd, Ce, Cm, roll, pitch
     x_ref = ca.MX.sym('x_ref', 8)
-    #parameters: Bf, Br, Cf, Cr, Df, Dr, Cro, Cd, Ce, Cm,
+    
 
     mass = params_car['mass']
     Iz = params_car['Iz'] 
     lf = params_car['lf']
     lr = params_car['lr']
+
+    g = 9.81
 
     if not linear: 
         print("NONLINEAR MODEL USED")
@@ -39,8 +42,8 @@ def export_model(params_car, linear = False):
         dx0 = (x[3] * ca.cos(x[2])) - (x[4] * ca.sin(x[2])) #xdot
         dx1 = (x[3] * ca.sin(x[2])) + (x[4] * ca.cos(x[2])) #ydot
         dx2 = x[5] #phidot
-        dx3 = (Frx - Ffy * ca.sin(x[7])) / mass + x[4] * x[5] #vxdot
-        dx4 = (Fry + Ffy * ca.cos(x[7])) / mass - x[3] * x[5] #vydot
+        dx3 = (Frx - Ffy * ca.sin(x[7])) / mass + x[4] * x[5] - g * ca.sin(p[11]) #vxdot
+        dx4 = (Fry + Ffy * ca.cos(x[7])) / mass - x[3] * x[5] + g * ca.sin(p[10])#vydot
         dx5 = (lf * Ffy * ca.cos(x[7]) - lr * Fry) / Iz #omegadot
         dx6 = u[0] # jerk
         dx7 = u[1] # steer rate
@@ -113,7 +116,7 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.cost.W = np.diag(np.concatenate((Q_flat, R_flat, Rd_flat))) #nx, nu, nu, 10x10
     ocp.cost.W_e = Qf # cost matrix
 
-    x_ref = model.p[10:]  # last 8 parameters
+    x_ref = model.p[-8:]  # last 8 parameters
     x = model.x
     u = model.u
 

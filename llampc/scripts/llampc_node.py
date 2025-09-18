@@ -6,10 +6,10 @@ from rclpy.node import Node
 from rclpy.time import Time
 
 from llampc.nmpc_gen import setup_mpc
-from llampc.params import F110, F110_sim
+from llampc.params import F110, F110_sim, get_param_dict
 from llampc.planner import get_reference_trajectory_segment
 from llampc.utils import Track
-from llampc.rollout import DynamicBank, DynamicSimBank
+from llampc.rollout import LBHistory, DynamicSimBank, odeintRK4_batch, DBMPacejkaBank
 
 from nav_msgs.msg import Odometry, Path
 from ackermann_msgs.msg import AckermannDriveStamped
@@ -24,7 +24,7 @@ class MPCNode(Node):
 
         self.get_logger().info("Initializing")
 
-        self.sim = False
+        self.sim = True
 
         self.declare_params()
         self.initialize_mpc()
@@ -107,9 +107,7 @@ class MPCNode(Node):
         #     solver_config=solver_config,
         #     params_car=F110
         # )
-        
 
-        
         variation_dict = None
         mean_dict = None
 
@@ -157,14 +155,23 @@ class MPCNode(Node):
             }
 
             cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
-            self.bank = DynamicBank(
+            
+            num_models = 10
+            param_dict = get_param_dict(mean_dict, variation_dict, num_models)
+
+            self.dynamics_bank = DBMPacejkaBank(
                 params_car['lf'], params_car['lr'], 
                 params_car['mass'], params_car['Iz'], 
-                mean_dict, variation_dict, 
-                10,
-                2,
-                0.2,
-                cost_weights
+                param_dict['Bf'], param_dict['Br'],
+                param_dict['Cf'], param_dict['Cr'],
+                param_dict['Df'], param_dict['Dr'],
+                param_dict['Cro'], param_dict['Cd'],
+                param_dict['Ce'], param_dict['Cm']
+            )
+            self.lb_history = LBHistory(
+                num_models, 2,
+                0.2, cost_weights,
+                self.dynamics_bank
             )
         else:
             params_car = F110_sim()
@@ -188,11 +195,28 @@ class MPCNode(Node):
                 'mu': 0,
             }
 
-            self.bank = DynamicSimBank(
+            num_models = 10
+
+            param_dict = get_param_dict(mean_dict, variation_dict, num_models)
+
+            self.dynamics_bank = DynamicSimBank(
                 params_car['lf'], params_car['lr'],
                 params_car['m'], params_car['I'],
-                params_car["h"], mean_dict,
-                variation_dict, 5, 2, 0.2, cost_weights
+                params_car["h"], params_car['v_switch'],
+                params_car['a_max'], params_car['v_min'],
+                params_car['v_max'], params_car['s_min'],
+                params_car['s_max'], params_car['sv_min'],
+                params_car['sv_max'],
+                param_dict['C_Sf'], param_dict['C_Sr'],
+                param_dict['mu'],
+            )
+
+        
+            self.lb_history = LBHistory(
+                num_models, 2,
+                0.2, cost_weights,
+                self.dynamics_bank,
+                state_size=7
             )
 
 
@@ -238,9 +262,9 @@ class MPCNode(Node):
             return
         
         if not self.sim:
-            self.bank.update_lookback_error(self.current_state)
+            self.lb_history.update_lookback_error(self.current_state)
         else:
-            self.bank.update_lookback_error(
+            self.lb_history.update_lookback_error(
                 np.array(
                     [
                         self.current_state[0],
@@ -292,8 +316,8 @@ class MPCNode(Node):
             ]
             )
         else:
-            selected_model_index = self.bank.get_best_model()
-            selected_model_params = self.bank.get_model_params_arr(selected_model_index)
+            selected_model_index = self.lb_history.get_best_model()
+            selected_model_params = self.dynamics_bank.get_model_params_arr(selected_model_index)
 
 
         # concatenate 2 for x, y, 6 to fill out rest of state
@@ -303,9 +327,10 @@ class MPCNode(Node):
         for i in range(self.N):
             # Combine tire parameters with reference state and previous control
             full_params = np.concatenate([
-                selected_model_params,
-                ref_segment[:, i], 
-                np.zeros(6)
+                selected_model_params, # banked models
+                np.zeros(2), # roll and pitch
+                ref_segment[:, i], #reference x, y
+                np.zeros(6) # rest of reference (unweighted) phi, vx, vy, omega, acceleration, delta
                 ]
 
                  
@@ -341,32 +366,7 @@ class MPCNode(Node):
             self.apply_control(u_opt) # Apply control
             if not self.sim:
                 #version for our dynamics
-                self.bank.predict_states(self.current_state, u_opt)
-
-
-                # last = self.solver.get(0, "x")[:]
-                # if self.on:
-                #     print("FOLLOW")
-                #     for i in range(0, 10):
-                #         print(self.solver.get(i, "x")[:])
-                #     self.on = False
-                # else:
-                #     for i in range(1, 10):
-                #         solved = self.solver.get(i, "x")[:]
-
-                #         if(solved[1] - last[1] > 0.2):
-                #             print("LAST")
-                #             for arr in self.l:
-                #                 print(arr)
-
-                #             print("ISSUE")
-
-                #             for i in range(0, 10):
-                #                 print(self.solver.get(i, "x")[:])
-                #             self.on = True
-                #             return
-                            
-                #         last = np.array(solved)
+                self.lb_history.predict_states(self.current_state, u_opt)
 
                 # self.l = []
                 # for i in range(0, 10):
@@ -381,7 +381,7 @@ class MPCNode(Node):
             else:
                 # print(self.solver.get(0, "u"))
                 steer_v = self.solver.get(0, "u")[1]
-                self.bank.predict_states(
+                self.lb_history.predict_states(
                     np.array(
                         [
                             self.current_state[0],
@@ -404,13 +404,10 @@ class MPCNode(Node):
             self.time_history[:5, self.count] = np.array(self.checkpoint[1:]-self.checkpoint[:-1])
         
             if(self.count == 0):
-                print(self.bank.running_cost)
+                print(self.lb_history.running_cost)
                 if not self.sim:
                     print(selected_model_index)
                 # print(np.max(self.time_history*10e-6, axis = 1))
-
-           
-            
         else:
             self.apply_control([0, 0]) # Brake
             self.get_logger().warn(f"MPC solver failed with status: {status}")

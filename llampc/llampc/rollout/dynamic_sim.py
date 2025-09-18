@@ -1,40 +1,42 @@
 # integrate vehicle dynamics by 1 step
-from llampc.rollout import ModelBank
+from llampc.rollout import LBHistory
 import numpy as np
 
 
-class DynamicSimBank(ModelBank):
-    def __init__(self, lf, lr, mass, I,  h, params_car, mean_dict, variation_dict, num_models, history_length, dt, cost_weights, ground_truth = True):
-        #initializes a bank of models ready for vectorized calculation
+class DynamicSimBank():
+    def __init__(self, 
+                 lf, lr, 
+                 mass, I, 
+                 h, v_switch,
+                 a_max, v_min, v_max,
+                 s_min, s_max, 
+                 sv_min, sv_max,
+                 C_Sf,
+                 C_Sr, mu
+                 ):
+        # non-varying parameters
         self.lf = lf
         self.lr = lr
         self.m = mass
         self.I = I
         self.h = h
-        self.params_car = params_car
+
+        #varying parameters
+        self.v_switch = v_switch
+        self.a_max = a_max
+        self.v_min = v_min
+        self.v_max = v_max
+        self.s_min = s_min
+        self.s_max = s_max
+        self.sv_min = sv_min
+        self.sv_max = sv_max
+        self.C_Sf = C_Sf
+        self.C_Sr = C_Sr
+        self.mu = mu
+
         self.approx = False
-        super().__init__(num_models, history_length, dt, cost_weights, state_size = 7, sim = True)
+        # super().__init__(num_mod`     els, history_length, dt, cost_weights, state_size = 7, sim = True)
 
-        for key in variation_dict.keys():
-            setattr(
-                self,
-                key,
-                mean_dict[key] * 
-                (np.random.uniform(-variation_dict[key], variation_dict[key], self.num_models) + 1)
-            )
-
-        if ground_truth:
-            for key in variation_dict.keys():
-                param_array = getattr(self, key)
-                param_array[0] = mean_dict[key]
-
-
-    def get_model_params(self, index):
-        return {
-            'C_Sf': self.C_Sf[index], 
-            'C_Sr': self.C_Sr[index],
-            'mu': self.C_Sr[index],
-        }
 
     def get_model_params_arr(self, index):
         return np.array([
@@ -42,10 +44,9 @@ class DynamicSimBank(ModelBank):
             self.C_Sr[index],
             self.mu[index]
         ])
-    
 
 
-    def accl_constraints(self, vel, accl_batch, v_switch, a_max, v_min, v_max):
+    def accl_constraints(self, vel, accl_batch):
         """
         Batched acceleration constraints.
 
@@ -60,25 +61,25 @@ class DynamicSimBank(ModelBank):
         Returns:
             np.ndarray: (N,) constrained accelerations
         """
-        pos_limit = np.where(vel > v_switch, a_max * v_switch / vel, a_max)
+        pos_limit = np.where(vel > self.v_switch, self.a_max * self.v_switch / vel, self.a_max)
 
         # Start with unconstrained
         constrained_accl = np.copy(accl_batch)
 
         # Conditions
-        stop_condition = ((vel <= v_min) & (accl_batch <= 0)) | ((vel >= v_max) & (accl_batch >= 0))
-        max_decel = accl_batch <= -a_max
+        stop_condition = ((vel <= self.v_min) & (accl_batch <= 0)) | ((vel >= self.v_max) & (accl_batch >= 0))
+        max_decel = accl_batch <= -self.a_max
         max_accel = accl_batch >= pos_limit
 
         constrained_accl[stop_condition] = 0.0
-        constrained_accl[max_decel] = -a_max
+        constrained_accl[max_decel] = -self.a_max
         constrained_accl[max_accel] = pos_limit[max_accel]
 
         return constrained_accl
 
 
     
-    def steering_constraint(self, steering_angle, steering_velocity, s_min, s_max, sv_min, sv_max):
+    def steering_constraint(self, steering_angle, steering_velocity):
         """
         Batched steering velocity constraints.
 
@@ -96,26 +97,22 @@ class DynamicSimBank(ModelBank):
         constrained_sv = np.copy(steering_velocity)
 
         # Conditions
-        stop_condition = ((steering_angle <= s_min) & (steering_velocity <= 0)) | \
-                        ((steering_angle >= s_max) & (steering_velocity >= 0))
-        too_negative = steering_velocity <= sv_min
-        too_positive = steering_velocity >= sv_max
+        stop_condition = ((steering_angle <= self.s_min) & (steering_velocity <= 0)) | \
+                        ((steering_angle >= self.s_max) & (steering_velocity >= 0))
+        too_negative = steering_velocity <= self.sv_min
+        too_positive = steering_velocity >= self.sv_max
 
         constrained_sv[stop_condition] = 0.0
-        constrained_sv[too_negative] = sv_min
-        constrained_sv[too_positive] = sv_max
+        constrained_sv[too_negative] = self.sv_min
+        constrained_sv[too_positive] = self.sv_max
 
         return constrained_sv
 
 
-
-    
-    
-    def _diffequation(self, t, x_batch, u_batch, rates = None):
+    def diffequation(self, t, x_batch, u_batch):
         """	write dynamics as first order ODE: dxdt = f(x(t))
             x is a 6x1 vector: [x, y, psi, vx, slip, omega, steer]^T
             u is a 2x1 vector: [acc/pwm, steer_rate]^T
-            rates is a 
         """
 
         psi = x_batch[:, 2]
@@ -130,55 +127,48 @@ class DynamicSimBank(ModelBank):
 
         acc= self.accl_constraints(
             vel=vx,
-            accl_batch=acc,
-            v_switch=self.params_car["v_switch"],
-            a_max=self.params_car["a_max"],
-            v_min=self.params_car["v_min"],
-            v_max=self.params_car["v_max"]
+            accl_batch=acc
         )
 
         steer_rate = self.steering_constraint(
             steering_angle=steer,
-            steering_velocity=steer_rate,
-            s_min=self.params_car["s_min"],
-            s_max=self.params_car["s_max"],
-            sv_min=self.params_car["sv_min"],
-            sv_max=self.params_car["sv_max"]
+            steering_velocity=steer_rate
         )
 
         base = (self.lr + self.lf)
-        dxdt = np.zeros((self.num_models, 7))
 
-        if abs(vx[0]) < 0.5:
-            
-            dxdt[:, 0] = vx*np.cos(psi) #x
-            dxdt[:, 1] = vx*np.sin(psi) #y
-            dxdt[:, 2] = acc / base * np.tan(steer) # psi
-            dxdt[:, 3] = acc #vx
-            dxdt[:, 4] = 0 #slip
-            dxdt[:, 5] = (acc/base) * np.tan(steer) + vx / (base * np.square(np.cos(steer))) * steer_rate
-            dxdt[:, 6] = steer_rate # steer
+        if np.abs(vx[0]) < 0.5:
+            return np.column_stack([
+                vx * np.cos(psi),  # x
+                vx * np.sin(psi),  # y
+                acc / base * np.tan(steer),  # psi
+                acc,  # vx
+                np.zeros_like(vx),  # slip = 0
+                (acc / base) * np.tan(steer) + vx / (base * np.square(np.cos(steer))) * steer_rate,  # omega
+                steer_rate  # steer
+            ])
         else:
             g = 9.81
-
             
             # one = -self.mu*self.m/(vx*self.I*(self.lr+self.lf)) *(self.lf**2*self.C_Sf*(g*self.lr-acc*self.h) + self.lr**2*self.C_Sr*(g*self.lf + acc*self.h))*omega
             # two = self.mu*self.m/(self.I*(self.lr+self.lf))*(self.lr*self.C_Sr*(g*self.lf + acc*self.h) - self.lf*self.C_Sf*(g*self.lr - acc*self.h))*slip
             # three = (self.mu*self.m/(self.I*(self.lr+self.lf))*self.lf*self.C_Sf*(g*self.lr - acc*self.h)*steer)
-            dxdt[:, 0] = vx * np.cos(psi + slip) #x
-            dxdt[:, 1] = vx * np.sin(psi + slip) #y
-            dxdt[:, 2] = omega # psi
-            dxdt[:, 3] = acc #vx
-            dxdt[:, 4] = (self.mu/(vx**2*(self.lr+self.lf))*(self.C_Sr*(g*self.lf + acc*self.h)*self.lr - self.C_Sf*(g*self.lr - acc*self.h)*self.lf)-1)*omega \
-                -self.mu/(vx*(self.lr+self.lf))*(self.C_Sr*(g*self.lf + acc*self.h) + self.C_Sf*(g*self.lr-acc*self.h))*slip \
-                +self.mu/(vx*(self.lr+self.lf))*(self.C_Sf*(g*self.lr-acc*self.h))*steer #slip
-            dxdt[:, 5] = -self.mu*self.m/(vx*self.I*(self.lr+self.lf)) *(self.lf**2*self.C_Sf*(g*self.lr-acc*self.h) + self.lr**2*self.C_Sr*(g*self.lf + acc*self.h))*omega \
-                +self.mu*self.m/(self.I*(self.lr+self.lf))*(self.lr*self.C_Sr*(g*self.lf + acc*self.h) - self.lf*self.C_Sf*(g*self.lr - acc*self.h))*slip \
-                +self.mu*self.m/(self.I*(self.lr+self.lf))*self.lf*self.C_Sf*(g*self.lr - acc*self.h)*steer #omega
-            dxdt[:, 6] = steer_rate # steer
+            return np.column_stack([
+                vx * np.cos(psi + slip), #x
+                vx * np.sin(psi + slip), #y
+                omega, # psi
+                acc, #vx
+                (self.mu/(vx**2*(self.lr+self.lf))*(self.C_Sr*(g*self.lf + acc*self.h)*self.lr - self.C_Sf*(g*self.lr - acc*self.h)*self.lf)-1)*omega \
+                    -self.mu/(vx*(self.lr+self.lf))*(self.C_Sr*(g*self.lf + acc*self.h) + self.C_Sf*(g*self.lr-acc*self.h))*slip \
+                    +self.mu/(vx*(self.lr+self.lf))*(self.C_Sf*(g*self.lr-acc*self.h))*steer, #slip
+                -self.mu*self.m/(vx*self.I*(self.lr+self.lf)) *(self.lf**2*self.C_Sf*(g*self.lr-acc*self.h) + self.lr**2*self.C_Sr*(g*self.lf + acc*self.h))*omega \
+                    +self.mu*self.m/(self.I*(self.lr+self.lf))*(self.lr*self.C_Sr*(g*self.lf + acc*self.h) - self.lf*self.C_Sf*(g*self.lr - acc*self.h))*slip \
+                    +self.mu*self.m/(self.I*(self.lr+self.lf))*self.lf*self.C_Sf*(g*self.lr - acc*self.h)*steer, #omega
+                steer_rate # steer
+            ])
         
 
-        return dxdt
+        return None
 
     # def calc_forces(self, x_batch, u_batch, return_slip=False):
     #     acc = u_batch[:, 0]

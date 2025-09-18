@@ -134,8 +134,13 @@ class GymBridge(Node):
             self.obs, _ , self.done, _ = self.env.reset(np.array([[sx, sy, stheta]]))
             self.ego_scan = list(self.obs['scans'][0])
 
-        sim_car = self.env.sim.agents[self.env.sim.ego_idx]
-        self.bank_wrapper = SynchronousBank(self.env.timestep, sim_car)
+
+        self.include_bank = True
+        self.print_debug = False
+
+        if self.include_bank:
+            sim_car = self.env.sim.agents[self.env.sim.ego_idx]
+            self.bank_wrapper = SynchronousBank(self.env.timestep, sim_car)
 
         # sim physical step timer
         self.drive_timer = self.create_timer(0.01, self.drive_timer_callback)
@@ -238,38 +243,39 @@ class GymBridge(Node):
             self.ego_steer = 0.0
 
     def drive_timer_callback(self):
+        
         if self.ego_drive_published and not self.has_opp:
-            self.bank_wrapper.update_state()
-            controls = self.bank_wrapper.get_controls(self.ego_requested_speed, self.ego_steer)
-            self.bank_wrapper.predict_states(controls)
+            if self.include_bank:
+                self.bank_wrapper.update_state()
+                controls = self.bank_wrapper.get_controls(self.ego_requested_speed, self.ego_steer)
+                self.bank_wrapper.predict_states(controls)
 
             
             self.obs, _, self.done, _ = self.env.step(np.array([[self.ego_steer, self.ego_requested_speed]]))
             
-            
-            self.bank_wrapper.update_state_and_error()
-                        
-            predicted = self.bank_wrapper.get_predicted_states()[:, 0]
-            actual = self.bank_wrapper.get_state()
+            if self.include_bank:
+                self.bank_wrapper.update_state_and_error()
+                            
+                predicted = self.bank_wrapper.get_predicted_states()[:, 0]
+                actual = self.bank_wrapper.get_state()
 
-            
+                diff = np.abs(predicted-actual)
+                if(diff.sum() > 0.1):
+                    self.get_logger().info(f'STEER:{self.ego_steer}\n')
+                    self.get_logger().info(f'STEER PID:{controls}\n')
+                    # self.get_logger().info(f'START:\n{start}')
+                    self.get_logger().info(f'PREDICTED:{predicted}\n')
+                    self.get_logger().info(f'ACTUAL:{actual}\n')
 
-            diff = np.abs(predicted-actual)
-            diff[3]
-            if(diff.sum() > 0.1):
-                self.get_logger().info(f'STEER:\n{self.ego_steer}')
-                self.get_logger().info(f'STEER PID:\n{controls}')
-                # self.get_logger().info(f'START:\n{start}')
-                self.get_logger().info(f'PREDICTED:\n{predicted}')
-                self.get_logger().info(f'ACTUAL:\n{actual}')
-
-            model_index = self.bank_wrapper.get_selected_model_index()
-            
-            if(model_index != 0):
-                self.get_logger().info(f'SELECTED MODEL:\n{model_index}')
-                gt = self.bank_wrapper.get_selected_model_params(0)
-                diff = np.abs(gt - self.bank_wrapper.get_selected_model_params(model_index))/gt
-                self.get_logger().info(f'VAR:\n{diff}')
+                model_index = self.bank_wrapper.get_selected_model_index()
+                
+                if(self.print_debug or (model_index != 0 and self.bank_wrapper.get_state()[3] > 0.5)):
+                    self.get_logger().info(f'SELECTED MODEL:{model_index}\n')
+        
+                if(model_index != 0 and self.bank_wrapper.get_state()[3] > 0.5 ):
+                    gt = self.bank_wrapper.get_selected_model_params(0)
+                    diff = np.abs(gt - self.bank_wrapper.get_selected_model_params(model_index))/gt
+                    self.get_logger().info(f'VAR:{diff}\n')
 
                 
 
