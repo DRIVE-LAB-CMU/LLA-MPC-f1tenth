@@ -3,7 +3,7 @@ import numpy as np
 
 import jax
 from jax import jit
-import jax.numpy as jnp
+import numpy as jnp
 
 
 
@@ -28,10 +28,12 @@ class DBMPacejkaBank:
         self.roll = 0
         self.pitch = 0
 
+        # self.diffequation = jit(self.diffequation, static_argnums=(0,))
+        # self._calc_forces = jit(self._calc_forces, static_argnums=(0,))
+
     def get_state_add(self):
         return jnp.array([self.roll, self.pitch])
 
-    @jit(static_argnums=0)
     def diffequation(self, t, x_batch, u_batch, state_add):
         """	write dynamics as first order ODE: dxdt = f(x(t))
             x is a 8x1 vector: [x, y, psi, vx, vy, omega]^T
@@ -58,7 +60,6 @@ class DBMPacejkaBank:
         
         return dxdt
 
-    @jit(static_argnums=0)
     def _calc_forces(self, x_batch, u_batch):
         acc = u_batch[:, 0]
         steer = u_batch[:, 1]

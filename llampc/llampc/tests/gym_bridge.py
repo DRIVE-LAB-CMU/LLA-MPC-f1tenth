@@ -135,8 +135,8 @@ class GymBridge(Node):
             self.ego_scan = list(self.obs['scans'][0])
 
 
-        self.include_bank = False
-        self.print_debug = False
+        self.include_bank = True
+        self.print_debug = True
 
         if self.include_bank:
             sim_car = self.env.sim.agents[self.env.sim.ego_idx]
@@ -269,7 +269,7 @@ class GymBridge(Node):
 
                 model_index = self.bank_wrapper.get_selected_model_index()
                 
-                if(self.print_debug or (model_index != 0 and self.bank_wrapper.get_state()[3] > 0.5)):
+                if((self.print_debug or model_index != 0) and self.bank_wrapper.get_state()[3] > 0.5):
                     self.get_logger().info(f'SELECTED MODEL:{model_index}\n')
         
                 if(model_index != 0 and self.bank_wrapper.get_state()[3] > 0.5 ):

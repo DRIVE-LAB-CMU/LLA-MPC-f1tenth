@@ -38,8 +38,9 @@ class DynamicSimBank():
         for key, value in param_dict.items():
             setattr(self, key, value)
 
-        # self.approx = False
-        # super().__init__(num_mod`     els, history_length, dt, cost_weights, state_size = 7, sim = True)
+        # self.accl_constraints = jit(self._accl_constraints, static_argnums=(0,))
+        # self.steering_constraint = jit(self._steering_constraint, static_argnums=(0,))
+        # self.diffequation = jit(self.diffequation, static_argnums=(0,))
 
     def get_model_params_arr(self, index):
         return np.array([
@@ -48,8 +49,7 @@ class DynamicSimBank():
             self.mu[index]
         ])
     
-    @jit(static_argnums=0)
-    def accl_constraints(self, vel, accl_batch):
+    def _accl_constraints(self, vel, accl_batch):
         """
         Batched acceleration constraints.
 
@@ -81,8 +81,7 @@ class DynamicSimBank():
         return constrained_accl
 
 
-    @jit(static_argnums=0)
-    def steering_constraint(self, steering_angle, steering_velocity):
+    def _steering_constraint(self, steering_angle, steering_velocity):
         """
         Batched steering velocity constraints.
 
@@ -114,7 +113,6 @@ class DynamicSimBank():
     def get_state_add(self):
         return None
 
-    @jit(static_argnums=0)
     def diffequation(self, t, x_batch, u_batch, state_add):
         """	write dynamics as first order ODE: dxdt = f(x(t))
             x is a 6x1 vector: [x, y, psi, vx, slip, omega, steer]^T
@@ -131,12 +129,12 @@ class DynamicSimBank():
         acc = u_batch[:, 0]
         steer_rate = u_batch[:, 1]
 
-        acc= self.accl_constraints(
+        acc= self._accl_constraints(
             vel=vx,
             accl_batch=acc
         )
 
-        steer_rate = self.steering_constraint(
+        steer_rate = self._steering_constraint(
             steering_angle=steer,
             steering_velocity=steer_rate
         )

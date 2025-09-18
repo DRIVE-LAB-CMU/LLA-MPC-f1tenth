@@ -1,6 +1,8 @@
+from llampc.rollout import odeintRK4_batch
 from llampc.rollout import DynamicSimBank, LBHistory
 from llampc.params import F110_sim, get_param_dict
 from . import syncbank
+
 
 import numpy as np
 
@@ -25,8 +27,8 @@ class SynchronousBank():
         }
 
         # variation_dict = {
-        #     'C_Sf': 0.15, 
-        #     'C_Sr': 0.15,
+        #     'C_Sf': 0, 
+        #     'C_Sr': 0,
         #     'mu': 0,
         # }
 
@@ -41,12 +43,12 @@ class SynchronousBank():
             self.params_car['v_max'], self.params_car['s_min'],
             self.params_car['s_max'], self.params_car['sv_min'],
             self.params_car['sv_max'],
-            param_dict['C_Sf'], param_dict['C_Sr'],
-            param_dict['mu'],
+            param_dict
         )
         self.history = LBHistory(
-            num_models, 20, env_timestep, cost_weights, self.dynamics_bank
+            num_models, 20, env_timestep, cost_weights, self.dynamics_bank, odeintRK4_batch, 7
         )
+
 
         self.current_state = np.empty(7)
         self.update_state()

@@ -18,8 +18,6 @@ from ackermann_msgs.msg import AckermannDriveStamped
 from geometry_msgs.msg import PoseStamped, PoseArray, Pose
 from std_msgs.msg import Float64MultiArray
 
-from numba import njit
-
 import time
 
 class MPCNode(Node):
@@ -28,7 +26,7 @@ class MPCNode(Node):
 
         self.get_logger().info("Initializing")
 
-        self.sim = False
+        self.sim = True
         self.publish_trajectories = False
 
         self.declare_params()
@@ -223,6 +221,10 @@ class MPCNode(Node):
                 odeintRK4_batch,
                 state_size
             )
+
+
+        import multiprocessing
+        self.get_logger().info(f"Devices seen: {multiprocessing.cpu_count()}")
 
         self.get_logger().info("Warm starting bank")
         # warm start bank

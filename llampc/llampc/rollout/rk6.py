@@ -12,7 +12,6 @@ import jax
 from jax import jit
 import jax.numpy as jnp
 
-@jit(static_argnums=(0))
 def odeintRK6(diffeq, y0, t, control, state_add):
     gamma = jnp.array([16/135, 0, 6656/12825, 28561/56430, -9/50, 2/55])
 
@@ -39,8 +38,8 @@ def odeintRK6(diffeq, y0, t, control, state_add):
 
     return y_next
 
+odeintRK6 = jax.jit(odeintRK6, static_argnums=(0,))
     
-@jit(static_argnums=(0))
 def odeintRK6_batch(diffeq, y0_batch, t, control_batch, state_add):
     gamma = jnp.array([16/135, 0, 6656/12825, 28561/56430, -9/50, 2/55])
 
@@ -68,7 +67,8 @@ def odeintRK6_batch(diffeq, y0_batch, t, control_batch, state_add):
 
     return y_next
 
-@jit(static_argnums=(0))
+odeintRK6_batch = jax.jit(odeintRK6_batch, static_argnums=(0,))
+
 def odeintRK4_batch(diffeq, y0_batch, t, control_batch, state_add):
     hs = jnp.diff(t)
     dts = t[:-1]
@@ -89,8 +89,10 @@ def odeintRK4_batch(diffeq, y0_batch, t, control_batch, state_add):
     _, y_next = jax.lax.scan(step, y0_batch, (hs, dts))
 
     return y_next
+# odeintRK4_batch = jax.jit(odeintRK4_batch, static_argnums=(0,))
 
-@jit(static_argnums=(0))
+
+
 def odeintEuler_batch(diffeq, y0_batch, t, control_batch, state_add):
     hs = jnp.diff(t)
     dts = t[:-1]
@@ -107,3 +109,5 @@ def odeintEuler_batch(diffeq, y0_batch, t, control_batch, state_add):
     _, y_next = jax.lax.scan(step, y0_batch, (hs, dts))
 
     return y_next
+
+odeintEuler_batch = jax.jit(odeintEuler_batch, static_argnums=(0,))
