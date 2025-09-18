@@ -9,7 +9,7 @@ from llampc.nmpc_gen import setup_mpc
 from llampc.params import F110, F110_sim, get_param_dict
 from llampc.planner import get_reference_trajectory_segment
 from llampc.utils import Track
-from llampc.rollout import odeintRK4BatchIntegrator
+from llampc.rollout import odeintRK4_batch
 from llampc.rollout import DynamicSimBank,DBMPacejkaBank
 from llampc.rollout import LBHistory
 
@@ -176,8 +176,8 @@ class MPCNode(Node):
                 num_models, 10,
                 0.05, cost_weights,
                 self.dynamics_bank,
-                odeintRK4BatchIntegrator(),
-                state_size
+                odeintRK4_batch,
+                state_size, 
             )
         else:
             params_car = F110_sim()
@@ -220,7 +220,7 @@ class MPCNode(Node):
                 num_models, 2,
                 0.05, cost_weights,
                 self.dynamics_bank,
-                odeintRK4BatchIntegrator(),
+                odeintRK4_batch,
                 state_size
             )
 

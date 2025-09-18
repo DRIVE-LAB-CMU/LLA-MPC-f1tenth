@@ -44,7 +44,7 @@ class DBMPacejkaBank:
         vy = x_batch[:, 4]
         omega = x_batch[:, 5]
 
-        Ffy, Frx, Fry = self.calc_forces(x_batch, u_batch)
+        Ffy, Frx, Fry = self._calc_forces(x_batch, u_batch)
 
 
         dxdt = jnp.stack([
@@ -59,7 +59,7 @@ class DBMPacejkaBank:
         return dxdt
 
     @jit(static_argnums=0)
-    def calc_forces(self, x_batch, u_batch):
+    def _calc_forces(self, x_batch, u_batch):
         acc = u_batch[:, 0]
         steer = u_batch[:, 1]
         psi = x_batch[:, 2]
