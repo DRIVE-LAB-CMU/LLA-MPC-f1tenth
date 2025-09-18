@@ -1,6 +1,10 @@
-from llampc.rollout import DynamicSimBank, LBHistory
 from llampc.params import F110_sim, get_param_dict
-from . import syncbank
+
+from llampc.rollout.rk6 import odeintRK4_batch, integrate_batch
+import llampc.rollout.history as history
+import llampc.rollout.dynamic_sim as dynamics_sim
+import llampc.rollout.dynamic as dynamics
+
 
 import numpy as np
 
@@ -33,7 +37,7 @@ class SynchronousBank():
         num_models = 200
         param_dict = get_param_dict(mean_dict, variation_dict, num_models, ground_truth = True)
 
-        self.dynamics_bank = DynamicSimBank(
+        self.dynamics_bank = dynamics_sim.DynamicSimBank(
             self.params_car['lf'], self.params_car['lr'],
             self.params_car['m'], self.params_car['I'],
             self.params_car["h"], self.params_car['v_switch'],
@@ -44,9 +48,11 @@ class SynchronousBank():
             param_dict['C_Sf'], param_dict['C_Sr'],
             param_dict['mu'],
         )
-        self.history = LBHistory(
-            num_models, 20, env_timestep, cost_weights, self.dynamics_bank
+        self.history = history.LBHistory(
+            num_models, 20, env_timestep, cost_weights, 7
         )
+        self.integrator = odeintRK4_batch
+        self.diffeq = dynamics_sim.diffequation
 
         self.current_state = np.empty(7)
         self.update_state()
@@ -62,11 +68,16 @@ class SynchronousBank():
         return self.history.get_best_model()
     
     def predict_states(self, controls):
-        self.history.predict_states(self.current_state, controls)
+        history.predict_states(
+            self.lb_history, self.integrator, self.dynamics_bank, 
+            self.diffeq, self.current_state, controls
+            )
     
     def update_state_and_error(self):
         self.update_state()
-        self.history.update_lookback_error(self.get_state())
+        history.update_lookback_error(
+            self.lb_history, np.zeros(self.current_state)
+        )
 
     def get_error_statistics(self):
         return self.history.running_cost, self.history.cost_history

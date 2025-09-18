@@ -6,11 +6,52 @@ __email__ = 'achinj@seas.upenn.edu'
 
 
 import numpy as np
-from llampc.rollout import odeintRK4_batch
+from llampc.rollout import integrate_batch
+from numba import njit, float64, boolean, int64, prange
+from numba.experimental import jitclass
 
+@njit(parallel = True)
+def _get_batch(num_models, x_t, u_t):
+    x_t_batch = np.empty((num_models, x_t.shape[0]), dtype=np.float64)
+    u_t_batch = np.empty((num_models, u_t.shape[0]), dtype=np.float64)
+    
+    for i in prange(num_models):
+        x_t_batch[i, :] = x_t
+        u_t_batch[i, :] = u_t
+
+    return x_t_batch, u_t_batch
+
+@njit
+def predict_states(history, integrator, dynamics_bank, diffeq, x_t, u_t):
+    x_batch, u_batch = _get_batch(history.num_models, x_t, u_t)
+    history.last_predicted_states = integrate_batch(
+        integrator, dynamics_bank, diffeq, x_batch, u_batch, 0, history.dt).T
+
+@njit
+def update_lookback_error(history, x_t):
+    history.running_cost -= history.cost_history[:, history.queue_index]
+
+    cost = np.sum(np.square(x_t[:, None] - history.last_predicted_states) * history.cost_weights[:, None], axis = 0)
+    history.cost_history[:, history.queue_index] = cost
+    history.running_cost += cost
+    history.queue_index = (history.queue_index + 1) % history.history_length
+
+
+spec = [
+    ('num_models', int64),          
+    ('history_length', int64),       
+    ('last_predicted_states', float64[:, :]), 
+    ('running_cost', float64[:]),         
+    ('cost_history', float64[:, :]),       
+    ('queue_index', int64),
+    ('dt', float64),                          
+    ('cost_weights', float64[:]),  
+    ('state_size', int64),                    
+]
+@jitclass(spec)
 class LBHistory:
 
-    def __init__(self, num_models, history_length, dt, cost_weights,  dynamics, integrator= odeintRK4_batch,state_size = 6):
+    def __init__(self, num_models, history_length, dt, cost_weights, state_size):
         self.num_models = num_models
         self.history_length = history_length
         self.last_predicted_states = np.zeros((state_size, self.num_models))
@@ -19,37 +60,19 @@ class LBHistory:
         self.queue_index = 0
         self.dt = dt
         self.cost_weights = cost_weights
-        self.integrator = integrator # should be njit integrator function
-        self.dynamics = dynamics # should be dynamics jitclass instance
-        
-    def predict_states(self, x_t, u_t):
-        x_batch, u_batch = self._get_batch(x_t, u_t)
-        self.last_predicted_states = self._integrate_batch(x_batch, u_batch, 0, self.dt).T
+        self.state_size = state_size
     
-    def update_lookback_error(self, x_t):
-        self.running_cost -= self.cost_history[:, self.queue_index]
+    def reset(self):
+        self.last_predicted_states = np.zeros((self.state_size, self.num_models))
+        self.running_cost = np.zeros(self.num_models)
+        self.cost_history = np.zeros((self.num_models, self.history_length))
+        self.queue_index = 0
 
-        # print(x_t[:, None].shape)
-        # print(self.last_predicted_states.shape)
-        cost = np.sum(np.square(x_t[:, None] - self.last_predicted_states) * self.cost_weights[:, None], axis = 0)
-        self.cost_history[:, self.queue_index] = cost
-        self.running_cost += cost
-        self.queue_index = (self.queue_index + 1) % self.history_length
-        
-    def get_best_model(self):
-        return np.argmin(self.running_cost)
+    def get_best_model(history):
+        return np.argmin(history.running_cost)
+
+           
     
-    def _get_batch(self, x_t, u_t):
-        x_t_batch = np.tile(x_t.reshape(1, -1), (self.num_models, 1))
-        u_t_batch = np.tile(u_t.reshape(1, -1), (self.num_models, 1))
-        return x_t_batch, u_t_batch
     
-    def _integrate_batch(self, x_t_batch, u_t_batch, t_start, t_end):
-        """Batched version of _integrate"""
-        odesol = self.integrator(
-            dynamics = self.dynamics,
-            y0_batch=x_t_batch,
-            t=np.array([t_start, t_end]),
-            control_batch = u_t_batch
-            )
-        return odesol[-1]
+    
+    

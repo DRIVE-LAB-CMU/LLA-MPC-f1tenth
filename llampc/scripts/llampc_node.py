@@ -9,7 +9,12 @@ from llampc.nmpc_gen import setup_mpc
 from llampc.params import F110, F110_sim, get_param_dict
 from llampc.planner import get_reference_trajectory_segment
 from llampc.utils import Track
-from llampc.rollout import LBHistory, DynamicSimBank, odeintRK4_batch, DBMPacejkaBank
+
+import llampc.rollout.history as history
+import llampc.rollout.dynamic_sim as dynamics_sim
+import llampc.rollout.dynamic as dynamics
+from llampc.rollout.rk6 import odeintRK4_batch, integrate_batch
+
 
 from nav_msgs.msg import Odometry, Path
 from ackermann_msgs.msg import AckermannDriveStamped
@@ -110,6 +115,8 @@ class MPCNode(Node):
 
         variation_dict = None
         mean_dict = None
+        
+        state_size = 0
 
         if not self.sim:
             params_car = F110()
@@ -157,9 +164,11 @@ class MPCNode(Node):
             cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
             
             num_models = 10
+            state_size = 6
             param_dict = get_param_dict(mean_dict, variation_dict, num_models)
 
-            self.dynamics_bank = DBMPacejkaBank(
+            self.diffeq = dynamics.diffequation
+            self.dynamics_bank = dynamics.DBMPacejkaBank(
                 params_car['lf'], params_car['lr'], 
                 params_car['mass'], params_car['Iz'], 
                 param_dict['Bf'], param_dict['Br'],
@@ -168,10 +177,11 @@ class MPCNode(Node):
                 param_dict['Cro'], param_dict['Cd'],
                 param_dict['Ce'], param_dict['Cm']
             )
-            self.lb_history = LBHistory(
+            self.integrator = odeintRK4_batch
+            self.lb_history = history.LBHistory(
                 num_models, 2,
                 0.2, cost_weights,
-                self.dynamics_bank
+                state_size
             )
         else:
             params_car = F110_sim()
@@ -196,10 +206,11 @@ class MPCNode(Node):
             }
 
             num_models = 10
+            state_size = 7
 
             param_dict = get_param_dict(mean_dict, variation_dict, num_models)
-
-            self.dynamics_bank = DynamicSimBank(
+            self.diffeq = dynamics_sim.diffequation
+            self.dynamics_bank = dynamics_sim.DynamicSimBank(
                 params_car['lf'], params_car['lr'],
                 params_car['m'], params_car['I'],
                 params_car["h"], params_car['v_switch'],
@@ -210,18 +221,29 @@ class MPCNode(Node):
                 param_dict['C_Sf'], param_dict['C_Sr'],
                 param_dict['mu'],
             )
+            self.integrator = odeintRK4_batch
 
-        
-            self.lb_history = LBHistory(
+            self.lb_history = history.LBHistory(
                 num_models, 2,
                 0.2, cost_weights,
-                self.dynamics_bank,
-                state_size=7
+                state_size
             )
 
 
         self.current_state = None
         self.solver = setup_mpc(self.N, self.Tf, build=True)
+        self.get_logger().info("SOLVER COMPILED, WARM STARTING")
+        
+        history.predict_states(
+            self.lb_history, self.integrator, self.dynamics_bank, 
+            self.diffeq, np.zeros(state_size), np.zeros(2)
+            )
+        history.update_lookback_error(
+            self.lb_history, np.zeros(state_size)
+        )
+        self.lb_history.get_best_model()
+        self.lb_history.reset()
+        self.get_logger().info("LLA BANK COMPILED")
 
     def odom_callback(self, msg):
 
