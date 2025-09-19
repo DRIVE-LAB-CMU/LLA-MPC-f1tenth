@@ -135,9 +135,8 @@ class GymBridge(Node):
             self.ego_scan = list(self.obs['scans'][0])
 
 
-        self.include_bank = True
-        self.print_debug = True
-
+        self.include_bank = False
+        self.print_debug = False
         if self.include_bank:
             sim_car = self.env.sim.agents[self.env.sim.ego_idx]
             self.bank_wrapper = SynchronousBank(self.env.timestep, sim_car)

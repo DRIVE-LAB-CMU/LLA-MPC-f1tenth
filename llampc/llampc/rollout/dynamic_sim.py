@@ -150,6 +150,8 @@ spec = [
     ('C_Sf', float64[:]),
     ('C_Sr', float64[:]),
     ('mu', float64[:]),
+
+    ('num_models', int64),
 ]
 @jitclass(spec)
 class DynamicSimBank():
@@ -161,7 +163,8 @@ class DynamicSimBank():
                  s_min, s_max, 
                  sv_min, sv_max,
                  C_Sf,
-                 C_Sr, mu
+                 C_Sr, mu,
+                 num_models
                  ):
         # non-varying parameters
         self.lf = lf
@@ -183,6 +186,8 @@ class DynamicSimBank():
         self.C_Sf = C_Sf
         self.C_Sr = C_Sr
         self.mu = mu
+
+        self.num_models = num_models
 
         # super().__init__(num_mod`     els, history_length, dt, cost_weights, state_size = 7, sim = True)
 

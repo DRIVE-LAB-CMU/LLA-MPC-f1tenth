@@ -29,7 +29,7 @@ class MPCNode(Node):
 
         self.get_logger().info("Initializing")
 
-        self.sim = True
+        self.sim = False
 
         self.declare_params()
         self.initialize_mpc()
@@ -44,9 +44,10 @@ class MPCNode(Node):
         self.count = 0
         self.time_window = 5
         self.time_index = 0
-        self.time_history = np.zeros((6, self.time_window))
-        self.maxtime = np.zeros(6)
-        self.checkpoint = np.empty(6)
+        self.checkpoints = 7
+        self.time_history = np.zeros((self.checkpoints, self.time_window))
+        self.maxtime = np.zeros(self.checkpoints)
+        self.checkpoint = np.empty(self.checkpoints)
 
         # dictionary, prefereably npy, which has waypoints_x, waypoints_y, and velocity
         track_name = self.get_parameter('track_file_name').get_parameter_value().string_value
@@ -163,7 +164,7 @@ class MPCNode(Node):
 
             cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
             
-            num_models = 10
+            num_models = 2000
             state_size = 6
             param_dict = get_param_dict(mean_dict, variation_dict, num_models)
 
@@ -175,7 +176,8 @@ class MPCNode(Node):
                 param_dict['Cf'], param_dict['Cr'],
                 param_dict['Df'], param_dict['Dr'],
                 param_dict['Cro'], param_dict['Cd'],
-                param_dict['Ce'], param_dict['Cm']
+                param_dict['Ce'], param_dict['Cm'],
+                num_models
             )
             self.integrator = odeintRK4_batch
             self.lb_history = history.LBHistory(
@@ -219,7 +221,7 @@ class MPCNode(Node):
                 params_car['s_max'], params_car['sv_min'],
                 params_car['sv_max'],
                 param_dict['C_Sf'], param_dict['C_Sr'],
-                param_dict['mu'],
+                param_dict['mu'], num_models
             )
             self.integrator = odeintRK4_batch
 
@@ -276,7 +278,7 @@ class MPCNode(Node):
         
     def control_callback(self):
 
-        start = time.perf_counter_ns()
+        self.checkpoint[0] = time.perf_counter_ns()
 
         # print(start)
 
@@ -284,9 +286,12 @@ class MPCNode(Node):
             return
         
         if not self.sim:
-            self.lb_history.update_lookback_error(self.current_state)
+            history.update_lookback_error(
+                self.lb_history, self.current_state
+            )
         else:
-            self.lb_history.update_lookback_error(
+            history.update_lookback_error(
+                self.lb_history,
                 np.array(
                     [
                         self.current_state[0],
@@ -303,17 +308,19 @@ class MPCNode(Node):
         x0 = self.current_state[:2]
         v0 = self.current_state[3]
 
+        self.checkpoint[1] = time.perf_counter_ns()
+
         # no need to copy states and trajectory in case of update b/c node is single thread
         ref_segment, idx = get_reference_trajectory_segment(x0, v0, self.track, self.N, self.dt, self.projidx)
         # ref_segment is only 2 large, representing X and Y
         self.projidx = idx
 
-        self.checkpoint[0] = time.perf_counter_ns()
+        
 
         self.publish_ref_trajectory(ref_segment)
         # print(f"segment: {ref_segment}")
 
-        self.checkpoint[1] = time.perf_counter_ns()
+        self.checkpoint[2] = time.perf_counter_ns()
 
         # set initial locked current state
         # print(f"current state: {np.concatenate([self.current_state, self.last_control])}")
@@ -362,13 +369,13 @@ class MPCNode(Node):
             # self.solver.set(i, "yref", all_yref)
         
 
-        self.checkpoint[2]= time.perf_counter_ns()
+        self.checkpoint[3]= time.perf_counter_ns()
         # print(f"x start: {self.solver.get(0, 'x')}")
         # print(f"u start: {self.solver.get(0, 'u')}")
         # print(f"params : {self.solver.get(0, 'p')}")
         status = self.solver.solve()
 
-        self.checkpoint[3] = time.perf_counter_ns()
+        self.checkpoint[4] = time.perf_counter_ns()
 
         u_opt = self.solver.get(1, "x")[-2:] # acceleration, delta
         # print(f"CONTROL: {u_opt}")
@@ -379,7 +386,7 @@ class MPCNode(Node):
             predicted_states.append(x_pred)
 
         self.publish_predicted_trajectory(predicted_states) # Publish predicted trajectory
-        self.checkpoint[4] = time.perf_counter_ns()
+        self.checkpoint[5] = time.perf_counter_ns()
 
 
         
@@ -388,8 +395,10 @@ class MPCNode(Node):
             self.apply_control(u_opt) # Apply control
             if not self.sim:
                 #version for our dynamics
-                self.lb_history.predict_states(self.current_state, u_opt)
-
+                history.predict_states(
+                    self.lb_history, self.integrator, self.dynamics_bank, 
+                    self.diffeq, self.current_state, u_opt
+                )
                 # self.l = []
                 # for i in range(0, 10):
                 #     self.l.append(np.array(self.solver.get(i, "x")[:]))
@@ -403,7 +412,9 @@ class MPCNode(Node):
             else:
                 # print(self.solver.get(0, "u"))
                 steer_v = self.solver.get(0, "u")[1]
-                self.lb_history.predict_states(
+                history.predict_states(
+                    self.lb_history, self.integrator, self.dynamics_bank, 
+                    self.diffeq, 
                     np.array(
                         [
                             self.current_state[0],
@@ -414,22 +425,22 @@ class MPCNode(Node):
                             self.current_state[5], 
                             self.last_control[1]
                         ]
-                    ), 
-                    #[x, y, psi, vx, slip, omega, steer
-                    np.array([u_opt[0], steer_v])  # accel + steer velocity
+                    ),
+                    np.array([u_opt[0], steer_v]) 
                 )
 
 
-            self.checkpoint[5] = time.perf_counter_ns()
+            self.checkpoint[6] = time.perf_counter_ns()
 
             self.count = (self.count + 1) % self.time_window
-            self.time_history[:5, self.count] = np.array(self.checkpoint[1:]-self.checkpoint[:-1])
+            self.time_history[:self.checkpoints-1, self.count] = np.array(self.checkpoint[1:]-self.checkpoint[:-1])
+            self.time_history[-1, self.count] = self.checkpoint[-1] - self.checkpoint[0]
         
             if(self.count == 0):
-                print(self.lb_history.running_cost)
-                if not self.sim:
-                    print(selected_model_index)
-                # print(np.max(self.time_history*10e-6, axis = 1))
+                # print(self.lb_history.running_cost)
+                # if not self.sim:
+                #     print(selected_model_index)
+                print(np.max(self.time_history*10e-6, axis = 1))
         else:
             self.apply_control([0, 0]) # Brake
             self.get_logger().warn(f"MPC solver failed with status: {status}")

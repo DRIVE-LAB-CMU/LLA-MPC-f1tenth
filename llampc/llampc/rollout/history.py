@@ -10,12 +10,12 @@ from llampc.rollout import integrate_batch
 from numba import njit, float64, boolean, int64, prange
 from numba.experimental import jitclass
 
-@njit(parallel = True)
+@njit
 def _get_batch(num_models, x_t, u_t):
     x_t_batch = np.empty((num_models, x_t.shape[0]), dtype=np.float64)
     u_t_batch = np.empty((num_models, u_t.shape[0]), dtype=np.float64)
     
-    for i in prange(num_models):
+    for i in range(num_models):
         x_t_batch[i, :] = x_t
         u_t_batch[i, :] = u_t
 
@@ -25,7 +25,7 @@ def _get_batch(num_models, x_t, u_t):
 def predict_states(history, integrator, dynamics_bank, diffeq, x_t, u_t):
     x_batch, u_batch = _get_batch(history.num_models, x_t, u_t)
     history.last_predicted_states = integrate_batch(
-        integrator, dynamics_bank, diffeq, x_batch, u_batch, 0, history.dt).T
+        integrator, dynamics_bank, diffeq, x_batch, u_batch, history.dt).T
 
 @njit
 def update_lookback_error(history, x_t):

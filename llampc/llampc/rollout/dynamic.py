@@ -1,52 +1,51 @@
 # integrate vehicle dynamics by 1 step
 import numpy as np
-from numba import njit, float64, boolean, int64
+from numba import njit, float64, boolean, int64, prange
 from numba.experimental import jitclass
 
 
-@njit
+@njit(fastmath=True, parallel=True)
 def diffequation(dynamic_bank, t, x_batch, u_batch):
     """	write dynamics as first order ODE: dxdt = f(x(t))
         x is a 6x1 vector: [x, y, psi, vx, vy, omega]^T
         u is a 2x1 vector: [acc/pwm, steer]^T
     """
     g = 9.81
-    steer = u_batch[:, 1]
+   
     psi = x_batch[:, 2]
     vx = x_batch[:, 3]
     vy = x_batch[:, 4]
     omega = x_batch[:, 5]
 
-    Ffy, Frx, Fry = _calc_forces(dynamic_bank, x_batch, u_batch)
+    acc = u_batch[:, 0]
+    steer = u_batch[:, 1]
+    dxdt = np.empty((dynamic_bank.num_models, 6))
 
-    dxdt = np.empty((vx.shape[0], 6))
-    dxdt[:, 0] = vx*np.cos(psi) - vy*np.sin(psi)
-    dxdt[:, 1] = vx*np.sin(psi) + vy*np.cos(psi)
-    dxdt[:, 2] = omega
-    dxdt[:, 3] = 1/dynamic_bank.mass * (Frx - Ffy*np.sin(steer)) + vy*omega - g * dynamic_bank.pitch
-    dxdt[:, 4] = 1/dynamic_bank.mass * (Fry + Ffy*np.cos(steer)) - vx*omega + g * dynamic_bank.roll
-    dxdt[:, 5] = 1/dynamic_bank.Iz * (Ffy*dynamic_bank.lf*np.cos(steer) - Fry*dynamic_bank.lr)
+    for i in prange(dynamic_bank.num_models):
+        Frx = dynamic_bank.mass * (acc[i] * dynamic_bank.Ce[i] - dynamic_bank.Cm[i] * vx[i] ) - dynamic_bank.Cro[i] - dynamic_bank.Cd[i] * (vx[i] * vx[i])
+        if(np.abs(vx[i]) < 1e-4):
+            alphaf =  0  
+        else:
+            alphaf = steer[i] - np.arctan2((dynamic_bank.lf*omega[i] + vy[i]), np.abs(vx[i]))
+
+        if(np.abs(vx[i]) < 1e-4):
+            alphar = 0 
+        else:
+            alphar = np.arctan2((dynamic_bank.lr*omega[i] - vy[i]), np.abs(vx[i]))
+
+        Ffy = dynamic_bank.Df[i] * np.sin(dynamic_bank.Cf[i] * np.arctan(dynamic_bank.Bf[i] * alphaf))
+        Fry = dynamic_bank.Dr[i] * np.sin(dynamic_bank.Cr[i] * np.arctan(dynamic_bank.Br[i] * alphar))
+
+        dxdt[i, 0] = vx[i]*np.cos(psi[i]) - vy[i]*np.sin(psi[i])
+        dxdt[i, 1] = vx[i]*np.sin(psi[i]) + vy[i]*np.cos(psi[i])
+        dxdt[i, 2] = omega[i]
+        dxdt[i, 3] = 1/dynamic_bank.mass * (Frx - Ffy*np.sin(steer[i])) + vy[i]*omega[i] - g * dynamic_bank.pitch
+        dxdt[i, 4] = 1/dynamic_bank.mass * (Fry + Ffy*np.cos(steer[i])) - vx[i]*omega[i] + g * dynamic_bank.roll
+        dxdt[i, 5] = 1/dynamic_bank.Iz * (Ffy*dynamic_bank.lf*np.cos(steer[i]) - Fry*dynamic_bank.lr)
     
     return dxdt
 
-@njit
-def _calc_forces(dynamic_bank, x_batch, u_batch):
-    acc = u_batch[:, 0]
-    steer = u_batch[:, 1]
-    psi = x_batch[:, 2]
-    vx = x_batch[:, 3]
-    vy = x_batch[:, 4]
-    omega = x_batch[:, 5]
 
-
-    Frx = dynamic_bank.mass * (acc * dynamic_bank.Ce - dynamic_bank.Cm * vx ) - dynamic_bank.Cro - dynamic_bank.Cd * (vx ** 2)
-
-    alphaf = np.where(np.abs(vx) < 1e-4, 0,  steer - np.arctan2((dynamic_bank.lf*omega + vy), abs(vx)))
-    alphar = np.where(np.abs(vx) < 1e-4, 0, np.arctan2((dynamic_bank.lr*omega - vy), abs(vx)))
-    Ffy = dynamic_bank.Df * np.sin(dynamic_bank.Cf * np.arctan(dynamic_bank.Bf * alphaf))
-    Fry = dynamic_bank.Dr * np.sin(dynamic_bank.Cr * np.arctan(dynamic_bank.Br * alphar))
-
-    return Ffy, Frx, Fry # each of these should end up being num_models long
         
 spec = [
     # Non-varying parameters
@@ -70,6 +69,8 @@ spec = [
     # Non-sampled state parameters
     ('roll', float64),
     ('pitch', float64),
+
+    ('num_models', int64),
 ]
 
 @jitclass(spec)
@@ -81,7 +82,9 @@ class DBMPacejkaBank():
                  Cf, Cr, 
                  Df, Dr, 
                  Cro, Cd,
-                 Ce, Cm):
+                 Ce, Cm, 
+                 num_models
+                 ):
         # non-varying parameters
         self.lf = lf
         self.lr = lr
@@ -103,6 +106,8 @@ class DBMPacejkaBank():
         # non-sampled state parameters
         self.roll = 0
         self.pitch = 0
+
+        self.num_models = num_models
 
 
     def set_roll_pitch(self, roll, pitch): 
