@@ -4,6 +4,7 @@
 __author__ = 'Achin Jain'
 __email__ = 'achinj@seas.upenn.edu'
 import numpy as np
+
 def F110_sim():
 	return {
 		'mu': 1.0489, 

@@ -6,10 +6,49 @@ __email__ = 'achinj@seas.upenn.edu'
 
 
 import numpy as np
+# from numba import njit, float64, boolean, int64, prange
+# from numba.experimental import jitclass
+
 import jax
-from jax import jit
 import jax.numpy as jnp
 from functools import partial
+
+# def _get_batch(num_models, x_t, u_t):
+#     x_t_batch = np.empty((num_models, x_t.shape[0]), dtype=np.float64)
+#     u_t_batch = np.empty((num_models, u_t.shape[0]), dtype=np.float64)
+    
+#     for i in range(num_models):
+#         x_t_batch[i, :] = x_t
+#         u_t_batch[i, :] = u_t
+
+#     return x_t_batch, u_t_batch
+
+# spec = [
+#     ('num_models', int64),          
+#     ('history_length', int64),       
+#     ('last_predicted_states', float64[:, :]), 
+#     ('running_cost', float64[:]),         
+#     ('cost_history', float64[:, :]),       
+#     ('queue_index', int64),
+#     ('dt', float64),                          
+#     ('cost_weights', float64[:]),  
+#     ('state_size', int64),                    
+# ]
+# @jitclass(spec)
+
+@jax.jit
+def get_lookback_error(last_predicted_states, x_t, running_cost, cost_history, cost_weights, queue_index):
+    running_cost = running_cost - cost_history[:, queue_index]
+    cost = jnp.sum(jnp.square(x_t[None, :] - last_predicted_states) * cost_weights[None, :], axis = 1)
+    cost_history = cost_history.at[:, queue_index].set(cost)
+
+    running_cost = running_cost + cost
+    
+    return cost_history, running_cost
+
+@jax.jit
+def find_best_model(running_cost):
+    return jnp.argmin(running_cost)
 
 
 
@@ -26,64 +65,54 @@ from functools import partial
 # @jitclass(spec)
 class LBHistory:
 
-    def __init__(self, num_models, history_length, dt, cost_weights, dynamics, integrator, state_size):
+    def __init__(self, num_models, history_length, dt, cost_weights, state_size, integrator_factory, dynamics_bank, diffeq):
         self.num_models = num_models
         self.history_length = history_length
-        self.last_predicted_states = np.zeros((state_size, self.num_models), dtype=np.float64)
-        self.running_cost = np.zeros(self.num_models, dtype=np.float64)
-        self.cost_history = np.zeros((self.num_models, self.history_length), dtype=np.float64)
+        self.last_predicted_states = jnp.zeros((self.num_models, state_size))
+        self.running_cost = jnp.zeros(self.num_models)
+        self.cost_history = jnp.zeros((self.num_models, self.history_length))
         self.queue_index = 0
         self.dt = dt
         self.cost_weights = cost_weights
-        self.dynamics = dynamics
-        self.integrator = integrator
         self.state_size = state_size
-
         
-        # self._get_batch = jit(self._get_batch, static_argnums=(0,))
+        self.dynamics_bank = dynamics_bank
+        self.integrator = integrator_factory(
+            dynamics_bank.param_bank,
+            diffeq
+        )
 
     def predict_states(self, x_t, u_t):
-        x_batch, u_batch = self._get_batch(x_t, u_t)
-        self.last_predicted_states = self._integrate_batch(x_batch, u_batch, 0, self.dt).T
-
-    # def update_lookback_error(self, x_t):
-    #     self.running_cost, self.cost_history= cost_update(
-    #         x_t, self.last_predicted_states, self.cost_history,
-    #         self.running_cost,self.cost_weights, self.queue_index)
+        """Batched version of _integrate"""
+        self.last_predicted_states = self.integrator(
+            self.dynamics_bank.get_known_params(),
+            x_t,
+            u_t,
+            self.dt)
         
-    #     self.queue_index = (self.queue_index + 1) % self.history_length
-
     def update_lookback_error(self, x_t):
-        self.running_cost -= self.cost_history[:, self.queue_index]
-
-        cost = np.sum(np.square(x_t[:, None] - self.last_predicted_states) * self.cost_weights[:, None], axis = 0)
-        self.cost_history[:, self.queue_index] = cost
-        self.running_cost += cost
+        self.cost_history, self.running_cost = get_lookback_error(
+            self.last_predicted_states,
+            x_t, 
+            self.running_cost,
+            self.cost_history,
+            self.cost_weights,
+            self.queue_index
+        )
         self.queue_index = (self.queue_index + 1) % self.history_length
+    
 
     def reset(self):
-        self.last_predicted_states = np.zeros((self.state_size, self.num_models), dtype=np.float64)
-        self.running_cost = np.zeros(self.num_models, dtype=np.float64)
-        self.cost_history = np.zeros((self.num_models, self.history_length), dtype=np.float64)
+        self.last_predicted_states = jnp.zeros((self.num_models, self.state_size))
+        self.running_cost = jnp.zeros(self.num_models)
+        self.cost_history = jnp.zeros((self.num_models, self.history_length))
         self.queue_index = 0
 
     def get_best_model(self):
-        return np.argmin(self.running_cost)
-    
-    
-    def _get_batch(self, x_t, u_t):
-        x_t_batch = np.tile(x_t[None, :], (self.num_models, 1))
-        u_t_batch = np.tile(u_t[None, :], (self.num_models, 1))
-        return x_t_batch, u_t_batch
-    
-    def _integrate_batch(self, x_t_batch, u_t_batch, t_start, t_end):
-        """Batched version of _integrate"""
-        odesol = self.integrator(
-            self.dynamics.diffequation,
-            x_t_batch,
-            jnp.array([t_start, t_end]),
-            u_t_batch,
-            self.dynamics.get_state_add()
-            )
-        return odesol[-1]
+        return find_best_model(self.running_cost)
 
+           
+    
+    
+    
+    

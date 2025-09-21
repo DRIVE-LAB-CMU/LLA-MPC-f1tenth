@@ -1,12 +1,173 @@
 # integrate vehicle dynamics by 1 step
-import numpy as np
 
+from numba import njit, float64, boolean, int64
+from numba.experimental import jitclass
 import jax
-from jax import jit, lax
 import jax.numpy as jnp
+@jax.jit
+def _accl_constraints(bank_params, known_params, vel, accl):
+    lf, lr, m, I, h, v_switch, a_max, v_min, v_max, s_min, s_max, sv_min, sv_max = known_params
+    C_Sf, C_Sr, mu = bank_params
+
+    pos_limit = jnp.where(vel > v_switch, a_max * v_switch / vel, a_max)
+
+    def stop_case(): return 0.0
+    def decel_case(): return -a_max
+    def accel_case(): return pos_limit
+    def nominal(): return accl
+
+    # Ordered condition checks
+    return jax.lax.cond(
+        ((vel <= v_min) & (accl <= 0)) | ((vel >= v_max) & (accl >= 0)),
+        stop_case,
+        lambda: jax.lax.cond(
+            accl <= -a_max,
+            decel_case,
+            lambda: jax.lax.cond(
+                accl >= pos_limit,
+                accel_case,
+                nominal
+            )
+        )
+    )
 
 
+@jax.jit
+def _steering_constraint(bank_params, known_params, steering_angle, steering_velocity):
+    lf, lr, m, I, h, v_switch, a_max, v_min, v_max, s_min, s_max, sv_min, sv_max = known_params
+    C_Sf, C_Sr, mu = bank_params
 
+    def stop_case(): return 0.0
+    def too_negative_case(): return sv_min
+    def too_positive_case(): return sv_max
+    def nominal(): return steering_velocity
+
+    return jax.lax.cond(
+        ((steering_angle <= s_min) & (steering_velocity <= 0)) |
+        ((steering_angle >= s_max) & (steering_velocity >= 0)),
+        stop_case,
+        lambda: jax.lax.cond(
+            steering_velocity <= sv_min,
+            too_negative_case,
+            lambda: jax.lax.cond(
+                steering_velocity >= sv_max,
+                too_positive_case,
+                nominal
+            )
+        )
+    )
+
+@jax.jit
+def diffequation(bank_params, known_params, x_batch, u_batch):
+    """	write dynamics as first order ODE: dxdt = f(x(t))
+        x is a 6x1 vector: [x, y, psi, vx, slip, omega, steer]^T
+        u is a 2x1 vector: [acc/pwm, steer_rate]^T
+    """
+    g = 9.81
+    psi = x_batch[ 2]
+    vx = x_batch[ 3]
+    slip =  x_batch[ 4]
+    omega = x_batch[ 5]
+    steer = x_batch[ 6]
+    
+    
+    acc = u_batch[0]
+    steer_rate = u_batch[1]
+
+    lf, lr, m, I, h, v_switch, a_max, v_min, v_max, s_min, s_max, sv_min, sv_max = known_params
+    C_Sf, C_Sr, mu = bank_params
+
+    acc= _accl_constraints(
+        bank_params,
+        known_params,
+        vel=vx,
+        accl=acc
+    )
+
+    steer_rate = _steering_constraint(
+        bank_params, 
+        known_params,
+        steering_angle=steer,
+        steering_velocity=steer_rate
+    )
+
+    base = (lr + lf)
+
+    def low_speed(_):
+        return jnp.stack([
+            vx * jnp.cos(psi),  # x
+            vx * jnp.sin(psi),  # y
+            acc / base * jnp.tan(steer),  # psi
+            acc,  # vx
+            0.0,  # slip = 0
+            (acc / base) * jnp.tan(steer) + vx / (base * jnp.square(jnp.cos(steer))) * steer_rate,  # omega
+            steer_rate  # steer
+        ])
+
+    def high_speed(_):
+        slip_term = (
+            mu / (vx**2 * base) *
+            (C_Sr * (g * lf + acc * h) * lr -
+             C_Sf * (g * lr - acc * h) * lf)
+            - 1
+        ) * omega \
+        - mu / (vx * base) * (
+            C_Sr * (g * lf + acc * h) +
+            C_Sf * (g * lr - acc * h)
+        ) * slip \
+        + mu / (vx * base) * (
+            C_Sf * (g * lr - acc * h)
+        ) * steer
+
+        omega_term = -mu * m / (vx * I * base) * (
+            lf**2 * C_Sf * (g * lr - acc * h) +
+            lr**2 * C_Sr * (g * lf + acc * h)
+        ) * omega \
+        + mu * m / (I * base) * (
+            lr * C_Sr * (g * lf + acc * h) -
+            lf * C_Sf * (g * lr - acc * h)
+        ) * slip \
+        + mu * m / (I * base) * lf * C_Sf * (
+            g * lr - acc * h
+        ) * steer
+
+        return jnp.stack([
+            vx * jnp.cos(psi + slip),  # x
+            vx * jnp.sin(psi + slip),  # y
+            omega,  # psi
+            acc,  # vx
+            slip_term,  # slip
+            omega_term,  # omega
+            steer_rate  # steer
+        ])
+
+    return jax.lax.cond(jnp.abs(vx) < 0.5, low_speed, high_speed, operand=None)
+
+
+# spec = [
+#     # Non-varying scalar parameters
+#     ('lf', float64),
+#     ('lr', float64),
+#     ('m', float64),
+#     ('I', float64),
+#     ('h', float64),
+#     ('v_switch', float64),
+#     ('a_max', float64),
+#     ('v_min', float64),
+#     ('v_max', float64),
+#     ('s_min', float64),
+#     ('s_max', float64),
+#     ('sv_min', float64),
+#     ('sv_max', float64),
+
+#     # Varying parameters (arrays)
+#     ('C_Sf', float64[:]),
+#     ('C_Sr', float64[:]),
+#     ('mu', float64[:]),
+
+#     ('num_models', int64),
+# ]
+# @jitclass(spec)
 class DynamicSimBank():
     def __init__(self, 
                  lf, lr, 
@@ -15,7 +176,9 @@ class DynamicSimBank():
                  a_max, v_min, v_max,
                  s_min, s_max, 
                  sv_min, sv_max,
-                 param_dict
+                 C_Sf,
+                 C_Sr, mu,
+                 num_models
                  ):
         # non-varying parameters
         self.lf = lf
@@ -33,152 +196,44 @@ class DynamicSimBank():
         self.sv_max = sv_max
 
         #varying parameters
-        
-        # varying parameters
-        for key, value in param_dict.items():
-            setattr(self, key, value)
+        self.C_Sf = C_Sf
+        self.C_Sr = C_Sr
+        self.mu = mu
 
-        # self.accl_constraints = jit(self._accl_constraints, static_argnums=(0,))
-        # self.steering_constraint = jit(self._steering_constraint, static_argnums=(0,))
-        # self.diffequation = jit(self.diffequation, static_argnums=(0,))
+        self.num_models = num_models
+
+        self.param_bank = jnp.stack([
+            self.C_Sf, self.C_Sr, self.mu
+        ], axis=1)
+
+        # super().__init__(num_mod`     els, history_length, dt, cost_weights, state_size = 7, sim = True)
 
     def get_model_params_arr(self, index):
-        return np.array([
+        return jnp.array([
             self.C_Sf[index],
             self.C_Sr[index],
             self.mu[index]
         ])
     
-    def _accl_constraints(self, vel, accl_batch):
-        """
-        Batched acceleration constraints.
-
-        Args:
-            vel (jnp.ndarray): (N,) current velocities
-            accl_batch (jnp.ndarray): (N,) unconstrained desired accelerations
-            v_switch (float): switching velocity
-            a_max (float): maximum allowed acceleration
-            v_min (float): minimum allowed velocity
-            v_max (float): maximum allowed velocity
-
-        Returns:
-            jnp.ndarray: (N,) constrained accelerations
-        """
-        pos_limit = jnp.where(vel > self.v_switch, self.a_max * self.v_switch / vel, self.a_max)
-
-        # Conditions
-        stop_condition = ((vel <= self.v_min) & (accl_batch <= 0)) | ((vel >= self.v_max) & (accl_batch >= 0))
-        max_decel = accl_batch <= -self.a_max
-        max_accel = accl_batch >= pos_limit
-
-        # Start with unconstrained
-        constrained_accl = accl_batch
-
-        constrained_accl = jnp.where(stop_condition, 0.0, constrained_accl)
-        constrained_accl = jnp.where(max_decel, -self.a_max, constrained_accl)
-        constrained_accl = jnp.where(max_accel, pos_limit, constrained_accl)
-
-        return constrained_accl
+    def get_known_params(self):
+        return jnp.array([
+            self.lf,
+            self.lr,
+            self.m,
+            self.I,
+            self.h,
+            self.v_switch,
+            self.a_max,
+            self.v_min,
+            self.v_max,
+            self.s_min,
+            self.s_max,
+            self.sv_min,
+            self.sv_max,
+        ])
 
 
-    def _steering_constraint(self, steering_angle, steering_velocity):
-        """
-        Batched steering velocity constraints.
-
-        Args:
-            steering_angle (jnp.ndarray): (N,) current steering angles
-            steering_velocity (jnp.ndarray): (N,) desired steering velocities
-            s_min (float): min steering angle
-            s_max (float): max steering angle
-            sv_min (float): min steering velocity
-            sv_max (float): max steering velocity
-
-        Returns:
-            jnp.ndarray: (N,) constrained steering velocities
-        """
-
-        # Conditions
-        stop_condition = ((steering_angle <= self.s_min) & (steering_velocity <= 0)) | \
-                        ((steering_angle >= self.s_max) & (steering_velocity >= 0))
-        too_negative = steering_velocity <= self.sv_min
-        too_positive = steering_velocity >= self.sv_max
-
-        constrained_sv = steering_velocity
-        constrained_sv = jnp.where(stop_condition, 0.0, constrained_sv)
-        constrained_sv = jnp.where(too_negative, self.sv_min, constrained_sv)
-        constrained_sv = jnp.where(too_positive, self.sv_max, constrained_sv)
-
-        return constrained_sv
-
-    def get_state_add(self):
-        return None
-
-    def diffequation(self, t, x_batch, u_batch, state_add):
-        """	write dynamics as first order ODE: dxdt = f(x(t))
-            x is a 6x1 vector: [x, y, psi, vx, slip, omega, steer]^T
-            u is a 2x1 vector: [acc/pwm, steer_rate]^T
-        """
-
-        psi = x_batch[:, 2]
-        vx = x_batch[:, 3]
-        slip =  x_batch[:, 4]
-        omega = x_batch[:, 5]
-        steer = x_batch[:, 6]
-        
-        
-        acc = u_batch[:, 0]
-        steer_rate = u_batch[:, 1]
-
-        acc= self._accl_constraints(
-            vel=vx,
-            accl_batch=acc
-        )
-
-        steer_rate = self._steering_constraint(
-            steering_angle=steer,
-            steering_velocity=steer_rate
-        )
-
-        base = (self.lr + self.lf)
-
-        def low_speed(_):
-            dxdt = jnp.stack([
-                vx * jnp.cos(psi),  # x
-                vx * jnp.sin(psi),  # y
-                acc / base * jnp.tan(steer),  # psi
-                acc, # vx
-                jnp.zeros_like(vx), # slip = 0
-                (acc / base) * jnp.tan(steer) + vx / (base * jnp.square(jnp.cos(steer))) * steer_rate,  # omega
-                steer_rate  # steer
-            ], axis=1)
-            return dxdt
-
-        def high_speed(_):
-            g = 9.81
-            base = self.lr + self.lf
-            dxdt = jnp.stack([
-                vx * jnp.cos(psi + slip),   # x
-                vx * jnp.sin(psi + slip),   # y
-                omega,                      # psi
-                acc,                        # vx
-                (self.mu/(vx**2 * base) * (self.C_Sr*(g*self.lf + acc*self.h)*self.lr - self.C_Sf*(g*self.lr - acc*self.h)*self.lf) - 1) * omega \
-                - self.mu/(vx * base) * (self.C_Sr*(g*self.lf + acc*self.h) + self.C_Sf*(g*self.lr - acc*self.h)) * slip \
-                + self.mu/(vx * base) * (self.C_Sf*(g*self.lr - acc*self.h)) * steer,   # slip
-                -self.mu * self.m / (vx * self.I * base) * (self.lf**2 * self.C_Sf * (g * self.lr - acc * self.h) + self.lr**2 * self.C_Sr * (g * self.lf + acc * self.h)) * omega \
-                + self.mu * self.m / (self.I * base) * (self.lr * self.C_Sr * (g * self.lf + acc * self.h) - self.lf * self.C_Sf * (g * self.lr - acc * self.h)) * slip \
-                + self.mu * self.m / (self.I * base) * self.lf * self.C_Sf * (g * self.lr - acc * self.h) * steer,   # omega
-                steer_rate                  # steer
-            ], axis=1)
-            return dxdt
-
-
-        dxdt = lax.cond(jnp.abs(vx[0]) < 0.5, low_speed, high_speed, operand=None)
-
-        return dxdt
-
-
-   
-
+    
     # def calc_forces(self, x_batch, u_batch, return_slip=False):
     #     acc = u_batch[:, 0]
     #     steer = u_batch[:, 1]

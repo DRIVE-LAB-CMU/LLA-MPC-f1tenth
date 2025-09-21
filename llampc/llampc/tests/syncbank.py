@@ -1,7 +1,10 @@
-from llampc.rollout import odeintRK4_batch
-from llampc.rollout import DynamicSimBank, LBHistory
 from llampc.params import F110_sim, get_param_dict
-from . import syncbank
+
+import llampc.rollout.history as history
+import llampc.rollout.dynamic_sim as dynamics_sim
+import llampc.rollout.dynamic as dynamics
+from llampc.rollout.rk6 import rk4Factory
+
 
 
 import numpy as np
@@ -11,7 +14,7 @@ import numpy as np
 class SynchronousBank():
     def __init__(self, env_timestep, sim_car):
         self.params_car = F110_sim()
-        cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0, 0])
+        cost_weights = np.array([1.0, 1.0,1.0, 1.0, 1.0, 1.0, 1.0])
         self.car = sim_car
 
         mean_dict = {
@@ -33,9 +36,10 @@ class SynchronousBank():
         # }
 
         num_models = 200
-        param_dict = get_param_dict(mean_dict, variation_dict, num_models, ground_truth = True)
+        self.param_dict = get_param_dict(mean_dict, variation_dict, num_models, ground_truth = True)
 
-        self.dynamics_bank = DynamicSimBank(
+
+        self.dynamics_bank = dynamics_sim.DynamicSimBank(
             self.params_car['lf'], self.params_car['lr'],
             self.params_car['m'], self.params_car['I'],
             self.params_car["h"], self.params_car['v_switch'],
@@ -43,38 +47,51 @@ class SynchronousBank():
             self.params_car['v_max'], self.params_car['s_min'],
             self.params_car['s_max'], self.params_car['sv_min'],
             self.params_car['sv_max'],
-            param_dict
+            self.param_dict['C_Sf'], self.param_dict['C_Sr'],
+            self.param_dict['mu'], num_models
         )
-        self.history = LBHistory(
-            num_models, 20, env_timestep, cost_weights, self.dynamics_bank, odeintRK4_batch, 7
+        self.lb_history = history.LBHistory(
+            num_models, 20, env_timestep, cost_weights, 7,
+            rk4Factory, self.dynamics_bank, dynamics_sim.diffequation
         )
-
-
         self.current_state = np.empty(7)
         self.update_state()
 
         self.steer_buffer = np.empty((0, ))
         self.steer_buffer_size = 2
 
+        # self.lb_history.predict_states(
+        #      np.zeros(7), np.zeros(2)
+        #     )
+        # self.lb_history.update_lookback_error(
+        #     self.history, np.zeros(7)
+        # )
+        # self.lb_history.get_best_model()
+        # self.lb_history.reset()
+
 
     def get_selected_model_params(self, index):
         return self.dynamics_bank.get_model_params_arr(index)
     
     def get_selected_model_index(self):
-        return self.history.get_best_model()
+        return self.lb_history.get_best_model()
     
     def predict_states(self, controls):
-        self.history.predict_states(self.current_state, controls)
+        self.lb_history.predict_states(
+            self.current_state, controls
+            )
     
     def update_state_and_error(self):
         self.update_state()
-        self.history.update_lookback_error(self.get_state())
+        self.lb_history.update_lookback_error(
+            self.current_state
+        )
 
     def get_error_statistics(self):
-        return self.history.running_cost, self.history.cost_history
+        return self.lb_history.running_cost, self.lb_history.cost_history
     
     def get_predicted_states(self):
-        return self.history.last_predicted_states
+        return self.lb_history.last_predicted_states
 
     def get_state(self):
         return self.current_state
