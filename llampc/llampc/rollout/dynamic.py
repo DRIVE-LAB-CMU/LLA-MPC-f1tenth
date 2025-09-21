@@ -1,79 +1,81 @@
 # integrate vehicle dynamics by 1 step
 import numpy as np
-from numba import njit, float64, boolean, int64, prange
-from numba.experimental import jitclass
+# from numba import njit, float64, boolean, int64
+# from numba.experimental import jitclass
+
+import jax
+import jax.numpy as jnp
+from functools import partial
 
 
-@njit(fastmath=True, parallel=True)
-def diffequation(dynamic_bank, t, x_batch, u_batch):
+# @njit(parallel=True)
+# @njit(fastmath=True)
+
+
+
+@jax.jit
+def diffequation(
+    bank_params, known_params,x, u):
     """	write dynamics as first order ODE: dxdt = f(x(t))
         x is a 6x1 vector: [x, y, psi, vx, vy, omega]^T
         u is a 2x1 vector: [acc/pwm, steer]^T
     """
     g = 9.81
-   
-    psi = x_batch[:, 2]
-    vx = x_batch[:, 3]
-    vy = x_batch[:, 4]
-    omega = x_batch[:, 5]
+    steer = u[1]
+    psi = x[2]
+    vx = x[3]
+    vy = x[4]
+    omega = x[5]
 
-    acc = u_batch[:, 0]
-    steer = u_batch[:, 1]
-    dxdt = np.empty((dynamic_bank.num_models, 6))
+    mass, Iz, lf, lr, pitch, roll = known_params
+    Ffy, Frx, Fry = _calc_forces(bank_params, known_params, x, u)
 
-    for i in prange(dynamic_bank.num_models):
-        Frx = dynamic_bank.mass * (acc[i] * dynamic_bank.Ce[i] - dynamic_bank.Cm[i] * vx[i] ) - dynamic_bank.Cro[i] - dynamic_bank.Cd[i] * (vx[i] * vx[i])
-        if(np.abs(vx[i]) < 1e-4):
-            alphaf =  0  
-        else:
-            alphaf = steer[i] - np.arctan2((dynamic_bank.lf*omega[i] + vy[i]), np.abs(vx[i]))
-
-        if(np.abs(vx[i]) < 1e-4):
-            alphar = 0 
-        else:
-            alphar = np.arctan2((dynamic_bank.lr*omega[i] - vy[i]), np.abs(vx[i]))
-
-        Ffy = dynamic_bank.Df[i] * np.sin(dynamic_bank.Cf[i] * np.arctan(dynamic_bank.Bf[i] * alphaf))
-        Fry = dynamic_bank.Dr[i] * np.sin(dynamic_bank.Cr[i] * np.arctan(dynamic_bank.Br[i] * alphar))
-
-        dxdt[i, 0] = vx[i]*np.cos(psi[i]) - vy[i]*np.sin(psi[i])
-        dxdt[i, 1] = vx[i]*np.sin(psi[i]) + vy[i]*np.cos(psi[i])
-        dxdt[i, 2] = omega[i]
-        dxdt[i, 3] = 1/dynamic_bank.mass * (Frx - Ffy*np.sin(steer[i])) + vy[i]*omega[i] - g * dynamic_bank.pitch
-        dxdt[i, 4] = 1/dynamic_bank.mass * (Fry + Ffy*np.cos(steer[i])) - vx[i]*omega[i] + g * dynamic_bank.roll
-        dxdt[i, 5] = 1/dynamic_bank.Iz * (Ffy*dynamic_bank.lf*np.cos(steer[i]) - Fry*dynamic_bank.lr)
+    return jnp.array([
+        vx*jnp.cos(psi) - vy*jnp.sin(psi),
+        vx*jnp.sin(psi) + vy*jnp.cos(psi),
+        omega,
+        1/mass * (Frx - Ffy*jnp.sin(steer)) + vy*omega - g * pitch,
+        1/mass * (Fry + Ffy*jnp.cos(steer)) - vx*omega + g * roll,
+        1/Iz * (Ffy* lf*jnp.cos(steer) - Fry * lr)
+    ])
     
-    return dxdt
 
+@jax.jit
+def _calc_forces(bank_params, known_params, x, u):
+    acc = u[0]
+    steer = u[1]
+    psi = x[2]
+    vx = x[3]
+    vy = x[4]
+    omega = x[5]
 
+    Bf, Br, Cf, Cr, Df, Dr, Cro, Cd, Ce, Cm = bank_params
+    mass, Iz, lf, lr, pitch, roll =  known_params
+
+    Frx = mass * (acc * Ce - Cm * vx ) - Cro - Cd * (vx * vx)
+    def small_velocity_case(_):
+        alphaf = 0.0
+        alphar = 0.0
+        return alphaf, alphar
+
+    def normal_case(_):
+        alphaf = steer - jnp.arctan2((lf * omega + vy), jnp.abs(vx))
+        alphar = jnp.arctan2((lr * omega - vy), jnp.abs(vx))
+        return alphaf, alphar
+
+    alphaf, alphar = jax.lax.cond(
+        jnp.abs(vx) < 1e-4,
+        small_velocity_case,
+        normal_case,
+        operand=None  # no additional input needed
+    )
+
+    Ffy = Df * jnp.sin(Cf * jnp.arctan(Bf * alphaf))
+    Fry = Dr * jnp.sin(Cr * jnp.arctan(Br * alphar))
+
+    return Ffy, Frx, Fry # each of these should end up being num_models long
         
-spec = [
-    # Non-varying parameters
-    ('lf', float64),
-    ('lr', float64),
-    ('mass', float64),
-    ('Iz', float64),
-
-    # Varying parameters (as arrays)
-    ('Bf', float64[:]),
-    ('Br', float64[:]),
-    ('Cf', float64[:]),
-    ('Cr', float64[:]),
-    ('Df', float64[:]),
-    ('Dr', float64[:]),
-    ('Cro', float64[:]),
-    ('Cd', float64[:]),
-    ('Ce', float64[:]),
-    ('Cm', float64[:]),
-
-    # Non-sampled state parameters
-    ('roll', float64),
-    ('pitch', float64),
-
-    ('num_models', int64),
-]
-
-@jitclass(spec)
+# @jitclass(spec)
 class DBMPacejkaBank():
     def __init__(self, 
                  lf, lr, 
@@ -109,12 +111,23 @@ class DBMPacejkaBank():
 
         self.num_models = num_models
 
+        self.param_bank = jnp.stack([
+            self.Bf, self.Br, self.Cf, self.Cr, self.Df, self.Dr,
+            self.Cro, self.Cd, self.Ce, self.Cm
+        ], axis=1)
+
 
     def set_roll_pitch(self, roll, pitch): 
         # non-sampled state parameters (i.e. state parameters not differentiated)
         # are updated here, as they are not given to diffiequation via x_batch
         self.roll = roll
         self.pitch = pitch
+
+    def get_known_params(self):
+        return jnp.array([self.mass, self.Iz, self.lf, self.lr, self.pitch, self.roll])
+
+    def get_bank_params(self):
+        return self.param_bank
 
     def get_model_params_arr(self, index):
         return np.array([

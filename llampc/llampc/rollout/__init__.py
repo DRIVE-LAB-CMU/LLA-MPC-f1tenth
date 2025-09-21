@@ -1,3 +1,3 @@
-from llampc.rollout.rk6 import integrate_batch, odeintRK4_batch
+from llampc.rollout.rk6 import rk4Factory
 
 # needs fixing

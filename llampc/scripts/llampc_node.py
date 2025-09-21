@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-import numba
 import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.time import Time
+
+import os
+# os.environ["XLA_FLAGS"] = "--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=8"
+import jax
 
 from llampc.nmpc_gen import setup_mpc
 from llampc.params import F110, F110_sim, get_param_dict
@@ -13,7 +16,7 @@ from llampc.utils import Track
 import llampc.rollout.history as history
 import llampc.rollout.dynamic_sim as dynamics_sim
 import llampc.rollout.dynamic as dynamics
-from llampc.rollout.rk6 import odeintRK4_batch, integrate_batch
+from llampc.rollout.rk6 import rk4Factory
 
 
 from nav_msgs.msg import Odometry, Path
@@ -23,13 +26,14 @@ from std_msgs.msg import Float64MultiArray
 
 import time
 
+
 class MPCNode(Node):
     def __init__(self):
         super().__init__('mpc_node')
 
         self.get_logger().info("Initializing")
 
-        self.sim = False
+        self.sim = True
 
         self.declare_params()
         self.initialize_mpc()
@@ -101,7 +105,7 @@ class MPCNode(Node):
         self.N = 20 #steps (from nmpc)
         self.Tf = 1.0 # total time horizon (from nmpc)
         self.dt = self.Tf / self.N
-        self.params_car = F110()
+        # self.params_car = F110()
         
 
     def initialize_mpc(self):
@@ -164,11 +168,10 @@ class MPCNode(Node):
 
             cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
             
-            num_models = 2000
+            num_models = 20000
             state_size = 6
             param_dict = get_param_dict(mean_dict, variation_dict, num_models)
 
-            self.diffeq = dynamics.diffequation
             self.dynamics_bank = dynamics.DBMPacejkaBank(
                 params_car['lf'], params_car['lr'], 
                 params_car['mass'], params_car['Iz'], 
@@ -179,11 +182,11 @@ class MPCNode(Node):
                 param_dict['Ce'], param_dict['Cm'],
                 num_models
             )
-            self.integrator = odeintRK4_batch
             self.lb_history = history.LBHistory(
-                num_models, 2,
+                num_models, 10,
                 0.2, cost_weights,
-                state_size
+                state_size, rk4Factory,
+                self.dynamics_bank, dynamics.diffequation
             )
         else:
             params_car = F110_sim()
@@ -210,8 +213,9 @@ class MPCNode(Node):
             num_models = 10
             state_size = 7
 
+            # print(self.params_car)
+
             param_dict = get_param_dict(mean_dict, variation_dict, num_models)
-            self.diffeq = dynamics_sim.diffequation
             self.dynamics_bank = dynamics_sim.DynamicSimBank(
                 params_car['lf'], params_car['lr'],
                 params_car['m'], params_car['I'],
@@ -220,15 +224,12 @@ class MPCNode(Node):
                 params_car['v_max'], params_car['s_min'],
                 params_car['s_max'], params_car['sv_min'],
                 params_car['sv_max'],
-                param_dict['C_Sf'], param_dict['C_Sr'],
-                param_dict['mu'], num_models
-            )
-            self.integrator = odeintRK4_batch
-
+                    param_dict['C_Sf'], param_dict['C_Sr'],
+                    param_dict['mu'],num_models
+                )
             self.lb_history = history.LBHistory(
-                num_models, 2,
-                0.2, cost_weights,
-                state_size
+                num_models, 20, 0.2, cost_weights, 7,
+                rk4Factory, self.dynamics_bank, dynamics_sim.diffequation
             )
 
 
@@ -236,12 +237,11 @@ class MPCNode(Node):
         self.solver = setup_mpc(self.N, self.Tf, build=True)
         self.get_logger().info("SOLVER COMPILED, WARM STARTING")
         
-        history.predict_states(
-            self.lb_history, self.integrator, self.dynamics_bank, 
-            self.diffeq, np.zeros(state_size), np.zeros(2)
+        self.lb_history.predict_states(
+            np.zeros(state_size), np.zeros(2)
             )
-        history.update_lookback_error(
-            self.lb_history, np.zeros(state_size)
+        self.lb_history.update_lookback_error(
+            np.zeros(state_size)
         )
         self.lb_history.get_best_model()
         self.lb_history.reset()
@@ -286,12 +286,11 @@ class MPCNode(Node):
             return
         
         if not self.sim:
-            history.update_lookback_error(
-                self.lb_history, self.current_state
+            self.lb_history.update_lookback_error(
+                self.current_state
             )
         else:
-            history.update_lookback_error(
-                self.lb_history,
+            self.lb_history.update_lookback_error(
                 np.array(
                     [
                         self.current_state[0],
@@ -386,7 +385,7 @@ class MPCNode(Node):
             predicted_states.append(x_pred)
 
         self.publish_predicted_trajectory(predicted_states) # Publish predicted trajectory
-        self.checkpoint[5] = time.perf_counter_ns()
+        
 
 
         
@@ -395,10 +394,12 @@ class MPCNode(Node):
             self.apply_control(u_opt) # Apply control
             if not self.sim:
                 #version for our dynamics
-                history.predict_states(
-                    self.lb_history, self.integrator, self.dynamics_bank, 
-                    self.diffeq, self.current_state, u_opt
+                self.checkpoint[5] = time.perf_counter_ns()
+                self.lb_history.predict_states(
+                    self.current_state, u_opt
                 )
+                self.checkpoint[6] = time.perf_counter_ns()
+
                 # self.l = []
                 # for i in range(0, 10):
                 #     self.l.append(np.array(self.solver.get(i, "x")[:]))
@@ -412,9 +413,7 @@ class MPCNode(Node):
             else:
                 # print(self.solver.get(0, "u"))
                 steer_v = self.solver.get(0, "u")[1]
-                history.predict_states(
-                    self.lb_history, self.integrator, self.dynamics_bank, 
-                    self.diffeq, 
+                self.lb_history.predict_states(
                     np.array(
                         [
                             self.current_state[0],
@@ -430,17 +429,16 @@ class MPCNode(Node):
                 )
 
 
-            self.checkpoint[6] = time.perf_counter_ns()
-
+            
             self.count = (self.count + 1) % self.time_window
             self.time_history[:self.checkpoints-1, self.count] = np.array(self.checkpoint[1:]-self.checkpoint[:-1])
-            self.time_history[-1, self.count] = self.checkpoint[-1] - self.checkpoint[0]
+            self.time_history[-1, self.count] = (self.checkpoint[-1] - self.checkpoint[0])
         
             if(self.count == 0):
-                # print(self.lb_history.running_cost)
-                # if not self.sim:
-                #     print(selected_model_index)
-                print(np.max(self.time_history*10e-6, axis = 1))
+                print(self.lb_history.running_cost)
+                if not self.sim:
+                    print(selected_model_index)
+                # print(np.max(self.time_history*1e-6, axis = 1))
         else:
             self.apply_control([0, 0]) # Brake
             self.get_logger().warn(f"MPC solver failed with status: {status}")
