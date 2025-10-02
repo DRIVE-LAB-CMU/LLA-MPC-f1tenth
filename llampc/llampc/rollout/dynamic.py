@@ -94,8 +94,20 @@ class DBMPacejkaBank():
         self.Iz = Iz
 
         # varying parameters
-        for key, value in param_dict.items():
-            setattr(self, key, value)
+        self.Bf = Bf
+        self.Br = Br
+        self.Cf = Cf
+        self.Cr = Cr
+        self.Df = Df
+        self.Dr = Dr
+        self.Cro = Cro
+        self.Cd = Cd
+        self.Ce = Ce
+        self.Cm = Cm
+        self.num_models = num_models
+
+        self.pitch = 0
+        self.roll = 0
 
         # non-sampled state parameters
 

@@ -37,14 +37,14 @@ from functools import partial
 # @jitclass(spec)
 
 @jax.jit
-def get_lookback_error(last_predicted_states, x_t, running_cost, cost_history, cost_weights, queue_index):
-    running_cost = running_cost - cost_history[:, queue_index]
+def get_lookback_error(last_predicted_states, x_t, cost_weights, queue_index):
+    # running_cost = running_cost - cost_history[:, queue_index]
+    # cost = jnp.sum(jnp.square(x_t[None, :] - last_predicted_states) * cost_weights[None, :], axis = 1)
+    # cost_history = cost_history.at[:, queue_index].set(cost)
+    # running_cost = running_cost + cost
     cost = jnp.sum(jnp.square(x_t[None, :] - last_predicted_states) * cost_weights[None, :], axis = 1)
-    cost_history = cost_history.at[:, queue_index].set(cost)
 
-    running_cost = running_cost + cost
-    
-    return cost_history, running_cost
+    return cost
 
 @jax.jit
 def find_best_model(running_cost):
@@ -68,12 +68,12 @@ class LBHistory:
     def __init__(self, num_models, history_length, dt, cost_weights, state_size, integrator_factory, dynamics_bank, diffeq):
         self.num_models = num_models
         self.history_length = history_length
-        self.last_predicted_states = jnp.zeros((self.num_models, state_size))
-        self.running_cost = jnp.zeros(self.num_models)
-        self.cost_history = jnp.zeros((self.num_models, self.history_length))
+        self.last_predicted_states = jnp.zeros((self.num_models, state_size), dtype='float16')
+        self.running_cost = np.zeros(self.num_models, dtype='float16')
+        self.cost_history = np.zeros((self.num_models, self.history_length), dtype='float16')
         self.queue_index = 0
         self.dt = dt
-        self.cost_weights = cost_weights
+        self.cost_weights = jnp.array(cost_weights)
         self.state_size = state_size
         
         self.dynamics_bank = dynamics_bank
@@ -91,21 +91,22 @@ class LBHistory:
             self.dt)
         
     def update_lookback_error(self, x_t):
-        self.cost_history, self.running_cost = get_lookback_error(
+        self.running_cost -= self.cost_history[:, self.queue_index]
+        cost = np.array(get_lookback_error(
             self.last_predicted_states,
             x_t, 
-            self.running_cost,
-            self.cost_history,
             self.cost_weights,
             self.queue_index
-        )
+        ))
+        self.cost_history[:, self.queue_index] = cost
+        self.running_cost += cost
         self.queue_index = (self.queue_index + 1) % self.history_length
     
 
     def reset(self):
         self.last_predicted_states = jnp.zeros((self.num_models, self.state_size))
-        self.running_cost = jnp.zeros(self.num_models)
-        self.cost_history = jnp.zeros((self.num_models, self.history_length))
+        self.running_cost = np.zeros(self.num_models)
+        self.cost_history = np.zeros((self.num_models, self.history_length))
         self.queue_index = 0
 
     def get_best_model(self):
