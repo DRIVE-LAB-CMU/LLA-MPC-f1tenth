@@ -400,7 +400,7 @@ class MPCNode(Node):
                 x_pred = self.solver.get(i, "x")[:3]
                 predicted_states.append(x_pred)
 
-        self.publish_predicted_trajectory(predicted_states) # Publish predicted trajectory
+            self.publish_predicted_trajectory(predicted_states) # Publish predicted trajectory
         
 
 
