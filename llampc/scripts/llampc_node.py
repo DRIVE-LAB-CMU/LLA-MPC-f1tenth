@@ -33,8 +33,8 @@ class MPCNode(Node):
 
         self.get_logger().info("Initializing")
 
-        self.sim = True
-        self.publish_trajectories = False
+        self.sim = False
+        self.publish_trajectories = False 
 
         self.declare_params()
         self.initialize_mpc()
@@ -171,7 +171,7 @@ class MPCNode(Node):
 
             cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
             
-            num_models = 20000
+            num_models = 6500
             state_size = 6
             param_dict = get_param_dict(mean_dict, variation_dict, num_models)
 
@@ -185,8 +185,10 @@ class MPCNode(Node):
                 param_dict['Ce'], param_dict['Cm'],
                 num_models
             )
+            
+            history_length=100
             self.lb_history = history.LBHistory(
-                num_models, 10,
+                num_models, history_length,
                 0.2, cost_weights,
                 state_size, rk4Factory,
                 self.dynamics_bank, dynamics.diffequation
@@ -332,7 +334,7 @@ class MPCNode(Node):
 
         
 
-        self.publish_ref_trajectory(ref_segment)
+        # self.publish_ref_trajectory(ref_segment)
         # print(f"segment: {ref_segment}")
 
         self.checkpoint[2] = time.perf_counter_ns()
@@ -400,7 +402,7 @@ class MPCNode(Node):
                 x_pred = self.solver.get(i, "x")[:3]
                 predicted_states.append(x_pred)
 
-        self.publish_predicted_trajectory(predicted_states) # Publish predicted trajectory
+            self.publish_predicted_trajectory(predicted_states) # Publish predicted trajectory
         
 
 
@@ -451,10 +453,10 @@ class MPCNode(Node):
             self.time_history[-1, self.count] = (self.checkpoint[-1] - self.checkpoint[0])
         
             if(self.count == 0):
-                print(self.lb_history.running_cost)
-                if not self.sim:
-                    print(selected_model_index)
-                # print(np.max(self.time_history*1e-6, axis = 1))
+                # print(self.lb_history.running_cost)
+                # if not self.sim:
+                #     print(selected_model_index)
+                print(np.max(self.time_history*1e-6, axis = 1))
         else:
             self.apply_control([0, 0]) # Brake
             self.get_logger().warn(f"MPC solver failed with status: {status}")
