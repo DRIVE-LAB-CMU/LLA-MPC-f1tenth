@@ -92,7 +92,7 @@ class MPCNode(Node):
             10
         )
 
-        self.control_timer = self.create_timer(self.dt, self.control_callback) # run 100 hz
+        self.control_timer = self.create_timer(self.control_callback_speed, self.control_callback) # run 100 hz
 
 
         self.get_logger().info("F1tenth MPC Initialized")
@@ -100,25 +100,18 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'pure_pursuit.npz')
+        self.declare_parameter('track_file_name', 'drivelab.npz')
         self.declare_parameter('odom_topic', '/ego_racecar/odom')
 
-        self.N = 20 #steps (from nmpc)
-        self.Tf = 1.0 # total time horizon (from nmpc)
+        self.N = 20 #steps (for nmpc)
+        self.Tf = 1.0 # total time horizon (for nmpc)
         self.dt = self.Tf / self.N
+        self.control_callback_speed = 0.04
+        self.lla_predict_horizon = 0.04
         # self.params_car = F110()
         
 
     def initialize_mpc(self):
-        # solver_config = self.get_parameter('solver_config').get_parameter_value().string_value
-        # json_file = self.get_parameter('json_file').get_parameter_value().string_value
-
-        # self.solver = setup_mpc_from_json(
-        #     json_file=json_file,
-        #     solver_config=solver_config,
-        #     params_car=F110
-        # )
-
         variation_dict = None
         mean_dict = None
         
@@ -141,19 +134,6 @@ class MPCNode(Node):
                 'Ce': 0.15,  # 15% variation
                 'Cm': 0.15,  # 15% variation
             }
-
-            # variation_dict = {
-            #     'Bf': 0,
-            #     'Br': 0,
-            #     'Cf': 0,
-            #     'Cr': 0,
-            #     'Df': 0,
-            #     'Dr': 0,
-            #     'Cro': 0,
-            #     'Cd': 0,
-            #     'Ce': 0,
-            #     'Cm': 0,
-            # }
 
             mean_dict = {
                 'Bf': 15.0,
@@ -189,7 +169,7 @@ class MPCNode(Node):
             history_length=100
             self.lb_history = history.LBHistory(
                 num_models, history_length,
-                0.2, cost_weights,
+                self.lla_predict_horizon, cost_weights,
                 state_size, rk4Factory,
                 self.dynamics_bank, dynamics.diffequation
             )
@@ -495,8 +475,6 @@ class MPCNode(Node):
         drive_msg.drive.speed = desired_speed
         drive_msg.drive.steering_angle = steer
 
-        # print(f"SPEED: {desired_speed}")
-        # print(f"STEER: {steer}")
 
         self.cmd_pub.publish(drive_msg) 
 
