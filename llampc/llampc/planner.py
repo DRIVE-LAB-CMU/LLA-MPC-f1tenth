@@ -47,8 +47,7 @@ def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., cu
 
 		if dist >= track.spline.s[-1] - eps: # NOT WRAPPING
 			dist = track.spline.s[-1] - eps
-			last_pos = track.spline.calc_position(dist)
-			xref[:2, idh:] = np.tile(track.spline.calc_position(last_pos).reshape(2, 1), (1, N - idh + 1))
+			xref[:2, idh:] = np.tile(track.spline.calc_position(dist).reshape(2, 1), (1, N - idh + 1))
 			break
 		# dist = dist % track.spline.s[-1] WRAPPING
 
