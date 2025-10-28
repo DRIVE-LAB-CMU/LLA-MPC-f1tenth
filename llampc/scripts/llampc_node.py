@@ -34,7 +34,7 @@ class MPCNode(Node):
         self.get_logger().info("Initializing")
 
         self.sim = False
-        self.publish_trajectories = False 
+        self.publish_trajectories = True
 
         self.declare_params()
         self.initialize_mpc()
@@ -166,7 +166,7 @@ class MPCNode(Node):
                 num_models
             )
             
-            history_length=100
+            history_length=25
             self.lb_history = history.LBHistory(
                 num_models, history_length,
                 self.lla_predict_horizon, cost_weights,
@@ -313,8 +313,8 @@ class MPCNode(Node):
         self.projidx = idx
 
         
-
-        # self.publish_ref_trajectory(ref_segment)
+        if self.publish_trajectories:
+            self.publish_ref_trajectory(ref_segment)
         # print(f"segment: {ref_segment}")
 
         self.checkpoint[2] = time.perf_counter_ns()
