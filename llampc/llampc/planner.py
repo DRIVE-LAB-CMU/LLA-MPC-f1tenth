@@ -39,16 +39,20 @@ def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., cu
 	dist0 = np.sum(np.linalg.norm(np.diff(start), 2, axis=0))
 	dist = dist0
 	v = max(v0,.01)
+	eps = 1e-6
 	# vr = 0.
 	for idh in range(1,N+1):
 		dist += scale*v*Ts
 
 
-		if dist >= track.spline.s[-1]: # NOT WRAPPING
-			dist = track.spline.s[-1]
-			xref[:2, idh:] = np.tile(track.spline.calc_position(track.spline.s[-1]).reshape(2, 1), (1, N - idh + 1))
+		if dist >= track.spline.s[-1] - eps: # NOT WRAPPING
+			dist = track.spline.s[-1] - eps
+			last_pos = track.spline.calc_position(dist)
+			xref[:2, idh:] = np.tile(track.spline.calc_position(last_pos).reshape(2, 1), (1, N - idh + 1))
 			break
 		# dist = dist % track.spline.s[-1] WRAPPING
+
+		
 
 
 
