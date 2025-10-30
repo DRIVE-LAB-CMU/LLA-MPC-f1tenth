@@ -38,22 +38,19 @@ def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., cu
     # when loading the raceline
 	dist0 = np.sum(np.linalg.norm(np.diff(start), 2, axis=0))
 	dist = dist0
-	v = max(v0,.01)
-	eps = 1e-6
+	v = max(v0,.1)
 	# vr = 0.
+	eps=1e-4
 	for idh in range(1,N+1):
 		dist += scale*v*Ts
 
 
 		if dist >= track.spline.s[-1] - eps: # NOT WRAPPING
-			dist = track.spline.s[-1] - eps
-			xref[:2, idh:] = np.tile(track.spline.calc_position(dist), (1, N - idh + 1)).reshape(2, -1)
+			for i in range (0, N+1-idh, -1):
+				dist = track.spline.s[-1] - eps * (N+1-idh-i)
+				xref[:2, idh+i:] = track.spline.calc_position(dist)
 			break
-		# dist = dist % track.spline.s[-1] WRAPPING
-
-		
-
-
+		dist = dist % track.spline.s[-1] #WRAPPING
 
 
 		# print(dist)
