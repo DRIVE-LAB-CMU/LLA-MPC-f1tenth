@@ -104,15 +104,16 @@ def create_ocp(model, params_car, steps, horizon):
     # w_accel = 0.001
     # w_jerk = 0
     # w_steer_v = 0
+    
 
-    w_x = 20
-    w_y = 20
+    w_x = 2.0
+    w_y = 2.0
     w_xe = 0
     w_ye = 0
-    w_steer = 0.5
-    w_accel = 0.001
-    w_jerk = .01
-    w_steer_v = 0.005
+    w_steer = 0.05
+    w_accel = 0.01
+    w_jerk = .0001
+    w_steer_v = 0.01
     Q_flat = [w_x, w_y, 0.0, 0.0, 0.0, 0.0]
     R_flat = [w_accel, w_steer]
     Rd_flat = [w_jerk, w_steer_v]
