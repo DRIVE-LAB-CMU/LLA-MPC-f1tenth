@@ -53,6 +53,7 @@ ament_python_install_package(${PROJECT_NAME})
 # Install Python executables
 install(PROGRAMS
   scripts/llampc_node.py
+  scripts/particle_filter_init.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
