@@ -13,35 +13,9 @@ import jax
 import jax.numpy as jnp
 from functools import partial
 
-# def _get_batch(num_models, x_t, u_t):
-#     x_t_batch = np.empty((num_models, x_t.shape[0]), dtype=np.float64)
-#     u_t_batch = np.empty((num_models, u_t.shape[0]), dtype=np.float64)
-    
-#     for i in range(num_models):
-#         x_t_batch[i, :] = x_t
-#         u_t_batch[i, :] = u_t
-
-#     return x_t_batch, u_t_batch
-
-# spec = [
-#     ('num_models', int64),          
-#     ('history_length', int64),       
-#     ('last_predicted_states', float64[:, :]), 
-#     ('running_cost', float64[:]),         
-#     ('cost_history', float64[:, :]),       
-#     ('queue_index', int64),
-#     ('dt', float64),                          
-#     ('cost_weights', float64[:]),  
-#     ('state_size', int64),                    
-# ]
-# @jitclass(spec)
 
 @jax.jit
 def get_lookback_error(last_predicted_states, x_t, cost_weights, queue_index):
-    # running_cost = running_cost - cost_history[:, queue_index]
-    # cost = jnp.sum(jnp.square(x_t[None, :] - last_predicted_states) * cost_weights[None, :], axis = 1)
-    # cost_history = cost_history.at[:, queue_index].set(cost)
-    # running_cost = running_cost + cost
     cost = jnp.sum(jnp.square(x_t[None, :] - last_predicted_states) * cost_weights[None, :], axis = 1)
 
     return cost
@@ -51,18 +25,6 @@ def find_best_model(running_cost):
     return jnp.argmin(running_cost)
 
 
-
-# def cost_update(x_t, last_predicted_states, cost_history, running_cost, cost_weights, queue_index):
-#     running_cost = running_cost - cost_history[:, queue_index]
-
-#     diff = x_t[:, None] - last_predicted_states
-#     cost = jnp.sum(jnp.square(diff) * cost_weights[:, None], axis=0)
-#     cost_history = cost_history.at[:, queue_index].set(cost)
-#     running_cost = running_cost + cost
-
-#     return running_cost, cost_history
-# cost_update = jit(cost_update)
-# @jitclass(spec)
 class LBHistory:
 
     def __init__(self, num_models, history_length, dt, cost_weights, state_size, integrator_factory, dynamics_bank, diffeq):

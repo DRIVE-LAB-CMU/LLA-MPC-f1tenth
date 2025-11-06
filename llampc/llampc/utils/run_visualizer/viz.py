@@ -1,0 +1,357 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.widgets import Slider, Button
+from matplotlib.patches import FancyArrow
+import os
+
+
+class StateVisualizer:
+    """Interactive visualizer for state trajectory data."""
+    
+    def __init__(self, filepath, n_params_to_show=None, params_per_column=3, param_names=None):
+        self.n_params_to_show = n_params_to_show
+        self.params_per_column = params_per_column
+        self.param_names = param_names
+        self.load_data(filepath)
+        self.setup_figure()
+        self.current_frame = 0
+        self.playing = False
+        self.setup_artists()
+        self.setup_controls()
+        
+    def load_data(self, filepath):
+        """Load trajectory data from npz file."""
+        data = np.load(filepath, allow_pickle=True)
+        self.time = data["time"]
+        state = data["state"]
+        self.x = state[:, 0]
+        self.y = state[:, 1]
+        self.theta = state[:, 2]
+        self.dx = state[:, 3]
+        self.dy = state[:, 4]
+        self.omega = state[:, 5]
+        self.n_frames = len(self.x)
+
+        # params could be either:
+        # - shape (n_timesteps, n_params) - need to transpose
+        # - list of arrays where each is length n_timesteps
+        params_raw = data["params"]
+        
+        # Check if it's a 2D array that needs transposing
+        if isinstance(params_raw, np.ndarray) and params_raw.ndim == 2:
+            # If first dimension matches time, transpose to get params as rows
+            if params_raw.shape[0] == len(self.time):
+                # Shape is (n_timesteps, n_params), transpose to (n_params, n_timesteps)
+                self.params = [params_raw[:, i] for i in range(params_raw.shape[1])]
+            else:
+                # Shape is already (n_params, n_timesteps)
+                self.params = [params_raw[i, :] for i in range(params_raw.shape[0])]
+        else:
+            # It's already a list or 1D structure
+            self.params = list(params_raw)
+        
+        self.model_idx = data["model_index"]
+        ctrl = data["ctrl"]
+        self.accel = ctrl[:, 0]
+        self.steer = ctrl[:, 1]
+        
+        # Determine how many parameters to show
+        if self.n_params_to_show is None:
+            self.n_params_to_show = len(self.params)
+        else:
+            self.n_params_to_show = min(self.n_params_to_show, len(self.params))
+        
+    def setup_figure(self):
+        """Create figure with appropriate layout."""
+        # Calculate grid layout for parameters
+        n_param_cols = int(np.ceil(self.n_params_to_show / self.params_per_column))
+        n_param_rows = min(self.params_per_column, self.n_params_to_show)
+        
+        self.fig = plt.figure(figsize=(8 + n_param_cols * 4, max(8, 3 + n_param_rows * 1.8)))
+        
+        # Create grid: left side for trajectory + info, right side for parameters
+        gs = self.fig.add_gridspec(
+            n_param_rows, 1 + n_param_cols, 
+            left=0.08, right=0.96, bottom=0.15, top=0.95,
+            wspace=0.35, hspace=0.4, 
+            width_ratios=[1.8] + [1] * n_param_cols
+        )
+        
+        # Trajectory plot (left side, spans all rows)
+        self.ax = self.fig.add_subplot(gs[:, 0])
+        
+        # Set axis properties for trajectory
+        margin = max(1.0, 0.1 * max(self.x.ptp(), self.y.ptp()))
+        self.ax.set_xlim(self.x.min() - margin, self.x.max() + margin)
+        self.ax.set_ylim(self.y.min() - margin, self.y.max() + margin)
+        self.ax.set_xlabel('X Position', fontsize=10)
+        self.ax.set_ylabel('Y Position', fontsize=10)
+        self.ax.set_aspect('equal', adjustable='box')
+        self.ax.grid(True, alpha=0.3)
+        self.ax.set_title('Trajectory', fontsize=12, fontweight='bold')
+        
+        # Parameter plots (right side, arranged in columns)
+        self.ax_params = []
+        for idx in range(self.n_params_to_show):
+            col = idx // self.params_per_column
+            row = idx % self.params_per_column
+            ax_p = self.fig.add_subplot(gs[row, col + 1])
+            self.ax_params.append(ax_p)
+            
+            # Get parameter name
+            if self.param_names and idx in self.param_names:
+                param_label = self.param_names[idx]
+            else:
+                param_label = f'Param {idx}'
+            
+            ax_p.set_xlabel('Time (s)', fontsize=9)
+            ax_p.set_ylabel(param_label, fontsize=9)
+            ax_p.grid(True, alpha=0.3)
+            ax_p.tick_params(labelsize=8)
+            
+            # Plot this parameter time series
+            param_data = self.params[idx]
+            ax_p.plot(self.time, param_data, 'b-', linewidth=1.5, alpha=0.8)
+            ax_p.set_xlim(self.time[0], self.time[-1])
+            
+            # Add some margin to y-axis
+            param_range = param_data.ptp()
+            if param_range > 0:
+                margin = 0.1 * param_range
+                ax_p.set_ylim(param_data.min() - margin, param_data.max() + margin)
+            else:
+                ax_p.set_ylim(param_data.min() - 0.1, param_data.max() + 0.1)
+        
+    def setup_artists(self):
+        """Initialize plot elements."""
+        # Trajectory trail
+        self.trail, = self.ax.plot([], [], 'b-', alpha=0.3, linewidth=1, label='Trajectory')
+        
+        # Current position
+        self.point, = self.ax.plot([], [], 'ko', markersize=10, label='Position', zorder=5)
+        
+        # Direction/velocity arrows
+        self.x_vel_arrow = None
+        self.y_vel_arrow = None
+        self.accel_arrow = None
+        
+        # Create legend
+        from matplotlib.patches import Patch
+        legend_elements = [
+            Patch(facecolor='blue', alpha=0.7, label='X Velocity'),
+            Patch(facecolor='green', alpha=0.7, label='Y Velocity'),
+            Patch(facecolor='red', alpha=0.7, label='Acceleration')
+        ]
+        self.ax.legend(handles=legend_elements, loc='upper right', fontsize=8)
+        
+        # Info text will be added to figure, not axes
+        self.info_text = self.fig.text(
+            0.01, 0.99, '', verticalalignment='top',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.9),
+            fontsize=9, family='monospace'
+        )
+        
+        # Vertical lines on parameter plots to show current time
+        self.param_vlines = []
+        self.param_points = []
+        for idx, ax_p in enumerate(self.ax_params):
+            vline = ax_p.axvline(x=0, color='red', linestyle='--', 
+                                linewidth=1.5, alpha=0.7, zorder=3)
+            self.param_vlines.append(vline)
+            
+            point, = ax_p.plot([], [], 'ro', markersize=6, zorder=4)
+            self.param_points.append(point)
+        
+    def setup_controls(self):
+        """Create interactive controls."""
+        # Adjust button positions based on figure height
+        bottom_margin = 0.08
+        
+        # Frame slider
+        ax_slider = plt.axes([0.2, bottom_margin + 0.02, 0.6, 0.02])
+        self.slider = Slider(
+            ax_slider, 'Frame', 0, self.n_frames - 1,
+            valinit=0, valstep=1, valfmt='%d'
+        )
+        self.slider.on_changed(self.on_slider_change)
+        
+        # Play/Pause button
+        ax_play = plt.axes([0.25, bottom_margin - 0.03, 0.08, 0.03])
+        self.btn_play = Button(ax_play, 'Play')
+        self.btn_play.on_clicked(self.toggle_play)
+        
+        # Reset button
+        ax_reset = plt.axes([0.35, bottom_margin - 0.03, 0.08, 0.03])
+        self.btn_reset = Button(ax_reset, 'Reset')
+        self.btn_reset.on_clicked(self.reset)
+        
+        # Speed slider
+        ax_speed = plt.axes([0.46, bottom_margin - 0.03, 0.2, 0.02])
+        self.speed_slider = Slider(
+            ax_speed, 'Speed', 1, 50,
+            valinit=10, valstep=1
+        )
+        
+        # Animation timer
+        self.timer = self.fig.canvas.new_timer(interval=50)
+        self.timer.add_callback(self.animate_step)
+        
+    def update_frame(self, frame_idx):
+        """Update visualization for given frame."""
+        frame_idx = int(frame_idx)
+        self.current_frame = frame_idx
+        
+        # Update trail (show trajectory up to current point)
+        self.trail.set_data(self.x[:frame_idx+1], self.y[:frame_idx+1])
+        
+        # Update position marker
+        self.point.set_data([self.x[frame_idx]], [self.y[frame_idx]])
+        
+        # Remove old arrows
+        if self.x_vel_arrow and self.x_vel_arrow in self.ax.patches:
+            self.x_vel_arrow.remove()
+        if self.y_vel_arrow and self.y_vel_arrow in self.ax.patches:
+            self.y_vel_arrow.remove()
+        if self.accel_arrow and self.accel_arrow in self.ax.patches:
+            self.accel_arrow.remove()
+            
+        # Draw x velocity arrow (longitudinal)
+        dx_arrow = self.dx[frame_idx] * np.cos(self.theta[frame_idx])
+        dy_arrow = self.dx[frame_idx] * np.sin(self.theta[frame_idx])
+        if abs(self.dx[frame_idx]) > 0.01:
+            self.x_vel_arrow = FancyArrow(
+                self.x[frame_idx], self.y[frame_idx],
+                dx_arrow, dy_arrow,
+                head_width=0.15, head_length=0.1,
+                fc='blue', ec='blue', alpha=0.7, zorder=3
+            )
+            self.ax.add_patch(self.x_vel_arrow)
+        
+        # Draw y velocity arrow (lateral)
+        if abs(self.dy[frame_idx]) > 0.01:
+            self.y_vel_arrow = FancyArrow(
+                self.x[frame_idx], self.y[frame_idx],
+                self.dy[frame_idx] * -np.sin(self.theta[frame_idx]),
+                self.dy[frame_idx] * np.cos(self.theta[frame_idx]),
+                head_width=0.1, head_length=0.08,
+                fc='green', ec='green', alpha=0.7, zorder=3
+            )
+            self.ax.add_patch(self.y_vel_arrow)
+
+        # Draw acceleration arrow
+        if abs(self.accel[frame_idx]) > 0.01:
+            self.accel_arrow = FancyArrow(
+                self.x[frame_idx], self.y[frame_idx],
+                self.accel[frame_idx] * np.cos(self.theta[frame_idx]),
+                self.accel[frame_idx] * np.sin(self.theta[frame_idx]),
+                head_width=0.1, head_length=0.08,
+                fc='red', ec='red', alpha=0.7, zorder=3
+            )
+            self.ax.add_patch(self.accel_arrow)
+        
+        # Update info text
+        time_str = f"Time: {self.time[frame_idx]:.3f}s"
+        info = (f"Frame: {frame_idx}/{self.n_frames-1}\n{time_str}\n"
+                f"θ: {self.theta[frame_idx]:.3f} rad\n"
+                f"vx: {self.dx[frame_idx]:.3f} m/s\n"
+                f"vy: {self.dy[frame_idx]:.3f} m/s\n"
+                f"ω: {self.omega[frame_idx]:.3f} rad/s\n"
+                f"accel: {self.accel[frame_idx]:.3f}\n"
+                f"steer: {self.steer[frame_idx]:.3f}\n"
+                f"Model: {self.model_idx[frame_idx]}")
+        self.info_text.set_text(info)
+        
+        # Update parameter plots
+        current_time = self.time[frame_idx]
+        
+        # Remove old vertical lines safely
+        for vline in self.param_vlines:
+            if vline in vline.axes.lines:
+                vline.remove()
+        self.param_vlines = []
+        
+        for idx, (ax_p, point) in enumerate(zip(self.ax_params, self.param_points)):
+            # Create new vertical line
+            vline = ax_p.axvline(x=current_time, color='red', linestyle='--', 
+                                linewidth=1.5, alpha=0.7, zorder=3)
+            self.param_vlines.append(vline)
+            
+            # Update point
+            param_val = self.params[idx][frame_idx]
+            point.set_data([current_time], [param_val])
+        
+        self.fig.canvas.draw_idle()
+        
+    def on_slider_change(self, val):
+        """Handle slider value change."""
+        self.update_frame(val)
+        
+    def toggle_play(self, event):
+        """Toggle animation playback."""
+        self.playing = not self.playing
+        if self.playing:
+            self.btn_play.label.set_text('Pause')
+            self.timer.start()
+        else:
+            self.btn_play.label.set_text('Play')
+            self.timer.stop()
+            
+    def animate_step(self):
+        """Advance one frame in animation."""
+        if self.playing:
+            next_frame = self.current_frame + 1
+            if next_frame >= self.n_frames:
+                next_frame = 0  # Loop back to start
+            self.slider.set_val(next_frame)
+            
+            # Adjust timer interval based on speed slider
+            interval = int(1000 / self.speed_slider.val)
+            self.timer.interval = interval
+            
+    def reset(self, event):
+        """Reset to first frame."""
+        self.playing = False
+        self.btn_play.label.set_text('Play')
+        self.timer.stop()
+        self.slider.set_val(0)
+        
+    def show(self):
+        """Display the visualization."""
+        self.update_frame(0)
+        plt.show()
+
+
+def main():
+    """Main entry point."""
+    dir_path = os.path.dirname(os.path.abspath(__file__))
+    filepath = os.path.join(dir_path, 'out.npz')
+    
+    # Optional: Define parameter names
+    param_names = {
+        0: 'Bf',
+        1: 'Br',
+        2: 'Cf',
+        3: 'Cr',
+        4: 'Df',
+        5: 'Dr',
+        6: 'Cro',
+        7: 'Cd',
+        8: 'Ce',
+        9: 'Cm',
+    }
+    
+    # Create visualizer
+    # n_params_to_show: number of parameters to display (None = all)
+    # params_per_column: how many parameter plots per column
+    # param_names: optional dict mapping parameter index to name
+    visualizer = StateVisualizer(
+        filepath, 
+        n_params_to_show=10, 
+        params_per_column=5,
+        param_names=param_names  # Set to None to use default "Param 0", "Param 1", etc.
+    )
+    visualizer.show()
+
+
+if __name__ == "__main__":
+    main()

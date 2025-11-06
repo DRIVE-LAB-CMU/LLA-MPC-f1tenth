@@ -142,14 +142,5 @@ class DBMPacejkaBank():
             self.Cm[index]
         ])
 
-    
 
-    
-    # def integrate_batch(self, x_t_batch, u_t_batch, t_start, t_end):
-    #     """Batched version of _integrate"""
-
-    #     odesol = self.odeintRK4_batch(x_t_batch, np.array([t_start, t_end]), u_t_batch)
-    #     return odesol[-1]
-    
-    
     
