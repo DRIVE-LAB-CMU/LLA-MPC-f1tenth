@@ -14,8 +14,7 @@ from functools import partial
 
 
 @jax.jit
-def diffequation(
-    bank_params, known_params,x, u):
+def diffequation(bank_params, known_params,x, u):
     """	write dynamics as first order ODE: dxdt = f(x(t))
         x is a 6x1 vector: [x, y, psi, vx, vy, omega]^T
         u is a 2x1 vector: [acc/pwm, steer]^T
@@ -27,7 +26,8 @@ def diffequation(
     vy = x[4]
     omega = x[5]
 
-    mass, Iz, lf, lr, roll, pitch = known_params
+    Df, Dr, roll, pitch = bank_params
+    mass, Iz, lf, lr, Bf, Br, Cf, Cr, Cro, Cd, Ce, Cm =  known_params
     Ffy, Frx, Fry = _calc_forces(bank_params, known_params, x, u)
 
     return jnp.array([
@@ -49,8 +49,8 @@ def _calc_forces(bank_params, known_params, x, u):
     vy = x[4]
     omega = x[5]
 
-    Bf, Br, Cf, Cr, Df, Dr, Cro, Cd, Ce, Cm = bank_params
-    mass, Iz, lf, lr, roll, pitch =  known_params
+    Df, Dr, roll, pitch = bank_params
+    mass, Iz, lf, lr, Bf, Br, Cf, Cr, Cro, Cd, Ce, Cm =  known_params
 
     Frx = mass * (acc * Ce - Cm * vx ) - Cro - Cd * (vx * vx)
     def small_velocity_case(_):
@@ -76,7 +76,7 @@ def _calc_forces(bank_params, known_params, x, u):
     return Ffy, Frx, Fry # each of these should end up being num_models long
         
 # @jitclass(spec)
-class DBMPacejkaBank():
+class DBMPacejkaBankRP():
     def __init__(self, 
                  lf, lr, 
                  mass, Iz, 
@@ -85,7 +85,7 @@ class DBMPacejkaBank():
                  Df, Dr, 
                  Cro, Cd,
                  Ce, Cm, 
-                 roll, pitch, 
+                 roll, pitch,
                  num_models
                  ):
         # non-varying parameters
@@ -99,24 +99,23 @@ class DBMPacejkaBank():
         self.Br = Br
         self.Cf = Cf
         self.Cr = Cr
-        self.Df = Df
-        self.Dr = Dr
+        self.Df = Df # array
+        self.Dr = Dr # array
         self.Cro = Cro
         self.Cd = Cd
         self.Ce = Ce
         self.Cm = Cm
         self.num_models = num_models
 
-        self.pitch = pitch
         self.roll = roll
+        self.pitch = pitch
 
         # non-sampled state parameters
 
         self.num_models = num_models
 
         self.param_bank = jnp.stack([
-            self.Bf, self.Br, self.Cf, self.Cr, self.Df, self.Dr,
-            self.Cro, self.Cd, self.Ce, self.Cm
+            self.Df, self.Dr, self.roll, self.pitch
         ], axis=1)
 
 
@@ -124,25 +123,28 @@ class DBMPacejkaBank():
         # self._calc_forces = jit(self._calc_forces, static_argnums=(0,))
 
     def get_known_params(self):
-        return jnp.array([self.mass, self.Iz, self.lf, self.lr, self.roll, self.pitch])
+        return jnp.array([self.mass, self.Iz, self.lf, self.lr, 
+                          self.Bf, self.Br, self.Cf, self.Cr,
+                          self.Cro, self.Cd, self.Ce, self.Cm 
+                          ])
 
     def get_bank_params(self):
         return self.param_bank
 
     def get_model_params_arr(self, index):
         return np.array([
-            self.Bf[index],
-            self.Br[index],
-            self.Cf[index],
-            self.Cr[index],
+            self.Bf,
+            self.Br,
+            self.Cf,
+            self.Cr,
             self.Df[index],
             self.Dr[index],
-            self.Cro[index],
-            self.Cd[index],
-            self.Ce[index],
-            self.Cm[index],
-            self.roll,
-            self.pitch
+            self.Cro,
+            self.Cd,
+            self.Ce,
+            self.Cm,
+            self.roll[index],
+            self.pitch[index]
         ])
 
 

@@ -82,7 +82,7 @@ def F110():
 def get_param_dict(mean_dict, variation_dict, num_models, ground_truth = False):
 	param_dict = {}
 	for key in variation_dict.keys():
-		param_dict[key] = mean_dict[key] * (np.random.uniform(-variation_dict[key], variation_dict[key], num_models) + 1)
+		param_dict[key] = mean_dict[key] + (np.random.uniform(-variation_dict[key], variation_dict[key], num_models))
 	
 	if ground_truth:
 		for key in variation_dict.keys():

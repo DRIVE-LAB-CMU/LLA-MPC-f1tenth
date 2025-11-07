@@ -57,15 +57,13 @@ class StateVisualizer:
         
         # Determine how many parameters to show
         if self.n_params_to_show is None:
-            self.n_params_to_show = len(self.params)
-        else:
-            self.n_params_to_show = min(self.n_params_to_show, len(self.params))
+            self.n_params_to_show = [x for x in range(len(self.params))]
         
     def setup_figure(self):
         """Create figure with appropriate layout."""
         # Calculate grid layout for parameters
-        n_param_cols = int(np.ceil(self.n_params_to_show / self.params_per_column))
-        n_param_rows = min(self.params_per_column, self.n_params_to_show)
+        n_param_cols = int(np.ceil(len(self.n_params_to_show)/ self.params_per_column))
+        n_param_rows = min(self.params_per_column, len(self.n_params_to_show))
         
         self.fig = plt.figure(figsize=(8 + n_param_cols * 4, max(8, 3 + n_param_rows * 1.8)))
         
@@ -92,12 +90,13 @@ class StateVisualizer:
         
         # Parameter plots (right side, arranged in columns)
         self.ax_params = []
-        for idx in range(self.n_params_to_show):
-            col = idx // self.params_per_column
-            row = idx % self.params_per_column
+        for count in range(len(self.n_params_to_show)):
+            col = count // self.params_per_column
+            row = count % self.params_per_column
             ax_p = self.fig.add_subplot(gs[row, col + 1])
             self.ax_params.append(ax_p)
             
+            idx = self.n_params_to_show[count]
             # Get parameter name
             if self.param_names and idx in self.param_names:
                 param_label = self.param_names[idx]
@@ -188,13 +187,26 @@ class StateVisualizer:
         # Speed slider
         ax_speed = plt.axes([0.46, bottom_margin - 0.03, 0.2, 0.02])
         self.speed_slider = Slider(
-            ax_speed, 'Speed', 1, 50,
-            valinit=10, valstep=1
+            ax_speed, 'Speed', 50, 1000,
+            valinit=200, valstep=50
         )
+
+        self.speed_slider.on_changed(self.on_speed_change)
         
         # Animation timer
         self.timer = self.fig.canvas.new_timer(interval=50)
         self.timer.add_callback(self.animate_step)
+
+    def on_speed_change(self, val):
+        """Update playback speed dynamically."""
+        if self.playing:
+            # Stop and restart timer with new interval
+            interval = int(1000 / val)
+            self.timer.stop()
+            self.timer = self.fig.canvas.new_timer(interval=interval)
+            self.timer.add_callback(self.animate_step)
+            self.timer.start()
+
         
     def update_frame(self, frame_idx):
         """Update visualization for given frame."""
@@ -324,7 +336,7 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'out.npz')
+    filepath = os.path.join(dir_path, 'out7.npz')
     
     # Optional: Define parameter names
     param_names = {
@@ -338,6 +350,8 @@ def main():
         7: 'Cd',
         8: 'Ce',
         9: 'Cm',
+        10: 'Roll',
+        11: 'Pitch'
     }
     
     # Create visualizer
@@ -346,8 +360,8 @@ def main():
     # param_names: optional dict mapping parameter index to name
     visualizer = StateVisualizer(
         filepath, 
-        n_params_to_show=10, 
-        params_per_column=5,
+        n_params_to_show=range(12), 
+        params_per_column=6,
         param_names=param_names  # Set to None to use default "Param 0", "Param 1", etc.
     )
     visualizer.show()

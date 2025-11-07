@@ -27,7 +27,8 @@ def diffequation(
     vy = x[4]
     omega = x[5]
 
-    mass, Iz, lf, lr, roll, pitch = known_params
+    mass, Iz, lf, lr = known_params
+    Bf, Br, Cf, Cr, Df, Dr, Cro, Cd, Ce, Cm, pitch, roll = bank_params
     Ffy, Frx, Fry = _calc_forces(bank_params, known_params, x, u)
 
     return jnp.array([
@@ -49,8 +50,8 @@ def _calc_forces(bank_params, known_params, x, u):
     vy = x[4]
     omega = x[5]
 
-    Bf, Br, Cf, Cr, Df, Dr, Cro, Cd, Ce, Cm = bank_params
-    mass, Iz, lf, lr, roll, pitch =  known_params
+    Bf, Br, Cf, Cr, Df, Dr, Cro, Cd, Ce, Cm, roll, pitch = bank_params
+    mass, Iz, lf, lr =  known_params
 
     Frx = mass * (acc * Ce - Cm * vx ) - Cro - Cd * (vx * vx)
     def small_velocity_case(_):
@@ -85,7 +86,7 @@ class DBMPacejkaBank():
                  Df, Dr, 
                  Cro, Cd,
                  Ce, Cm, 
-                 roll, pitch, 
+                 roll, pitch,
                  num_models
                  ):
         # non-varying parameters
@@ -107,16 +108,15 @@ class DBMPacejkaBank():
         self.Cm = Cm
         self.num_models = num_models
 
-        self.pitch = pitch
         self.roll = roll
-
+        self.pitch = pitch
+        
         # non-sampled state parameters
-
         self.num_models = num_models
 
         self.param_bank = jnp.stack([
             self.Bf, self.Br, self.Cf, self.Cr, self.Df, self.Dr,
-            self.Cro, self.Cd, self.Ce, self.Cm
+            self.Cro, self.Cd, self.Ce, self.Cm, self.roll, self.pitch
         ], axis=1)
 
 
@@ -124,7 +124,7 @@ class DBMPacejkaBank():
         # self._calc_forces = jit(self._calc_forces, static_argnums=(0,))
 
     def get_known_params(self):
-        return jnp.array([self.mass, self.Iz, self.lf, self.lr, self.roll, self.pitch])
+        return jnp.array([self.mass, self.Iz, self.lf, self.lr])
 
     def get_bank_params(self):
         return self.param_bank
@@ -141,8 +141,8 @@ class DBMPacejkaBank():
             self.Cd[index],
             self.Ce[index],
             self.Cm[index],
-            self.roll,
-            self.pitch
+            self.roll[index],
+            self.pitch[index]
         ])
 
 
