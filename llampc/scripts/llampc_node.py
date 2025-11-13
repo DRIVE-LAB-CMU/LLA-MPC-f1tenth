@@ -36,7 +36,7 @@ class MPCNode(Node):
         self.get_logger().info("Initializing")
 
         self.sim = False
-        self.lla_type = "full"
+        self.lla_type = "rp"
         self.publish_trajectories = True
         self.log_data = True
 
