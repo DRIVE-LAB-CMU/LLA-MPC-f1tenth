@@ -105,8 +105,8 @@ class MPCNode(Node):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
         self.declare_parameter('track_file_name', 'blevel.npz')
-        # self.declare_parameter('odom_topic', '/pf/pose/odom')
-        self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        self.declare_parameter('odom_topic', '/pf/pose/odom')
+        #self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
@@ -141,8 +141,8 @@ class MPCNode(Node):
             'Br': 15.0,
             'Cf': 1.0,
             'Cr': 1.0,
-            'Df': 0.8,
-            'Dr': 0.8,
+            'Df': 0.7,
+            'Dr': 0.7,
             'Cro': 0.02,
             'Cd': 0.001,
             'Ce': 1.0,
@@ -155,8 +155,8 @@ class MPCNode(Node):
                 'Br': .15* mean_dict['Br'],   # 15% variation
                 'Cf': .15* mean_dict['Cf'],   # 15% variation
                 'Cr': .15* mean_dict['Cr'],   # 15% variation
-                'Df': .2,   # 15% variation
-                'Dr': .2,   # 15% variation
+                'Df': .3,   # 15% variation
+                'Dr': .3,   # 15% variation
                 'Cro': 0.15* mean_dict['Cro'], # 15% variation
                 'Cd': 0.15* mean_dict['Cd'],  # 15% variation
                 'Ce': 0.15* mean_dict['Ce'],  # 15% variation
