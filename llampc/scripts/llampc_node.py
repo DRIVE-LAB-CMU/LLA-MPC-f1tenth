@@ -36,7 +36,7 @@ class MPCNode(Node):
         self.get_logger().info("Initializing")
 
         self.sim = False
-        self.lla_type = "rp"
+        self.lla_type = "reg"
         self.publish_trajectories = True
         self.log_data = True
 
@@ -104,9 +104,9 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'nshhall3.npz')
-        # self.declare_parameter('odom_topic', '/pf/pose/odom')
-        self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        self.declare_parameter('track_file_name', 'blevel.npz')
+        self.declare_parameter('odom_topic', '/pf/pose/odom')
+        #self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
@@ -151,16 +151,16 @@ class MPCNode(Node):
         }
 
         variation_dict = {
-                'Bf': .15,   # 15% variation
-                'Br': .15,   # 15% variation
-                'Cf': .15,   # 15% variation
-                'Cr': .15,   # 15% variation
-                'Df': .15,   # 15% variation
-                'Dr': .15,   # 15% variation
-                'Cro': 0.15, # 15% variation
-                'Cd': 0.15,  # 15% variation
-                'Ce': 0.15,  # 15% variation
-                'Cm': 0.15,  # 15% variation
+                'Bf': .15 * mean_dict['Bf'],   # 15% variation
+                'Br': .15* mean_dict['Br'],   # 15% variation
+                'Cf': .15* mean_dict['Cf'],   # 15% variation
+                'Cr': .15* mean_dict['Cr'],   # 15% variation
+                'Df': .2,   # 15% variation
+                'Dr': .2,   # 15% variation
+                'Cro': 0.15* mean_dict['Cro'], # 15% variation
+                'Cd': 0.15* mean_dict['Cd'],  # 15% variation
+                'Ce': 0.15* mean_dict['Ce'],  # 15% variation
+                'Cm': 0.15* mean_dict['Cm'],  # 15% variation
             }
         
         for key in variation_dict.keys():
@@ -169,9 +169,9 @@ class MPCNode(Node):
 
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
         
-        num_models = 30000
+        num_models = 6000
         self.state_size = 6
-        param_dict = get_param_dict(mean_dict, variation_dict, num_models)
+        param_dict = get_param_dict(mean_dict, variation_dict, num_models, ground_truth=True)
 
         self.dynamics_bank = dynamics.DBMPacejkaBank(
             params_car['lf'], params_car['lr'], 
@@ -192,6 +192,7 @@ class MPCNode(Node):
             self.state_size, rk4Factory,
             self.dynamics_bank, dynamics.diffequation
         )
+
 
     def rp_setup(self):
         self.get_logger().info("Roll Pitch MPC Initialized")
@@ -353,6 +354,8 @@ class MPCNode(Node):
         if not self.sim:
             if(self.lla_type == "rp"):
                 self.rp_setup()
+            elif(self.lla_type == "exp"):
+                self.exp_setup()
             elif(self.lla_type == "full"):
                 self.full_setup()
             else:
