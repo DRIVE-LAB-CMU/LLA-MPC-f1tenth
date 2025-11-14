@@ -162,11 +162,6 @@ class MPCNode(Node):
                 'Ce': 0.15* mean_dict['Ce'],  # 15% variation
                 'Cm': 0.15* mean_dict['Cm'],  # 15% variation
             }
-        
-        for key in variation_dict.keys():
-            variation_dict[key] = mean_dict[key]  * variation_dict[key]
-
-
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
         
         num_models = 6000
