@@ -104,7 +104,7 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'blevel.npz')
+        self.declare_parameter('track_file_name', 'blevel1.npz')
         # self.declare_parameter('odom_topic', '/pf/pose/odom')
         self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
