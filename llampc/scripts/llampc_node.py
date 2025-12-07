@@ -188,6 +188,62 @@ class MPCNode(Node):
             self.dynamics_bank, dynamics.diffequation
         )
 
+    def exp_setup(self):
+        self.get_logger().info("novar Initialized")
+        params_car = F110()
+        
+        mean_dict = {
+            'Bf': 15.0,
+            'Br': 15.0,
+            'Cf': 1.0,
+            'Cr': 1.0,
+            'Df': 0.95,
+            'Dr': 0.95,
+            'Cro': 0.02,
+            'Cd': 0.001,
+            'Ce': 1.0,
+            'Cm': .05, 
+            
+        }
+
+        variation_dict = {
+                'Bf': 0,# 15% variation
+                'Br': 0, # 15% variation
+                'Cf': 0, # 15% variation
+                'Cr': 0, # 15% variation
+                'Df':0,
+                'Dr':0,
+                'Cro':0, # 15% variation
+                'Cd': 0, # 15% variation
+                'Ce': 0, # 15% variation
+                'Cm': 0, # 15% variation
+            }
+        cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
+        
+        num_models = 6000
+        self.state_size = 6
+        param_dict = get_param_dict(mean_dict, variation_dict, num_models, ground_truth=True)
+
+        self.dynamics_bank = dynamics.DBMPacejkaBank(
+            params_car['lf'], params_car['lr'], 
+            params_car['mass'], params_car['Iz'], 
+            param_dict['Bf'], param_dict['Br'],
+            param_dict['Cf'], param_dict['Cr'],
+            param_dict['Df'], param_dict['Dr'],
+            param_dict['Cro'], param_dict['Cd'],
+            param_dict['Ce'], param_dict['Cm'],
+            0, 0,
+            num_models
+        )
+        
+        history_length=25
+        self.lb_history = history.LBHistory(
+            num_models, history_length,
+            self.lla_predict_horizon, cost_weights,
+            self.state_size, rk4Factory,
+            self.dynamics_bank, dynamics.diffequation
+        )
+
 
     def rp_setup(self):
         self.get_logger().info("Roll Pitch MPC Initialized")
