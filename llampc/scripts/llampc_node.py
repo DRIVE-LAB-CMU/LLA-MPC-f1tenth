@@ -104,9 +104,9 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'blevel1.npz')
-        # self.declare_parameter('odom_topic', '/pf/pose/odom')
-        self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        self.declare_parameter('track_file_name', 'blevel11.npz')
+        self.declare_parameter('odom_topic', '/pf/pose/odom')
+        #self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
@@ -220,7 +220,7 @@ class MPCNode(Node):
             }
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
         
-        num_models = 6000
+        num_models = 1
         self.state_size = 6
         param_dict = get_param_dict(mean_dict, variation_dict, num_models, ground_truth=True)
 
@@ -469,7 +469,6 @@ class MPCNode(Node):
 
         
     def control_callback(self):
-
         self.checkpoint[0] = time.perf_counter_ns()
 
         if self.track is None or self.current_state is None:
