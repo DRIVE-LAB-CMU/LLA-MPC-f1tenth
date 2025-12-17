@@ -249,8 +249,8 @@ class MPCNode(Node):
         self.get_logger().info("Roll Pitch MPC Initialized")
         params_car = F110()
         variation_dict = {
-            'Df': .1,   
-            'Dr': .1,
+            'Df': .2,   
+            'Dr': .2,
             'roll': np.pi/4, 
             'pitch': np.pi/4
         }
