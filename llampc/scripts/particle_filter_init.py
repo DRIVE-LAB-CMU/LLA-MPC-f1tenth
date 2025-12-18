@@ -9,6 +9,7 @@ from geometry_msgs.msg import PoseWithCovarianceStamped
 import math
 import time
 
+
 def main():
     rclpy.init()
     node = rclpy.create_node('initialpose_publisher')  # minimal node
