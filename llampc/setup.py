@@ -13,11 +13,12 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='hzl',
-    maintainer_email='hzl@andrew.cmu.edu',
+    author='Henry Liao',
+    author_email='hzl@andrew.cmu.edu',
+    maintainer='DRIVE Lab',
     description='f1tenth llampc',
     license='MIT',
-    tests_require=['pytest'],
+    packages=['llampc'],
     entry_points={
         'console_scripts': [
             'llampc = llampc.llampc_node:main',
