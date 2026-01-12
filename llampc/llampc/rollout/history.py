@@ -12,7 +12,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from functools import partial
-
+from collections import deque
 
 @jax.jit
 def get_lookback_error(last_predicted_states, x_t, cost_weights, queue_index):
@@ -27,7 +27,8 @@ def find_best_model(running_cost):
 
 class LBHistory:
 
-    def __init__(self, num_models, history_length, dt, cost_weights, state_size, integrator_factory, dynamics_bank, diffeq):
+    def __init__(self, num_models, history_length, dt, cost_weights, state_size, integrator_factory, dynamics_bank, diffeq,
+                 buffer_size = None, control_size = 2):
         self.num_models = num_models
         self.history_length = history_length
         self.last_predicted_states = jnp.zeros((self.num_models, state_size), dtype='float16')
@@ -44,12 +45,26 @@ class LBHistory:
             diffeq
         )
 
+        # control buffer to account for actuation delay 
+        # note that this does not account for actuation speed, which is accounted for via 
+        # the nmpc problem setup itself via max acceleratin and steering angle
+        self.control_size = 2
+        self.buffer_size = np.zeros(control_size) if buffer_size is None else buffer_size
+        self.buffer = [deque() for _ in control_size]
+
     def predict_states(self, x_t, u_t):
         """Batched version of _integrate"""
+
+        buffered_u_t = np.zeros_like(u_t)
+        for i in range(self.control_size):
+            self.buffer[i].append(u_t)
+            if(len(self.buffer) > self.buffer_size[i]):
+                buffered_u_t[i] = self.buffer.popleft()
+        
         self.last_predicted_states = self.integrator(
             self.dynamics_bank.get_known_params(),
             x_t,
-            u_t,
+            buffered_u_t,
             self.dt)
         
     def update_lookback_error(self, x_t):

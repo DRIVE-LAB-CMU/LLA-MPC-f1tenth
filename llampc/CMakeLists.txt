@@ -54,6 +54,7 @@ ament_python_install_package(${PROJECT_NAME})
 install(PROGRAMS
   scripts/llampc_node.py
   scripts/particle_filter_init.py
+  scripts/step_response_test.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

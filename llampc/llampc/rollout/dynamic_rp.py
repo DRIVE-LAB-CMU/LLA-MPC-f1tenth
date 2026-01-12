@@ -38,7 +38,6 @@ def diffequation(bank_params, known_params,x, u):
         1/mass * (Fry + Ffy*jnp.cos(steer)) - vx*omega + g * jnp.sin(roll),
         1/Iz * (Ffy* lf*jnp.cos(steer) - Fry * lr)
     ])
-    
 
 @jax.jit
 def _calc_forces(bank_params, known_params, x, u):
