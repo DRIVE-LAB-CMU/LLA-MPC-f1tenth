@@ -14,7 +14,7 @@ from functools import partial
 
 
 @jax.jit
-def diffequation(
+def diffequation_unoptimized(
     bank_params, known_params,x, u):
     """	write dynamics as first order ODE: dxdt = f(x(t))
         x is a 6x1 vector: [x, y, psi, vx, vy, omega]^T
@@ -37,6 +37,46 @@ def diffequation(
         1/mass * (Frx - Ffy*jnp.sin(steer)) + vy*omega - g * jnp.sin(pitch),
         1/mass * (Fry + Ffy*jnp.cos(steer)) - vx*omega + g * jnp.sin(roll),
         1/Iz * (Ffy* lf*jnp.cos(steer) - Fry * lr)
+    ])
+
+@jax.jit
+def diffequation(bank_params, known_params, x, u):
+    """Optimized for GPU - no conditionals"""
+    g = 9.81
+
+    acc = u[0]
+    steer = u[1]
+    psi = x[2]
+    vx = x[3]
+    vy = x[4]
+    omega = x[5]
+
+    mass, Iz, lf, lr, roll, pitch = known_params
+    
+    # Inline force calculation to reduce function call overhead
+    Bf, Br, Cf, Cr, Df, Dr, Cro, Cd, Ce, Cm = bank_params
+    
+    # Forces
+    Frx = mass * (acc * Ce - Cm * vx) - Cro - Cd * (vx * vx)
+    
+    vx_safe = jnp.where(jnp.abs(vx) < 1e-4, 1e-4, vx)
+    alphaf = steer - jnp.arctan2((lf * omega + vy), vx_safe)
+    alphar = jnp.arctan2((lr * omega - vy), vx_safe)
+    
+    mask = jnp.abs(vx) >= 1e-4
+    alphaf = jnp.where(mask, alphaf, 0.0)
+    alphar = jnp.where(mask, alphar, 0.0)
+    
+    Ffy = Df * jnp.sin(Cf * jnp.arctan(Bf * alphaf))
+    Fry = Dr * jnp.sin(Cr * jnp.arctan(Br * alphar))
+
+    return jnp.array([
+        vx*jnp.cos(psi) - vy*jnp.sin(psi),
+        vx*jnp.sin(psi) + vy*jnp.cos(psi),
+        omega,
+        1/mass * (Frx - Ffy*jnp.sin(steer)) + vy*omega - g * jnp.sin(pitch),
+        1/mass * (Fry + Ffy*jnp.cos(steer)) - vx*omega + g * jnp.sin(roll),
+        1/Iz * (Ffy * lf*jnp.cos(steer) - Fry * lr)
     ])
     
 

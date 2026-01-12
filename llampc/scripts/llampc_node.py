@@ -105,8 +105,8 @@ class MPCNode(Node):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
         self.declare_parameter('track_file_name', 'blevel11.npz')
-        self.declare_parameter('odom_topic', '/pf/pose/odom')
-        #self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        #self.declare_parameter('odom_topic', '/pf/pose/odom')
+        self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
@@ -167,6 +167,8 @@ class MPCNode(Node):
         num_models = 6000
         self.state_size = 6
         param_dict = get_param_dict(mean_dict, variation_dict, num_models, ground_truth=True)
+        
+        self.get_logger().info("Dynamics bank starting")
 
         self.dynamics_bank = dynamics.DBMPacejkaBank(
             params_car['lf'], params_car['lr'], 
@@ -180,6 +182,8 @@ class MPCNode(Node):
             num_models
         )
         
+        self.get_logger().info("History starting")
+        
         history_length=25
         self.lb_history = history.LBHistory(
             num_models, history_length,
@@ -187,6 +191,8 @@ class MPCNode(Node):
             self.state_size, rk4Factory,
             self.dynamics_bank, dynamics.diffequation
         )
+        
+        self.get_logger().info("History generation complete")
 
     def exp_setup(self):
         self.get_logger().info("novar Initialized")
@@ -573,7 +579,7 @@ class MPCNode(Node):
         if status == 0:  # Success
             # Get optimal control
             self.apply_control(u_opt) # Apply control
-            self.get_logger().info(f"Logging control {u_opt}")
+            #self.get_logger().info(f"Logging control {u_opt}")
             if not self.sim:
                 #version for our dynamics
                 self.checkpoint[5] = time.perf_counter_ns()
