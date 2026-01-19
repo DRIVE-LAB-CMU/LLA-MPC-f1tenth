@@ -50,16 +50,18 @@ class LBHistory:
         # the nmpc problem setup itself via max acceleratin and steering angle
         self.control_size = 2
         self.buffer_size = np.zeros(control_size) if buffer_size is None else buffer_size
-        self.buffer = [deque() for _ in control_size]
+        self.buffer = [deque() for _ in range(control_size)]
 
     def predict_states(self, x_t, u_t):
         """Batched version of _integrate"""
 
         buffered_u_t = np.zeros_like(u_t)
         for i in range(self.control_size):
-            self.buffer[i].append(u_t)
-            if(len(self.buffer) > self.buffer_size[i]):
-                buffered_u_t[i] = self.buffer.popleft()
+            self.buffer[i].append(u_t[i])
+            if(len(self.buffer[i]) > self.buffer_size[i]):
+                x = self.buffer[i].popleft()
+                print(x)
+                buffered_u_t[i] = x
         
         self.last_predicted_states = self.integrator(
             self.dynamics_bank.get_known_params(),
