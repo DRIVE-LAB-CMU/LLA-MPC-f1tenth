@@ -13,6 +13,7 @@ import jax
 import jax.numpy as jnp
 from functools import partial
 from collections import deque
+import time
 
 @jax.jit
 def get_lookback_error(last_predicted_states, x_t, cost_weights, queue_index):
@@ -31,7 +32,9 @@ class LBHistory:
                  buffer_size = None, control_size = 2):
         self.num_models = num_models
         self.history_length = history_length
+
         self.last_predicted_states = jnp.zeros((self.num_models, state_size), dtype='float16')
+
         self.running_cost = np.zeros(self.num_models, dtype='float16')
         self.cost_history = np.zeros((self.num_models, self.history_length), dtype='float16')
         self.queue_index = 0
@@ -42,8 +45,10 @@ class LBHistory:
         self.dynamics_bank = dynamics_bank
         self.integrator = integrator_factory(
             dynamics_bank.param_bank,
-            diffeq
+            diffeq,
+            dt
         )
+        
 
         # control buffer to account for actuation delay 
         # note that this does not account for actuation speed, which is accounted for via 
@@ -54,20 +59,30 @@ class LBHistory:
 
     def predict_states(self, x_t, u_t):
         """Batched version of _integrate"""
+    
+        t0 = time.perf_counter_ns()
+        # buffered_u_t = u_t
 
         buffered_u_t = np.zeros_like(u_t)
         for i in range(self.control_size):
             self.buffer[i].append(u_t[i])
             if(len(self.buffer[i]) > self.buffer_size[i]):
-                x = self.buffer[i].popleft()
-                print(x)
-                buffered_u_t[i] = x
+                buffered_u_t[i] = self.buffer[i].popleft()
         
+        t1 = time.perf_counter_ns()
+        known_params = self.dynamics_bank.get_known_params()
+        
+        t2 = time.perf_counter_ns()
         self.last_predicted_states = self.integrator(
-            self.dynamics_bank.get_known_params(),
+            known_params,
             x_t,
-            buffered_u_t,
-            self.dt)
+            buffered_u_t)
+        
+        t3 = time.perf_counter_ns()
+        
+        print(f"Buffer: {(t1-t0)*1e-6:.3f}ms, "
+            f"GetParams: {(t2-t1)*1e-6:.3f}ms, "
+            f"Integrator: {(t3-t2)*1e-6:.3f}ms")
         
     def update_lookback_error(self, x_t):
         self.running_cost -= self.cost_history[:, self.queue_index]
@@ -80,6 +95,8 @@ class LBHistory:
         self.cost_history[:, self.queue_index] = cost
         self.running_cost += cost
         self.queue_index = (self.queue_index + 1) % self.history_length
+
+        return cost
     
 
     def reset(self):

@@ -37,7 +37,7 @@ def diffequation_unoptimized(
         1/mass * (Frx - Ffy*jnp.sin(steer)) + vy*omega - g * jnp.sin(pitch),
         1/mass * (Fry + Ffy*jnp.cos(steer)) - vx*omega + g * jnp.sin(roll),
         1/Iz * (Ffy* lf*jnp.cos(steer) - Fry * lr)
-    ])
+    ])#, jnp.array([Frx, Ffy, Fry])
 
 @jax.jit
 def diffequation(bank_params, known_params, x, u):
@@ -76,7 +76,7 @@ def diffequation(bank_params, known_params, x, u):
         omega,
         1/mass * (Frx - Ffy*jnp.sin(steer)) + vy*omega - g * jnp.sin(pitch),
         1/mass * (Fry + Ffy*jnp.cos(steer)) - vx*omega + g * jnp.sin(roll),
-        1/Iz * (Ffy * lf*jnp.cos(steer) - Fry * lr)
+        1/Iz * (Ffy * lf*jnp.cos(steer) - Fry * lr),
     ])
     
 
@@ -158,10 +158,6 @@ class DBMPacejkaBank():
             self.Bf, self.Br, self.Cf, self.Cr, self.Df, self.Dr,
             self.Cro, self.Cd, self.Ce, self.Cm
         ], axis=1)
-
-
-        # self.diffequation = jit(self.diffequation, static_argnums=(0,))
-        # self._calc_forces = jit(self._calc_forces, static_argnums=(0,))
 
     def get_known_params(self):
         return jnp.array([self.mass, self.Iz, self.lf, self.lr, self.roll, self.pitch])

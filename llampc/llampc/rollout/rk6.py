@@ -38,10 +38,10 @@ def odeintRK6(dynamics, diffequation, y0, t, control):
         
     return y_next
 
-def rk4Factory(bank_params, diffequation):
+def rk4Factory(bank_params, diffequation, h):
     """Returns a function that integrates with fixed bank_params."""
     
-    def odeintRK4_batch(known_params, x0, u, h):
+    def odeintRK4_batch(known_params, x0, u):
         def step(b_p, x_t):
             return diffequation(b_p,  known_params,x_t, u)
 
@@ -56,9 +56,9 @@ def rk4Factory(bank_params, diffequation):
     
     return jax.jit(odeintRK4_batch)
 
-def eulerFactory(bank_params, diffequation):
+def eulerFactory(bank_params, diffequation, h):
     """Returns a function that performs one Euler integration step with fixed bank_params."""    
-    def odeintEuler_batch(known_params, x0, u, h):
+    def odeintEuler_batch(known_params, x0, u):
         def step(b_p, x_t):
             return diffequation(b_p, known_params, x_t, u)
 
@@ -69,11 +69,11 @@ def eulerFactory(bank_params, diffequation):
 
     return jax.jit(odeintEuler_batch)
 
-def rk6Factory(bank_params, diffequation):
+def rk6Factory(bank_params, diffequation, h):
     """Returns a function that performs one RK6 integration step with fixed bank_params."""
 
     gamma = jnp.array([16/135, 0, 6656/12825, 28561/56430, -9/50, 2/55])
-    def odeintRK6_batch(known_params, x0, u, h):
+    def odeintRK6_batch(known_params, x0, u):
         def step(b_p, x_t):
             return diffequation(b_p, known_params, x_t, u)
 

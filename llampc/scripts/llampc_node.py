@@ -40,7 +40,7 @@ class MPCNode(Node):
         self.sim = False
         self.lla_type = "reg"
         self.publish_trajectories = True
-        self.log_data = True
+        self.log_data = False
 
         self.declare_params()
         self.initialize_mpc()
@@ -106,7 +106,7 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'blevel11.npz')
+        self.declare_parameter('track_file_name', 'nshhall3.npz')
         #self.declare_parameter('odom_topic', '/pf/pose/odom')
         self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
@@ -131,6 +131,9 @@ class MPCNode(Node):
                 "params": [],
                 "model_idx": [],
                 "ctrl": [],
+                "predicted_state": [],
+                "one_step_cost": [],
+                "running_cost":[]
             }
             self.get_logger().info(f"Logging MPC data to {self.log_file}")
     
@@ -191,7 +194,8 @@ class MPCNode(Node):
             num_models, history_length,
             self.lla_predict_horizon, cost_weights,
             self.state_size, rk4Factory,
-            self.dynamics_bank, dynamics.diffequation
+            self.dynamics_bank, dynamics.diffequation,
+            buffer_size = [1, 1]
         )
         
         self.get_logger().info("History generation complete")
@@ -215,12 +219,12 @@ class MPCNode(Node):
         }
 
         variation_dict = {
-                'Bf': 0,# 15% variation
+                'Bf': 0, # 15% variation
                 'Br': 0, # 15% variation
                 'Cf': 0, # 15% variation
                 'Cr': 0, # 15% variation
-                'Df':0,
-                'Dr':0,
+                'Df': 0,
+                'Dr': 0,
                 'Cro':0, # 15% variation
                 'Cd': 0, # 15% variation
                 'Ce': 0, # 15% variation
@@ -446,6 +450,7 @@ class MPCNode(Node):
         self.lb_history.update_lookback_error(
             np.zeros(self.state_size)
         )
+
         self.lb_history.get_best_model()
         self.lb_history.reset()
         self.get_logger().info("LLA BANK COMPILED")
@@ -484,12 +489,13 @@ class MPCNode(Node):
         
         ##############################################
         ### BANK UPDATE
+        one_step_cost = None
         if not self.sim:
-            self.lb_history.update_lookback_error(
+            one_step_cost = self.lb_history.update_lookback_error(
                 self.current_state
             )
         else:
-            self.lb_history.update_lookback_error(
+            one_step_cost = self.lb_history.update_lookback_error(
                 np.array(
                     [
                         self.current_state[0],
@@ -502,6 +508,8 @@ class MPCNode(Node):
                     ]
                 )
             )
+
+        self.log_rollout_data(self.lb_history, one_step_cost)
 
         x0 = self.current_state[:2]
         v0 = self.current_state[3]
@@ -661,7 +669,6 @@ class MPCNode(Node):
     def publish_predicted_trajectory(self, predicted_states):
         """Publish predicted trajectory for visualization"""
 
-        
         path_msg = PoseArray()
         path_msg.header.stamp = self.get_clock().now().to_msg()
         path_msg.header.frame_id = "map"
@@ -702,7 +709,13 @@ class MPCNode(Node):
             self.log_buffer["params"].append(params.copy())
             self.log_buffer["model_idx"].append(model_index)
             self.log_buffer["ctrl"].append(self.last_control.copy())
-            
+
+    def log_rollout_data(self, lb_history, one_step_cost):
+        if(self.log_data):
+            self.log_buffer["predicted_state"].append(lb_history.last_predicted_states.copy())
+            self.log_buffer["one_step_cost"].append(one_step_cost)
+            self.log_buffer["running_cost"].append(lb_history.running_cost.copy())
+
     def destroy_node(self):
         if(self.log_data):
             self.get_logger().info(f"Saving data to {self.log_file}")
@@ -712,7 +725,10 @@ class MPCNode(Node):
                 state=np.array(self.log_buffer["state"]),
                 params=np.array(self.log_buffer["params"]),
                 model_index=np.array(self.log_buffer["model_idx"]),
-                ctrl=np.array(self.log_buffer["ctrl"])
+                ctrl=np.array(self.log_buffer["ctrl"]), 
+                states=np.array(self.log_buffer["predicted_state"]),
+                one_step_cost=np.array(self.log_buffer["one_step_cost"]),
+                running_cost=np.array(self.log_buffer["running_cost"])
             )
         super().destroy_node()
 
