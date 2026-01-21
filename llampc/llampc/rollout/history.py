@@ -80,21 +80,41 @@ class LBHistory:
         
         t3 = time.perf_counter_ns()
         
+        jax.block_until_ready(self.last_predicted_states)
+        t4 = time.perf_counter_ns()
+        
         print(f"Buffer: {(t1-t0)*1e-6:.3f}ms, "
-            f"GetParams: {(t2-t1)*1e-6:.3f}ms, "
-            f"Integrator: {(t3-t2)*1e-6:.3f}ms")
+          f"GetParams: {(t2-t1)*1e-6:.3f}ms, "
+          f"Integrator: {(t3-t2)*1e-6:.3f}ms, "
+          f"Sync: {(t4-t3)*1e-6:.3f}ms")
         
     def update_lookback_error(self, x_t):
+        t0 = time.perf_counter_ns()
+        
         self.running_cost -= self.cost_history[:, self.queue_index]
-        cost = np.array(get_lookback_error(
+        
+        t1 = time.perf_counter_ns()
+        error_result = get_lookback_error(
             self.last_predicted_states,
             x_t, 
             self.cost_weights,
             self.queue_index
-        ))
+        )
+        jax.block_until_ready(error_result)
+        t2 = time.perf_counter_ns()
+        cost = np.array(error_result)
+        t3 = time.perf_counter_ns()
         self.cost_history[:, self.queue_index] = cost
         self.running_cost += cost
         self.queue_index = (self.queue_index + 1) % self.history_length
+
+        t4 = time.perf_counter_ns()
+        print(f"Prep cost: {(t1-t0)*1e-6:.3f}ms, "
+          f"Jit call: {(t2-t1)*1e-6:.3f}ms, "
+          f"CPU Transfer: {(t3-t2)*1e-6:.3f}ms, "
+          f"Update: {(t4-t3)*1e-6:.3f}ms")
+
+
 
         return cost
     

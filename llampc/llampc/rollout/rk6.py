@@ -42,6 +42,8 @@ def rk4Factory(bank_params, diffequation, h):
     """Returns a function that integrates with fixed bank_params."""
     
     def odeintRK4_batch(known_params, x0, u):
+
+        
         def step(b_p, x_t):
             return diffequation(b_p,  known_params,x_t, u)
 

@@ -5,10 +5,19 @@ from rclpy.node import Node
 from rclpy.time import Time
 
 import os
-# os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-# os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = 0.5
-# os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
+# os.environ["JAX_PLATFORM_NAME"] = "cpu"
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.8"
+os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
+
+from jax.experimental.compilation_cache import compilation_cache as cc
+cc.initialize_cache("/home/kathy/jax_cache")
 import jax
+jax.config.update('jax_persistent_cache_min_compile_time_secs', 0)
+jax.config.update("jax_log_compiles", True)
+import jax.numpy as jnp
+
+
 
 from llampc.nmpc_gen import setup_mpc
 from llampc.params import F110, F110_sim, get_param_dict
@@ -169,7 +178,7 @@ class MPCNode(Node):
             }
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
         
-        num_models = 6000
+        num_models = 20000
         self.state_size = 6
         param_dict = get_param_dict(mean_dict, variation_dict, num_models, ground_truth=True)
         
@@ -195,7 +204,7 @@ class MPCNode(Node):
             self.lla_predict_horizon, cost_weights,
             self.state_size, rk4Factory,
             self.dynamics_bank, dynamics.diffequation,
-            buffer_size = [1, 1]
+            buffer_size = [0, 0]
         )
         
         self.get_logger().info("History generation complete")
@@ -509,7 +518,7 @@ class MPCNode(Node):
                 )
             )
 
-        self.log_rollout_data(self.lb_history, one_step_cost)
+        # self.log_rollout_data(self.lb_history, one_step_cost)
 
         x0 = self.current_state[:2]
         v0 = self.current_state[3]
