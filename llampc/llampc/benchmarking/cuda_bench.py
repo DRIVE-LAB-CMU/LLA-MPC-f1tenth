@@ -11,33 +11,24 @@ import numpy as np
 import os
 
 
-
-# CRITICAL: Set these BEFORE importing JAX
-os.environ['JAX_COMPILATION_CACHE_DIR'] = '/home/kathy/jax_cache'  # or any persistent path
-os.environ['JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES'] = '-1'  # Cache everything
-os.environ['JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS'] = '0'  # Cache all compilations
-
-# Enable XLA kernel and autotuning caches
-os.environ['TF_XLA_FLAGS'] = (
-    '--xla_gpu_kernel_cache_file=/home/kathy/jax_cache/kernel_cache '
-    '--xla_gpu_per_fusion_autotune_cache_dir=/home/kathy/jax_cache/autotune_cache'
-)
-
 # os.environ["JAX_PLATFORM_NAME"] = "cpu"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.8"
 os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
 
+from jax.experimental.compilation_cache import compilation_cache as cc
+cc.initialize_cache("/home/kathy/jax_cache")
+
 print("imports")
 import jax
+jax.config.update('jax_persistent_cache_min_compile_time_secs', 0)
+jax.config.update("jax_log_compiles", True)
 import jax.numpy as jnp
 from functools import partial
 from collections import deque
 import time
 print("import complete")
 
-jax.config.update("jax_log_compiles", True)
-print(hasattr(jax.config, 'jax_compilation_cache_dir'))
 
 # def _get_batch(num_models, x_t, u_t):
 #     x_t_batch = np.empty((num_models, x_t.shape[0]), dtype=np.float64)
