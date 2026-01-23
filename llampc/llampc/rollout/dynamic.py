@@ -10,6 +10,9 @@ from functools import partial
 
 # @njit(parallel=True)
 # @njit(fastmath=True)
+cpu = jax.devices("cpu")[0]
+gpu = jax.devices("gpu")[0]
+# gpu = jax.devices("cpu")[0]
 
 
 
@@ -150,17 +153,27 @@ class DBMPacejkaBank():
         self.pitch = pitch
         self.roll = roll
 
+        self.known_params = jax.device_put(
+            jnp.array([self.mass, self.Iz, self.lf, self.lr, self.roll, self.pitch]),
+            device=gpu
+        )
+
         # non-sampled state parameters
 
         self.num_models = num_models
 
-        self.param_bank = jnp.stack([
+        self.param_bank = jax.device_put(
+            jnp.stack([
             self.Bf, self.Br, self.Cf, self.Cr, self.Df, self.Dr,
             self.Cro, self.Cd, self.Ce, self.Cm
-        ], axis=1)
+            ], axis=1), 
+        device=cpu)
+
+    def update_known_params(self):
+        pass
 
     def get_known_params(self):
-        return jnp.array([self.mass, self.Iz, self.lf, self.lr, self.roll, self.pitch])
+        return self.known_params
 
     def get_bank_params(self):
         return self.param_bank

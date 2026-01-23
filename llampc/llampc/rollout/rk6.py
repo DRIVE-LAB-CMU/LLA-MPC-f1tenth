@@ -49,7 +49,8 @@ def odeintRK4_batch(bank_params, diffequation, h, known_params, x0, u):
         k2 = h * step(b_p, x0 + k1 / 2)
         k3 = h * step(b_p, x0 + k2 / 2)
         k4 = h * step(b_p, x0 + k3)
-        return x0 + (k1 + 2 * k2 + 2 * k3 + k4) / 6
+        result = x0 + (k1 + 2 * k2 + 2 * k3 + k4) / 6
+        return result.astype(jnp.float16)
 
     return jax.vmap(rk4)(bank_params)
 

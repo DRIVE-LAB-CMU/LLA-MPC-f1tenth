@@ -6,8 +6,8 @@ from rclpy.time import Time
 
 import os
 # os.environ["JAX_PLATFORM_NAME"] = "cpu"
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.8"
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "true"
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.5"
 os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
 
 from jax.experimental.compilation_cache import compilation_cache as cc
@@ -62,7 +62,7 @@ class MPCNode(Node):
         self.projidx = 0
 
         self.count = 0
-        self.time_window = 5
+        self.time_window = 1
         self.time_index = 0
         self.checkpoints = 7
         self.time_history = np.zeros((self.checkpoints, self.time_window))
