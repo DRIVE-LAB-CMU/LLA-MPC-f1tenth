@@ -5,13 +5,13 @@ from rclpy.node import Node
 from rclpy.time import Time
 
 import os
-# os.environ["JAX_PLATFORM_NAME"] = "cpu"
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "true"
-os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.5"
-os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
+os.environ["JAX_PLATFORM_NAME"] = "cpu"
+# os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "true"
+# os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.5"
+# os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
 
-from jax.experimental.compilation_cache import compilation_cache as cc
-cc.initialize_cache("/home/kathy/jax_cache")
+# from jax.experimental.compilation_cache import compilation_cache as cc
+# cc.initialize_cache("/home/kathy/jax_cache")
 import jax
 jax.config.update('jax_persistent_cache_min_compile_time_secs', 0)
 jax.config.update("jax_log_compiles", True)
@@ -49,7 +49,7 @@ class MPCNode(Node):
         self.sim = False
         self.lla_type = "reg"
         self.publish_trajectories = True
-        self.log_data = False
+        self.log_data = True
 
         self.declare_params()
         self.initialize_mpc()
@@ -499,24 +499,25 @@ class MPCNode(Node):
         ##############################################
         ### BANK UPDATE
         one_step_cost = None
-        if not self.sim:
-            one_step_cost = self.lb_history.update_lookback_error(
-                self.current_state
-            )
-        else:
-            one_step_cost = self.lb_history.update_lookback_error(
-                np.array(
-                    [
-                        self.current_state[0],
-                        self.current_state[1],
-                        self.current_state[2],
-                        self.current_state[3],
-                        np.arctan2(self.current_state[4], self.current_state[3]),
-                        self.current_state[5], 
-                        self.last_control[1]
-                    ]
+        if(self.time_history[-1, self.count] * 1e-6 < 2 * self.dt * 1000):
+            if not self.sim:
+                one_step_cost = self.lb_history.update_lookback_error(
+                    self.current_state
                 )
-            )
+            else:
+                one_step_cost = self.lb_history.update_lookback_error(
+                    np.array(
+                        [
+                            self.current_state[0],
+                            self.current_state[1],
+                            self.current_state[2],
+                            self.current_state[3],
+                            np.arctan2(self.current_state[4], self.current_state[3]),
+                            self.current_state[5], 
+                            self.last_control[1]
+                        ]
+                    )
+                )
 
         # self.log_rollout_data(self.lb_history, one_step_cost)
 
@@ -598,7 +599,7 @@ class MPCNode(Node):
         if status == 0:  # Success
             # Get optimal control
             self.apply_control(u_opt) # Apply control
-            #self.get_logger().info(f"Logging control {u_opt}")
+            # self.get_logger().info(f"Logging control {u_opt}")
             if not self.sim:
                 #version for our dynamics
                 self.checkpoint[5] = time.perf_counter_ns()
@@ -663,11 +664,9 @@ class MPCNode(Node):
         
         # Convert acceleration to speed command (simple integration)
         desired_speed = max(0.0, self.last_drive_command[0] + acceleration * self.dt)
-        
-        
+
         drive_msg.drive.speed = desired_speed
         drive_msg.drive.steering_angle = steer
-
 
         self.cmd_pub.publish(drive_msg) 
 

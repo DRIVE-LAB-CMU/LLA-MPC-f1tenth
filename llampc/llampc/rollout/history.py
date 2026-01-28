@@ -16,7 +16,7 @@ from collections import deque
 import time
 
 cpu = jax.devices("cpu")[0]
-gpu = jax.devices("gpu")[0]
+gpu = jax.devices("cpu")[0]
 # gpu = jax.devices("cpu")[0]
 
 @jax.jit
@@ -126,8 +126,8 @@ class LBHistory:
         t2 = time.perf_counter_ns()
         
         
-        print(f"Prep cost: {(t1-t0)*1e-6:.3f}ms, "
-            f"Jit call: {(t2-t1)*1e-6:.3f}ms, ")
+        # print(f"Prep cost: {(t1-t0)*1e-6:.3f}ms, "
+        #     f"Jit call: {(t2-t1)*1e-6:.3f}ms, ")
             # f"In-place update: {(t2-t1)*1e-6:.3f}ms, "
             # f"CPU Transfer: {(t3-t2)*1e-6:.3f}ms")
 
