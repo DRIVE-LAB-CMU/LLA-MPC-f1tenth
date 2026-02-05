@@ -152,9 +152,3 @@ class LBHistory:
 
     def get_best_model(self):
         return self.current_best_model
-
-           
-    
-    
-    
-    

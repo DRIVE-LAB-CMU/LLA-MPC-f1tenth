@@ -17,8 +17,6 @@ jax.config.update('jax_persistent_cache_min_compile_time_secs', 0)
 jax.config.update("jax_log_compiles", True)
 import jax.numpy as jnp
 
-
-
 from llampc.nmpc_gen import setup_mpc
 from llampc.params import F110, F110_sim, get_param_dict
 from llampc.planner import get_reference_trajectory_segment
@@ -82,22 +80,17 @@ class MPCNode(Node):
             10
         )
 
+        self.drive_subscriber= self.create_subscription{
+            AckermannDriveStamped,
+            '/drive',
+            self.drive_callback,
+            10
+        }
+
 
         self.predicted_path_pub = self.create_publisher(
             PoseArray,
             '/predicted_path',
-            10
-        )
-
-        self.cmd_pub = self.create_publisher(
-            AckermannDriveStamped,
-            '/drive',
-            10
-        )
-
-        self.mpc_info_pub = self.create_publisher(
-            Float64MultiArray,
-            '/mpc_info',
             10
         )
 
@@ -464,6 +457,11 @@ class MPCNode(Node):
         self.lb_history.reset()
         self.get_logger().info("LLA BANK COMPILED")
 
+    def drive_callback(self, msg):
+        self.cur_velocity = msg.drive.speed
+        self.drive_steer = msg.drive.steering_angle
+
+
     def odom_callback(self, msg):        
         x = msg.pose.pose.position.x
         y = msg.pose.pose.position.y
@@ -489,6 +487,7 @@ class MPCNode(Node):
         self.current_state = np.array([x, y, phi, vx, vy, omega])
         # self.get_logger().info(f"Logging State {self.current_state}")
 
+        
     def control_callback(self):
         self.checkpoint[0] = time.perf_counter_ns()
 
@@ -561,29 +560,25 @@ class MPCNode(Node):
         ########################################################
         #### SETUP AND SOLVE MPC
 
-        self.solver.set(0, "lbx", np.concatenate([self.current_state, self.last_control]))
-        self.solver.set(0, "ubx", np.concatenate([self.current_state, self.last_control]))
-        def construct_params(N, selected_model_params, ref_segment):
-            full_params = np.zeros((N, 20), np.float64)
-            full_params[:, :12] = selected_model_params
-            # self.get_logger().info(f"{full_params}")
-            full_params[:, 12:14] = ref_segment[:2, :N].T #reference x, y
-            return full_params
         
-        full_params = construct_params(self.N, selected_model_params, ref_segment)
-
-        for i in range(self.N):
-            self.solver.set(i, "p", full_params[i])
-            # self.solver.set(i, "yref", all_yref)
-
+        
         self.checkpoint[3]= time.perf_counter_ns()
 
-        status = self.solver.solve()
+        time_now = time.perf_counter_ns() * 1e-9
+        if(self.last_drive_time != None):
+            diff = self.last_drive_time - time_now
+        self.last_drive_time = time_now
 
+        if diff != None:
+            accel = (self.cur_velocity - self.last_velocity) / (diff)
+            self.last_velocity = self.cur_velocity
+            
+            steer = self.drive_steer
+            u_opt = np.array([accel, steer])
+        else:
+            u_opt = np.array([0, 0])
+        
         self.checkpoint[4] = time.perf_counter_ns()
-
-        u_opt = self.solver.get(1, "x")[-2:] # acceleration, delta
-        # print(f"CONTROL: {u_opt}")
 
         if(self.publish_trajectories):
             predicted_states = []
@@ -595,44 +590,44 @@ class MPCNode(Node):
 
         #########################################
         ### PUBLISH MPC DATA
-        if status == 0:  # Success
+        # if status == 0:  # Success
             # Get optimal control
-            self.apply_control(u_opt) # Apply control
+        # self.apply_control(u_opt) # Apply control
             # self.get_logger().info(f"Logging control {u_opt}")
-            if not self.sim:
+        # if not self.sim:
                 #version for our dynamics
-                self.checkpoint[5] = time.perf_counter_ns()
-                self.lb_history.predict_states(
-                    self.current_state, u_opt
-                )
-                self.checkpoint[6] = time.perf_counter_ns()
+        self.checkpoint[5] = time.perf_counter_ns()
+        self.lb_history.predict_states(
+            self.current_state, u_opt
+        )
+        self.checkpoint[6] = time.perf_counter_ns()
                 
-            else:
-                steer_v = self.solver.get(0, "u")[1]
-                self.lb_history.predict_states(
-                    np.array(
-                        [
-                            self.current_state[0],
-                            self.current_state[1],
-                            self.current_state[2],
-                            self.current_state[3],
-                            np.arctan2(self.current_state[4], self.current_state[3]),
-                            self.current_state[5], 
-                            self.last_control[1]
-                        ]
-                    ),
-                    np.array([u_opt[0], steer_v]) 
-                )
+            # else:
+            #     steer_v = self.solver.get(0, "u")[1]
+            #     self.lb_history.predict_states(
+            #         np.array(
+            #             [
+            #                 self.current_state[0],
+            #                 self.current_state[1],
+            #                 self.current_state[2],
+            #                 self.current_state[3],
+            #                 np.arctan2(self.current_state[4], self.current_state[3]),
+            #                 self.current_state[5], 
+            #                 self.last_control[1]
+            #             ]
+            #         ),
+            #         np.array([u_opt[0], steer_v]) 
+            #     )
 
-            self.count = (self.count + 1) % self.time_window
-            self.time_history[:self.checkpoints-1, self.count] = np.array(self.checkpoint[1:]-self.checkpoint[:-1])
-            self.time_history[-1, self.count] = (self.checkpoint[-1] - self.checkpoint[0])
+        #     self.count = (self.count + 1) % self.time_window
+        #     self.time_history[:self.checkpoints-1, self.count] = np.array(self.checkpoint[1:]-self.checkpoint[:-1])
+        #     self.time_history[-1, self.count] = (self.checkpoint[-1] - self.checkpoint[0])
         
-            if(self.count == 0):
-                print(np.max(self.time_history*1e-6, axis = 1))
-        else:
-            self.apply_control([0, 0]) # Brake
-            self.get_logger().warn(f"MPC solver failed with status: {status}")
+        #     if(self.count == 0):
+        #         print(np.max(self.time_history*1e-6, axis = 1))
+        # else:
+        #     self.apply_control([0, 0]) # Brake
+        #     self.get_logger().warn(f"MPC solver failed with status: {status}")
 
 
     def publish_ref_trajectory(self, ref_trajectory):
@@ -650,28 +645,7 @@ class MPCNode(Node):
         self.ref_pub.publish(ref_msg)
 
 
-    def apply_control(self, u_opt):
-        """Apply optimal control to the vehicle"""
-        # u_opt = [steer, acceleration]
-        acceleration = float(u_opt[0])
-        steer = float(u_opt[1])
-        
-        # Create Ackermann drive message
-        drive_msg = AckermannDriveStamped()
-        drive_msg.header.stamp = self.get_clock().now().to_msg()
-        drive_msg.header.frame_id = "base_link"
-        
-        # Convert acceleration to speed command (simple integration)
-        desired_speed = max(0.0, self.last_drive_command[0] + acceleration * self.dt)
 
-        drive_msg.drive.speed = desired_speed
-        drive_msg.drive.steering_angle = steer
-
-        self.cmd_pub.publish(drive_msg) 
-
-        self.last_drive_command = np.array([desired_speed, steer])
-        self.last_control = np.array([acceleration, steer])
-        
 
     def publish_predicted_trajectory(self, predicted_states):
         """Publish predicted trajectory for visualization"""
@@ -696,17 +670,6 @@ class MPCNode(Node):
         
         self.predicted_path_pub.publish(path_msg)
     
-    def publish_mpc_info(self, u_opt, status):
-        """Publish MPC solver information"""
-        info_msg = Float64MultiArray()
-        info_msg.data = [
-            float(u_opt[1]),  # acceleration
-            #self.last_drive_command[0], # target speed
-            float(u_opt[0]),  # steer
-            float(status),    # solver status
-            float(self.solver.get_cost())  # optimal cost
-        ]
-        self.mpc_info_pub.publish(info_msg)
 
     def log_lla_data(self, params, model_index):
         if(self.log_data):
