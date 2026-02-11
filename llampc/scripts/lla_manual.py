@@ -80,12 +80,12 @@ class MPCNode(Node):
             10
         )
 
-        self.drive_subscriber= self.create_subscription{
+        self.drive_subscriber= self.create_subscription(
             AckermannDriveStamped,
             '/drive',
             self.drive_callback,
             10
-        }
+        )
 
 
         self.predicted_path_pub = self.create_publisher(
