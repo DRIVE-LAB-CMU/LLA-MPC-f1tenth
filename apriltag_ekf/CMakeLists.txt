@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.5)
-project(pure_pursuit)
+# FIX 1: Change this to your actual package name! 
+# (It must match the <name> tag in package.xml)
+project(apriltag_ekf) 
 
 # Default to C++14
 if(NOT CMAKE_CXX_STANDARD)
@@ -10,63 +12,45 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# Find dependencies
-foreach(PACKAGE 
-  ament_cmake 
-  ament_cmake_python
-  rclcpp
-  rclpy 
-  geometry_msgs
-  nav_msgs
-  ackermann_msgs
-  sensor_msgs
-  std_msgs
-  visualization_msgs
-  Eigen3
-  tf2_ros)
+find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
 
-  find_package(${PACKAGE} REQUIRED)
+# NOTE: You do NOT need to find_package() python dependencies like rclpy, tf2_ros, etc.
+# Those are handled by package.xml <exec_depend>
 
-endforeach()
+# ---------------------------------------------------------
+# C++ SECTION (Delete this block if you don't have C++ code)
+# ---------------------------------------------------------
+# If you DO have C++ code, uncomment these, but ensure the files actually exist!
+# find_package(rclcpp REQUIRED)
+# add_executable(some_cpp_node src/some_cpp_node.cpp)
+# ament_target_dependencies(some_cpp_node rclcpp)
+# install(TARGETS some_cpp_node DESTINATION lib/${PROJECT_NAME})
+# ---------------------------------------------------------
 
-# Include Cpp "include" directory
-include_directories(include)
-include_directories(
-  ${EIGEN3_INCLUDE_DIRS}
-)
+# ---------------------------------------------------------
+# PYTHON SECTION
+# ---------------------------------------------------------
 
-# Create Cpp executable
-add_executable(pure_pursuit_node src/pure_pursuit_node.cpp)
+# 1. Install Python modules (if you have a folder named 'apriltag_ekf' with __init__.py)
+# ament_python_install_package(${PROJECT_NAME})
 
-ament_target_dependencies(pure_pursuit_node 
-  rclcpp geometry_msgs ackermann_msgs nav_msgs sensor_msgs std_msgs visualization_msgs tf2_ros
-)
-
-# Install Cpp executables
-install(TARGETS
-  pure_pursuit_node
-  DESTINATION lib/${PROJECT_NAME})
-
-# Install Python modules
-ament_python_install_package(${PROJECT_NAME})
-
-# Install Python executables
+# 2. Install the script
 install(PROGRAMS
-  scripts/pure_pursuit_node.py
+  scripts/apriltag_ekf_node.py  # FIX 2: Corrected spelling (was aprilatag)
   DESTINATION lib/${PROJECT_NAME}
+)
+
+# 3. Install config/launch files (highly recommended for your YAML)
+install(DIRECTORY
+  launch
+  config
+  DESTINATION share/${PROJECT_NAME}
 )
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
-  # the following line skips the linter which checks for copyrights
-  # uncomment the line when a copyright and license is not present in all source files
-  #set(ament_cmake_copyright_FOUND TRUE)
-  # the following line skips cpplint (only works in a git repo)
-  # uncomment the line when this package is not in a git repo
-  #set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
-
-
 
 ament_package()
