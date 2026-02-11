@@ -33,7 +33,7 @@ find_package(ament_cmake_python REQUIRED)
 # ---------------------------------------------------------
 
 # 1. Install Python modules (if you have a folder named 'apriltag_ekf' with __init__.py)
-# ament_python_install_package(${PROJECT_NAME})
+ament_python_install_package(${PROJECT_NAME})
 
 # 2. Install the script
 install(PROGRAMS
