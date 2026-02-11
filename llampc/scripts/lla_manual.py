@@ -59,6 +59,8 @@ class MPCNode(Node):
         
         self.projidx = 0
 
+        self.last_drive_time = None
+
         self.count = 0
         self.time_window = 1
         self.time_index = 0
@@ -70,7 +72,11 @@ class MPCNode(Node):
         # dictionary, prefereably npy, which has waypoints_x, waypoints_y, and velocity
         track_name = self.get_parameter('track_file_name').get_parameter_value().string_value
 
-        self.track = Track(track_name)
+        # self.track = Track(track_name)
+
+        self.last_velocity = 0
+        self.cur_velocity = 0
+        self.drive_steer = 0
     
 
         self.odom_subscriber = self.create_subscription(
@@ -102,6 +108,7 @@ class MPCNode(Node):
 
         self.control_timer = self.create_timer(self.control_callback_speed, self.control_callback) # run 100 hz
 
+        
 
         self.get_logger().info("F1tenth MPC Initialized")
 
@@ -109,8 +116,8 @@ class MPCNode(Node):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
         self.declare_parameter('track_file_name', 'nshhall3.npz')
-        #self.declare_parameter('odom_topic', '/pf/pose/odom')
-        self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        self.declare_parameter('odom_topic', '/pf/pose/odom')
+        # self.declare_parameter('odom_topic', '/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
@@ -455,6 +462,8 @@ class MPCNode(Node):
 
         self.lb_history.get_best_model()
         self.lb_history.reset()
+
+        
         self.get_logger().info("LLA BANK COMPILED")
 
     def drive_callback(self, msg):
@@ -462,7 +471,8 @@ class MPCNode(Node):
         self.drive_steer = msg.drive.steering_angle
 
 
-    def odom_callback(self, msg):        
+    def odom_callback(self, msg):
+        # print("hello")        
         x = msg.pose.pose.position.x
         y = msg.pose.pose.position.y
         
@@ -491,7 +501,9 @@ class MPCNode(Node):
     def control_callback(self):
         self.checkpoint[0] = time.perf_counter_ns()
 
-        if self.track is None or self.current_state is None:
+        print(self.current_state)
+
+        if self.current_state is None:
             return
         
         ##############################################
@@ -528,11 +540,11 @@ class MPCNode(Node):
         ### GET REF TRAJECTORY AND MODEL FOR ROLLOUT
 
         # no need to copy states and trajectory in case of update b/c node is single thread
-        ref_segment, idx = get_reference_trajectory_segment(x0, v0, self.track, self.N, self.dt, self.projidx)
-        self.projidx = idx
+        # ref_segment, idx = get_reference_trajectory_segment(x0, v0, self.track, self.N, self.dt, self.projidx)
+        # self.projidx = idx
 
-        if self.publish_trajectories:
-            self.publish_ref_trajectory(ref_segment)
+        # if self.publish_trajectories:
+        #     self.publish_ref_trajectory(ref_segment)
 
         self.checkpoint[2] = time.perf_counter_ns()
         
@@ -554,7 +566,7 @@ class MPCNode(Node):
         else:
             selected_model_index = self.lb_history.get_best_model()
             selected_model_params = self.dynamics_bank.get_model_params_arr(selected_model_index)
-
+            # print("hello")
             self.log_lla_data(selected_model_params, selected_model_index)
         
         ########################################################
@@ -563,7 +575,7 @@ class MPCNode(Node):
         
         
         self.checkpoint[3]= time.perf_counter_ns()
-
+        diff = None
         time_now = time.perf_counter_ns() * 1e-9
         if(self.last_drive_time != None):
             diff = self.last_drive_time - time_now
@@ -673,6 +685,7 @@ class MPCNode(Node):
 
     def log_lla_data(self, params, model_index):
         if(self.log_data):
+            print("logging")
             now_ns = time.perf_counter_ns()
             self.log_buffer["time"].append(now_ns)
             self.log_buffer["state"].append(self.current_state.copy())
