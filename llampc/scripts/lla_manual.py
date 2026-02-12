@@ -116,8 +116,8 @@ class MPCNode(Node):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
         self.declare_parameter('track_file_name', 'nshhall3.npz')
-        self.declare_parameter('odom_topic', '/pf/pose/odom')
-        # self.declare_parameter('odom_topic', '/odom')
+        # self.declare_parameter('odom_topic', '/pf/pose/odom')
+        self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
@@ -165,24 +165,27 @@ class MPCNode(Node):
         }
 
         variation_dict = {
-                'Bf': 1.0 * mean_dict['Bf'],   # 15% variation
-                'Br': 1.0 * mean_dict['Br'],   # 15% variation
-                'Cf': 1.0 * mean_dict['Cf'],   # 15% variation
-                'Cr': 1.0 * mean_dict['Cr'],   # 15% variation
+                'Bf': 0.0,   # 15% variation
+                'Br': 0.0,   # 15% variation
+                'Cf': 0.0,   # 15% variation
+                'Cr': 0.0,   # 15% variation
                 'Df': 1.0,   # 15% variation
                 'Dr': 1.0,   # 15% variation
-                'Cro': 1.0* mean_dict['Cro'], # 15% variation
-                'Cd': 1.0* mean_dict['Cd'],  # 15% variation
-                'Ce': 1.0* mean_dict['Ce'],  # 15% variation
-                'Cm': 1.0* mean_dict['Cm'],  # 15% variation
+                'Cro': 0.0, # 15% variation
+                'Cd': 0.0,  # 15% variation
+                'Ce': 0.0,  # 15% variation
+                'Cm': 0.0,  # 15% variation
             }
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
         
-        num_models = 200
+        num_models = 22
         self.state_size = 6
         param_dict = get_param_dict(mean_dict, variation_dict, num_models, ground_truth=True)
         
         self.get_logger().info("Dynamics bank starting")
+
+        print(param_dict['Df'])
+        print(param_dict['Dr'])
 
         self.dynamics_bank = dynamics.DBMPacejkaBank(
             params_car['lf'], params_car['lr'], 
@@ -450,8 +453,8 @@ class MPCNode(Node):
 
         # start solver
         self.current_state = None
-        self.solver = setup_mpc(self.N, self.Tf, build=True)
-        self.get_logger().info("SOLVER COMPILED, WARM STARTING")
+        # self.solver = setup_mpc(self.N, self.Tf, build=True)
+        # self.get_logger().info("SOLVER COMPILED, WARM STARTING")
         
         self.lb_history.predict_states(
             np.zeros(self.state_size), np.zeros(2)
@@ -501,7 +504,7 @@ class MPCNode(Node):
     def control_callback(self):
         self.checkpoint[0] = time.perf_counter_ns()
 
-        print(self.current_state)
+        # print(self.current_state)
 
         if self.current_state is None:
             return
@@ -594,13 +597,13 @@ class MPCNode(Node):
         
         self.checkpoint[4] = time.perf_counter_ns()
 
-        if(self.publish_trajectories):
-            predicted_states = []
-            for i in range(self.N + 1):
-                x_pred = self.solver.get(i, "x")[:3]
-                predicted_states.append(x_pred)
+        # if(self.publish_trajectories):
+        #     predicted_states = []
+        #     for i in range(self.N + 1):
+        #         x_pred = self.solver.get(i, "x")[:3]
+        #         predicted_states.append(x_pred)
 
-            self.publish_predicted_trajectory(predicted_states) # Publish predicted trajectory
+        #     self.publish_predicted_trajectory(predicted_states) # Publish predicted trajectory
 
         #########################################
         ### PUBLISH MPC DATA
@@ -687,7 +690,7 @@ class MPCNode(Node):
 
     def log_lla_data(self, params, model_index):
         if(self.log_data):
-            print("logging")
+            # print("logging")
             now_ns = time.perf_counter_ns()
             self.log_buffer["time"].append(now_ns)
             self.log_buffer["state"].append(self.current_state.copy())
