@@ -116,8 +116,8 @@ class MPCNode(Node):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
         self.declare_parameter('track_file_name', 'nshhall3.npz')
-        # self.declare_parameter('odom_topic', '/pf/pose/odom')
-        self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        self.declare_parameter('odom_topic', '/pf/pose/odom')
+        # self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
@@ -178,7 +178,7 @@ class MPCNode(Node):
             }
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
         
-        num_models = 22
+        num_models = 10
         self.state_size = 6
         param_dict = get_param_dict(mean_dict, variation_dict, num_models, ground_truth=True)
         

@@ -178,7 +178,7 @@ class MPCNode(Node):
             }
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
         
-        num_models = 200
+        num_models = 10
         self.state_size = 6
         param_dict = get_param_dict(mean_dict, variation_dict, num_models, ground_truth=True)
         
@@ -405,7 +405,8 @@ class MPCNode(Node):
             param_dict['Cro'], param_dict['Cd'],
             param_dict['Ce'], param_dict['Cm'],
             param_dict['roll'], param_dict['pitch'],
-            num_models
+            
+            
         )
         
         history_length=25
