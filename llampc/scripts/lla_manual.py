@@ -157,9 +157,9 @@ class MPCNode(Node):
             'Cr': 1.0,
             'Df': 0.7,
             'Dr': 0.7,
-            'Cro': 0.02,
+            'Cro': 0.015,
             'Cd': 0.001,
-            'Ce': 1.0,
+            'Ce': 0.7,
             'Cm': .05, 
             
         }
@@ -171,10 +171,10 @@ class MPCNode(Node):
                 'Cr': .5* mean_dict['Cr'],   # 15% variation
                 'Df': .3,   # 15% variation
                 'Dr': .3,   # 15% variation
-                'Cro': 0.5* mean_dict['Cro'], # 15% variation
-                'Cd': 0.5* mean_dict['Cd'],  # 15% variation
-                'Ce': 0.5* mean_dict['Ce'],  # 15% variation
-                'Cm': 0.5* mean_dict['Cm'],  # 15% variation
+                'Cro': .01, # 15% variation
+                'Cd': 0,  # assume negligible drag
+                'Ce': 0.3,  # motor efficiency conversion should never be above 1
+                'Cm': 0.5* mean_dict['Cm'],  # motor speed saturation
             }
         cost_weights = np.array([1.0, 1.0, 0.1, 0.01, 0, 0]) # x, y, theta, vx, vy, omega
         
@@ -204,7 +204,7 @@ class MPCNode(Node):
             num_models, history_length,
             self.lla_predict_horizon, cost_weights,
             self.state_size, rk4Factory,
-            self.dynamics_bank, dynamics.diffequation_unoptimized,
+            self.dynamics_bank, dynamics.diffequation,
             buffer_size = [0, 0]
         )
         
