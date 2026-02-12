@@ -206,7 +206,7 @@ class MPCNode(Node):
             num_models, history_length,
             self.lla_predict_horizon, cost_weights,
             self.state_size, rk4Factory,
-            self.dynamics_bank, dynamics.diffequation,
+            self.dynamics_bank, dynamics.diffequation_unoptimized,
             buffer_size = [0, 0]
         )
         
