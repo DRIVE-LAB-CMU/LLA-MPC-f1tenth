@@ -88,7 +88,7 @@ class MPCNode(Node):
 
         self.drive_subscriber= self.create_subscription(
             AckermannDriveStamped,
-            '/drive',
+            '/ackermann_cmd',
             self.drive_callback,
             10
         )
