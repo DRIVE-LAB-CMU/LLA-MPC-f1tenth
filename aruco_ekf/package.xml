@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>apriltag_ekf</name>
+  <name>aruco_ekf</name>
   <version>0.0.0</version>
-  <description>AprilTag EKF Localization Package</description>
+  <description>ArUco EKF Localization Package</description>
   
   <maintainer email="your_email@example.com">Your Name</maintainer>
   <license>MIT</license>
@@ -16,12 +16,14 @@
   <depend>nav_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
-  <depend>apriltag_msgs</depend>
+
+  <depend>aruco_opencv_msgs</depend>
 
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>tf2_geometry_msgs</exec_depend>
 
   <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-opencv</exec_depend> 
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

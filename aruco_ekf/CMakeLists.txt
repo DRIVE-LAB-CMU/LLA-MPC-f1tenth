@@ -37,7 +37,7 @@ ament_python_install_package(${PROJECT_NAME})
 
 # 2. Install the script
 install(PROGRAMS
-  scripts/apriltag_ekf_node.py  # FIX 2: Corrected spelling (was aprilatag)
+  scripts/aruco_ekf_node.py  # FIX 2: Corrected spelling (was aprilatag)
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -1,0 +1,11 @@
+aruco_tracker:
+  ros__parameters:
+    # ArUco Settings
+    cam_base_topic: "/image_rect"
+    marker_size: 0.15
+    marker_dict: "4X4_50"
+    image_is_rectified: true
+
+    # Optimization for Jetson
+    # (Higher step = faster search, but misses small tags)
+    adaptiveThreshWinSizeStep: 10

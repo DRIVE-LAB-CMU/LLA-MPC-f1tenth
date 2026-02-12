@@ -1,4 +1,4 @@
-apriltag_ekf:
+aruco_ekf:
   ros__parameters:
     # Publishing rate for filtered odometry (Hz)
     publish_rate: 50.0
