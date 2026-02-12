@@ -690,7 +690,7 @@ class MPCNode(Node):
 
     def log_lla_data(self, params, model_index):
         if(self.log_data):
-            # print("logging")
+            print("logging")
             now_ns = time.perf_counter_ns()
             self.log_buffer["time"].append(now_ns)
             self.log_buffer["state"].append(self.current_state.copy())
