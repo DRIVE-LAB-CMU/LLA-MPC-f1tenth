@@ -176,9 +176,9 @@ class MPCNode(Node):
                 'Ce': 0.5* mean_dict['Ce'],  # 15% variation
                 'Cm': 0.5* mean_dict['Cm'],  # 15% variation
             }
-        cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
+        cost_weights = np.array([1.0, 1.0, 0.1, 0.01, 0, 0]) # x, y, theta, vx, vy, omega
         
-        num_models = 3000
+        num_models = 5000
         self.state_size = 6
         param_dict = get_param_dict(mean_dict, variation_dict, num_models, ground_truth=True)
         

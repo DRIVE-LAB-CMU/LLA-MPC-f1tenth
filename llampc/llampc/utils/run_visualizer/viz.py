@@ -336,7 +336,7 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'fast.npz')
+    filepath = os.path.join(dir_path, 'bigrandom.npz')
     
     # Optional: Define parameter names
     param_names = {
