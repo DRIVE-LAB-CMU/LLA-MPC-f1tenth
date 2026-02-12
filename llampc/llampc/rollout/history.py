@@ -98,7 +98,7 @@ class LBHistory:
             x_t,
             buffered_u_t)
         
-        print(self.last_predicted_states)
+        # print(self.last_predicted_states)
         
         
         t3 = time.perf_counter_ns()
@@ -127,7 +127,7 @@ class LBHistory:
         self.queue_index = (self.queue_index + 1) % self.history_length
         t2 = time.perf_counter_ns()
 
-        print(cost)
+        # print(cost)
         
         # print(f"Prep cost: {(t1-t0)*1e-6:.3f}ms, "
         #     f"Jit call: {(t2-t1)*1e-6:.3f}ms, ")
