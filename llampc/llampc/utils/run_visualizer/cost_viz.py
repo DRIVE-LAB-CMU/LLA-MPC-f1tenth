@@ -423,7 +423,8 @@ class LLAMPCVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'stuff2.npz')
+    filepath = os.path.join(dir_path, 'corrected.npz')
+    # filepath = os.path.join(dir_path, 'spinout.npz')
     
     # Create visualizer
     visualizer = LLAMPCVisualizer(

@@ -165,16 +165,16 @@ class MPCNode(Node):
         }
 
         variation_dict = {
-                'Bf': 0.0,   # 15% variation
-                'Br': 0.0,   # 15% variation
-                'Cf': 0.0,   # 15% variation
-                'Cr': 0.0,   # 15% variation
-                'Df': 1.0,   # 15% variation
-                'Dr': 1.0,   # 15% variation
-                'Cro': 0.0, # 15% variation
-                'Cd': 0.0,  # 15% variation
-                'Ce': 0.0,  # 15% variation
-                'Cm': 0.0,  # 15% variation
+                'Bf': .5 * mean_dict['Bf'],   # 15% variation
+                'Br': .5* mean_dict['Br'],   # 15% variation
+                'Cf': .5* mean_dict['Cf'],   # 15% variation
+                'Cr': .5* mean_dict['Cr'],   # 15% variation
+                'Df': .3,   # 15% variation
+                'Dr': .3,   # 15% variation
+                'Cro': 0.5* mean_dict['Cro'], # 15% variation
+                'Cd': 0.5* mean_dict['Cd'],  # 15% variation
+                'Ce': 0.5* mean_dict['Ce'],  # 15% variation
+                'Cm': 0.5* mean_dict['Cm'],  # 15% variation
             }
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
         
