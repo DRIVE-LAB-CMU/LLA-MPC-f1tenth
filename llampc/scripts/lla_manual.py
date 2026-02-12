@@ -165,16 +165,16 @@ class MPCNode(Node):
         }
 
         variation_dict = {
-                'Bf': .5 * mean_dict['Bf'],   # 15% variation
-                'Br': .5* mean_dict['Br'],   # 15% variation
-                'Cf': .5* mean_dict['Cf'],   # 15% variation
-                'Cr': .5* mean_dict['Cr'],   # 15% variation
-                'Df': .3,   # 15% variation
-                'Dr': .3,   # 15% variation
-                'Cro': 0.5* mean_dict['Cro'], # 15% variation
-                'Cd': 0.5* mean_dict['Cd'],  # 15% variation
-                'Ce': 0.5* mean_dict['Ce'],  # 15% variation
-                'Cm': 0.5* mean_dict['Cm'],  # 15% variation
+                'Bf': 1.0 * mean_dict['Bf'],   # 15% variation
+                'Br': 1.0 * mean_dict['Br'],   # 15% variation
+                'Cf': 1.0 * mean_dict['Cf'],   # 15% variation
+                'Cr': 1.0 * mean_dict['Cr'],   # 15% variation
+                'Df': 1.0,   # 15% variation
+                'Dr': 1.0,   # 15% variation
+                'Cro': 1.0* mean_dict['Cro'], # 15% variation
+                'Cd': 1.0* mean_dict['Cd'],  # 15% variation
+                'Ce': 1.0* mean_dict['Ce'],  # 15% variation
+                'Cm': 1.0* mean_dict['Cm'],  # 15% variation
             }
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
         
@@ -587,8 +587,10 @@ class MPCNode(Node):
             
             steer = self.drive_steer
             u_opt = np.array([accel, steer])
+            self.last_control = u_opt
         else:
             u_opt = np.array([0, 0])
+            self.last_control = u_opt
         
         self.checkpoint[4] = time.perf_counter_ns()
 
