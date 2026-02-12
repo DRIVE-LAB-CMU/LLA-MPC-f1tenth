@@ -178,14 +178,12 @@ class MPCNode(Node):
             }
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
         
-        num_models = 10
+        num_models = 3000
         self.state_size = 6
         param_dict = get_param_dict(mean_dict, variation_dict, num_models, ground_truth=True)
         
         self.get_logger().info("Dynamics bank starting")
 
-        print(param_dict['Df'])
-        print(param_dict['Dr'])
 
         self.dynamics_bank = dynamics.DBMPacejkaBank(
             params_car['lf'], params_car['lr'], 
