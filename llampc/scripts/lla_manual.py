@@ -504,7 +504,7 @@ class MPCNode(Node):
     def control_callback(self):
         self.checkpoint[0] = time.perf_counter_ns()
 
-        # print(self.current_state)
+        print(self.current_state)
 
         if self.current_state is None:
             return
