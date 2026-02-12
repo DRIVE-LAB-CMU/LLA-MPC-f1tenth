@@ -33,9 +33,7 @@ def diffequation_unoptimized(
     mass, Iz, lf, lr, roll, pitch = known_params
     Ffy, Frx, Fry = _calc_forces(bank_params, known_params, x, u)
 
-    jax.debug.print("DEBUG: Ffy={fy}, Frx={rx}, Fry={ry}, Steer={s}", 
-                    fy=Ffy, rx=Frx, ry=Fry, s=steer)
-
+    
     return jnp.array([
         vx*jnp.cos(psi) - vy*jnp.sin(psi),
         vx*jnp.sin(psi) + vy*jnp.cos(psi),

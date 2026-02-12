@@ -98,16 +98,18 @@ class LBHistory:
             x_t,
             buffered_u_t)
         
+        print(self.last_predicted_states)
+        
         
         t3 = time.perf_counter_ns()
         
         jax.block_until_ready(self.last_predicted_states)
         t4 = time.perf_counter_ns()
         
-        print(f"Buffer: {(t1-t0)*1e-6:.3f}ms, "
-          f"GetParams: {(t2-t1)*1e-6:.3f}ms, "
-          f"Integrator: {(t3-t2)*1e-6:.3f}ms, "
-          f"Sync: {(t4-t3)*1e-6:.3f}ms")
+        # print(f"Buffer: {(t1-t0)*1e-6:.3f}ms, "
+        #   f"GetParams: {(t2-t1)*1e-6:.3f}ms, "
+        #   f"Integrator: {(t3-t2)*1e-6:.3f}ms, "
+        #   f"Sync: {(t4-t3)*1e-6:.3f}ms")
         
     def update_lookback_error(self, x_t):
         t0 = time.perf_counter_ns()
@@ -124,7 +126,8 @@ class LBHistory:
         # Advance queue_index
         self.queue_index = (self.queue_index + 1) % self.history_length
         t2 = time.perf_counter_ns()
-        
+
+        print(cost)
         
         # print(f"Prep cost: {(t1-t0)*1e-6:.3f}ms, "
         #     f"Jit call: {(t2-t1)*1e-6:.3f}ms, ")
