@@ -423,7 +423,7 @@ class LLAMPCVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path,'hallway_recording.npz')
+    filepath = os.path.join(dir_path,'hall.npz')
     # filepath = os.path.join(dir_path, 'spinout.npz')
     
     # Create visualizer

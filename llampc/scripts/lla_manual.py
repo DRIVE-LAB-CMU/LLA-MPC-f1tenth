@@ -716,9 +716,9 @@ class MPCNode(Node):
                 params=np.array(self.log_buffer["params"]),
                 model_index=np.array(self.log_buffer["model_idx"]),
                 ctrl=np.array(self.log_buffer["ctrl"]), 
-                # states=np.array(self.log_buffer["predicted_state"]),
-                # one_step_cost=np.array(self.log_buffer["one_step_cost"]),
-                # running_cost=np.array(self.log_buffer["running_cost"]),
+                states=np.array(self.log_buffer["predicted_state"]),
+                one_step_cost=np.array(self.log_buffer["one_step_cost"]),
+                running_cost=np.array(self.log_buffer["running_cost"]),
                 ok_time = np.array(self.log_buffer["ok_time"])
             )
         super().destroy_node()
