@@ -179,7 +179,7 @@ class MPCNode(Node):
             }
         cost_weights = np.array([1.0, 1.0, 0.1, 0.01, 0, 0]) # x, y, theta, vx, vy, omega
         
-        num_models = 5000
+        num_models = 2000
         self.state_size = 6
         param_dict = get_param_dict(mean_dict, variation_dict, num_models, ground_truth=True)
         
@@ -701,9 +701,9 @@ class MPCNode(Node):
     def log_rollout_data(self, lb_history, one_step_cost, ok_time):
         if(self.log_data):
             self.log_buffer["ok_time"].append(ok_time)
-            # self.log_buffer["predicted_state"].append(lb_history.last_predicted_states.copy())
-            # self.log_buffer["one_step_cost"].append(one_step_cost)
-            # self.log_buffer["running_cost"].append(lb_history.running_cost.copy())
+            self.log_buffer["predicted_state"].append(lb_history.last_predicted_states.copy())
+            self.log_buffer["one_step_cost"].append(one_step_cost)
+            self.log_buffer["running_cost"].append(lb_history.running_cost.copy())
 
 
     def destroy_node(self):
