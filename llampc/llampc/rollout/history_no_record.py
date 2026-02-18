@@ -27,19 +27,15 @@ def get_lookback_error(last_predicted_states, x_t, cost_weights):
     return cost
 
 @jax.jit
-def _step_bank(last_predicted_states, cost_history, running_cost, queue_index, x_t, cost_weights):
-    cost = jnp.sum(jnp.square(x_t[None, :] - last_predicted_states) * cost_weights[None, :], axis = 1)
-
-    running_cost = running_cost.at[:].add(-cost_history[:, queue_index])
-
-    cost_history = cost_history.at[:, queue_index].set(cost)
-
+def _step_bank(last_predicted_states,  running_cost, x_t, cost_weights):
+    diff = x_t[None, :] - last_predicted_states
+    cost = jnp.sum(jnp.square(diff) * cost_weights[None, :], axis = 1)
     running_cost = running_cost.at[:].add(cost)
 
     best_model = jnp.argmin(running_cost)
 
 
-    return cost, cost_history, running_cost, best_model
+    return diff, cost,  running_cost, best_model
 
 @jax.jit
 def find_best_model(running_cost):
@@ -48,16 +44,14 @@ def find_best_model(running_cost):
 
 class LBHistory:
 
-    def __init__(self, num_models, history_length, dt, cost_weights, state_size, integrator_factory, dynamics_bank, diffeq,
+    def __init__(self, num_models, dt, cost_weights, state_size, integrator_factory, dynamics_bank, diffeq,
                  buffer_size = None, control_size = 2):
         self.num_models = num_models
-        self.history_length = history_length
 
         self.last_predicted_states = jax.device_put(jnp.zeros((self.num_models, state_size), dtype='float32'), device = gpu)
 
         self.running_cost = jax.device_put(jnp.zeros(self.num_models, dtype='float32'), device = gpu)
-        self.cost_history = jax.device_put(jnp.zeros((self.num_models, self.history_length), dtype='float32'), device = gpu)
-        self.queue_index = 0
+        
         self.dt = dt
         self.cost_weights = jax.device_put(jnp.array(cost_weights, dtype='float32'), device = gpu)
         self.state_size = state_size
@@ -106,40 +100,19 @@ class LBHistory:
         jax.block_until_ready(self.last_predicted_states)
         t4 = time.perf_counter_ns()
         
-        # print(f"Buffer: {(t1-t0)*1e-6:.3f}ms, "
-        #   f"GetParams: {(t2-t1)*1e-6:.3f}ms, "
-        #   f"Integrator: {(t3-t2)*1e-6:.3f}ms, "
-        #   f"Sync: {(t4-t3)*1e-6:.3f}ms")
         
     def update_lookback_error(self, x_t):
         t0 = time.perf_counter_ns()
         gpu_x = jax.device_put(jnp.array(x_t, dtype = 'float32'), device = gpu)
         t1 = time.perf_counter_ns()
-        cost, self.cost_history, self.running_cost, self.current_best_model = _step_bank(
+        diff, cost, self.running_cost, self.current_best_model = _step_bank(
             self.last_predicted_states,
-            self.cost_history,
             self.running_cost,
-            self.queue_index,
             gpu_x,
             self.cost_weights
         )
-        # Advance queue_index
-        self.queue_index = (self.queue_index + 1) % self.history_length
-        t2 = time.perf_counter_ns()
 
-        # print(cost)
-        
-        # print(f"Prep cost: {(t1-t0)*1e-6:.3f}ms, "
-        #     f"Jit call: {(t2-t1)*1e-6:.3f}ms, ")
-            # f"In-place update: {(t2-t1)*1e-6:.3f}ms, "
-            # f"CPU Transfer: {(t3-t2)*1e-6:.3f}ms")
-
-        # print(f"Prep cost: {(t1-t0)*1e-6:.3f}ms, ")
-            # f"Jit call: {(t1-t0)*1e-6:.3f}ms, "
-            # f"In-place update: {(t2-t1)*1e-6:.3f}ms, "
-            # f"CPU Transfer: {(t3-t2)*1e-6:.3f}ms")
-
-        return cost
+        return diff, cost
     
 
     def reset(self):
@@ -150,8 +123,6 @@ class LBHistory:
         )
         self.current_best_model = 0
         self.running_cost = np.zeros(self.num_models, dtype='float32')
-        self.cost_history = np.zeros((self.num_models, self.history_length), dtype='float32')
-        self.queue_index = 0
 
     def get_best_model(self):
         return self.current_best_model

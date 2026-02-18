@@ -61,7 +61,7 @@ def diffequation(bank_params, known_params, x, u):
     Bf, Br, Cf, Cr, Df, Dr, Cro, Cd, Ce, Cm = bank_params
     
     # Forces
-    Frx = mass * (acc * Ce - Cm * vx) - Cro - Cd * (vx * vx)
+    Frx = mass * acc * ( Ce - Cm * vx) - Cro - Cd * (vx * vx)
     
     vx_safe = jnp.where(jnp.abs(vx) < 1e-4, 1e-4, vx)
     alphaf = steer - jnp.arctan2((lf * omega + vy), vx_safe)
@@ -96,7 +96,7 @@ def _calc_forces(bank_params, known_params, x, u):
     Bf, Br, Cf, Cr, Df, Dr, Cro, Cd, Ce, Cm = bank_params
     mass, Iz, lf, lr, roll, pitch =  known_params
 
-    Frx = mass * (acc * Ce - Cm * vx ) - Cro - Cd * (vx * vx)
+    Frx = acc* ( Ce - Cm * vx ) - Cro - Cd * (vx * vx)
     def small_velocity_case(_):
         alphaf = 0.0
         alphar = 0.0

@@ -510,7 +510,8 @@ class MPCNode(Node):
         ##############################################
         ### BANK UPDATE
         one_step_cost = None
-        if(self.time_history[-1, self.count] * 1e-6 < 2 * self.dt * 1000):
+        ok_time = self.time_history[-1, self.count] * 1e-6 < 2 * self.dt * 1000
+        if(ok_time):
             if not self.sim:
                 one_step_cost = self.lb_history.update_lookback_error(
                     self.current_state
@@ -530,7 +531,7 @@ class MPCNode(Node):
                     )
                 )
 
-        self.log_rollout_data(self.lb_history, one_step_cost)
+        self.log_rollout_data(self.lb_history, one_step_cost, ok_time)
 
         x0 = self.current_state[:2]
         v0 = self.current_state[3]
@@ -696,11 +697,13 @@ class MPCNode(Node):
             self.log_buffer["model_idx"].append(model_index)
             self.log_buffer["ctrl"].append(self.last_control.copy())
 
-    def log_rollout_data(self, lb_history, one_step_cost):
+    def log_rollout_data(self, lb_history, one_step_cost, ok_time):
         if(self.log_data):
-            self.log_buffer["predicted_state"].append(lb_history.last_predicted_states.copy())
-            self.log_buffer["one_step_cost"].append(one_step_cost)
-            self.log_buffer["running_cost"].append(lb_history.running_cost.copy())
+            self.log_buffer["ok_time"].append(ok_time)
+            # self.log_buffer["predicted_state"].append(lb_history.last_predicted_states.copy())
+            # self.log_buffer["one_step_cost"].append(one_step_cost)
+            # self.log_buffer["running_cost"].append(lb_history.running_cost.copy())
+
 
     def destroy_node(self):
         if(self.log_data):
@@ -712,9 +715,10 @@ class MPCNode(Node):
                 params=np.array(self.log_buffer["params"]),
                 model_index=np.array(self.log_buffer["model_idx"]),
                 ctrl=np.array(self.log_buffer["ctrl"]), 
-                states=np.array(self.log_buffer["predicted_state"]),
-                one_step_cost=np.array(self.log_buffer["one_step_cost"]),
-                running_cost=np.array(self.log_buffer["running_cost"])
+                # states=np.array(self.log_buffer["predicted_state"]),
+                # one_step_cost=np.array(self.log_buffer["one_step_cost"]),
+                # running_cost=np.array(self.log_buffer["running_cost"]),
+                ok_time = np.array(self.log_buffer["ok_time"])
             )
         super().destroy_node()
 

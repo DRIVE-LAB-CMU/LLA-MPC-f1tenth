@@ -75,10 +75,10 @@ class LBHistory:
         self.num_models = num_models
         self.history_length = history_length
 
-        self.last_predicted_states = jnp.zeros((self.num_models, state_size), dtype='float16')
+        self.last_predicted_states = jnp.zeros((self.num_models, state_size), dtype='float32')
 
-        self.running_cost = np.zeros(self.num_models, dtype='float16')
-        self.cost_history = np.zeros((self.num_models, self.history_length), dtype='float16')
+        self.running_cost = np.zeros(self.num_models, dtype='float32')
+        self.cost_history = np.zeros((self.num_models, self.history_length), dtype='float32')
         self.queue_index = 0
         self.dt = dt
         self.cost_weights = jnp.array(cost_weights)
