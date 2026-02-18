@@ -5,6 +5,8 @@ from llampc.rollout.rk6 import rk6Factory
 import numpy as np
 import os
 
+os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=8"
+
 def main():
     params_range = {
         'Bf': [0.1, 30],
@@ -22,7 +24,7 @@ def main():
         'Cd': 0.0
     }
 
-    discretization = 5    
+    discretization = 5
     
     param_series = {
         param_key: np.linspace(value[0], value[1], discretization + 1, dtype=np.float32)
@@ -69,19 +71,22 @@ def main():
     )
 
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'run_visualizer', 'close.npz')
+    filepath = os.path.join(dir_path, 'hallway_recording.npz')
 
-    filepath = ""
     recording = np.load(filepath, allow_pickle=True)
-    total = range(len(recording)-1)
-    for t in range(len(recording)-1):
+    total = len(recording["time"])-1
+    
+    for t in range(total):
+
+        print(f"--- Processing Timestep {t} of {total} ---", flush=True)
 
         current_state =  recording["state"][t]
         u_opt = recording["ctrl"][t]
         lb_history.predict_states(
             current_state, u_opt
         )
-        if(recording["ok_time"][t+1] is True):
+
+        if(recording["ok_time"][t+1]):
             next_state =  recording["state"][t+1]
 
             diff, costs = lb_history.update_lookback_error(
@@ -90,11 +95,14 @@ def main():
 
             cur_best_model = lb_history.get_best_model()
 
-            print("*********************************")
-            print(f"Timestep{t}: of {total}")
-            print(f"Best params: {dynamics_bank.get_model_params_arr(cur_best_model)}")
-            print(f"Diff: {diff[cur_best_model]}")
-            print(f"Cost: {costs[cur_best_model]}")
+            if(t %50== 0 or t == total):
+                print("*********************************", flush=True)
+                print(f"Timestep{t}: of {total}")
+                print(f"Best Model: {cur_best_model}")
+                print(f"Best params: {dynamics_bank.get_model_params_arr(cur_best_model)}")
+                print(f"Diff: {diff[cur_best_model]}")
+                print(f"Cost: {costs[cur_best_model]}")
+        
 
     
 

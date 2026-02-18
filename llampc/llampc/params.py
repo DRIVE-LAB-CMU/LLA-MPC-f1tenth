@@ -43,8 +43,8 @@ def F110():
 	switch_v = 1.
 	max_acc = 9.51 			# max acceleration [m/s^2]
 	min_acc = -13.26 		# max deceleration [m/s^2]
-	max_steer = 0.4189 		# max steering angle [rad]
-	min_steer = -0.4189 	# min steering angle [rad]
+	max_steer = 0.34 		# max steering angle [rad]
+	min_steer = -0.34 	# min steering angle [rad]
 	max_steer_vel = 3.2 	# max steering velocity [rad/s]
 
 	max_inputs = [max_acc, max_steer]

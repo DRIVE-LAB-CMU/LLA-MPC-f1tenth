@@ -95,10 +95,10 @@ class LBHistory:
         # print(self.last_predicted_states)
         
         
-        t3 = time.perf_counter_ns()
+        # t3 = time.perf_counter_ns()
         
-        jax.block_until_ready(self.last_predicted_states)
-        t4 = time.perf_counter_ns()
+        # jax.block_until_ready(self.last_predicted_states)
+        # t4 = time.perf_counter_ns()
         
         
     def update_lookback_error(self, x_t):

@@ -575,18 +575,18 @@ class MPCNode(Node):
         ########################################################
         #### SETUP AND SOLVE MPC
 
-        
-        
+        params_car = F110()
         self.checkpoint[3]= time.perf_counter_ns()
         diff = None
         time_now = time.perf_counter_ns() * 1e-9
         if(self.last_drive_time != None):
-            diff = self.last_drive_time - time_now
+            diff = time_now - self.last_drive_time
         self.last_drive_time = time_now
 
         if diff != None:
-            accel = (self.cur_velocity - self.last_velocity) / (diff)
-            self.last_velocity = self.cur_velocity
+            accel = min((self.cur_velocity - self.last_velocity) / (diff), params_car["max_acc"])
+
+            self.last_velocity = self.cur_velocity + accel * diff
             
             steer = self.drive_steer
             u_opt = np.array([accel, steer])
