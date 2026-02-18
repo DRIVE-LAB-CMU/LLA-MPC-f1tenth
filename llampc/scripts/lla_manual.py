@@ -142,7 +142,8 @@ class MPCNode(Node):
                 "ctrl": [],
                 "predicted_state": [],
                 "one_step_cost": [],
-                "running_cost":[]
+                "running_cost":[],
+                "ok_time":[]
             }
             self.get_logger().info(f"Logging MPC data to {self.log_file}")
     
