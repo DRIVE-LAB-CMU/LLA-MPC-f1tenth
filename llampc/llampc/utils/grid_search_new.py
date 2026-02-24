@@ -45,6 +45,51 @@ if not logger.handlers:
     logger.addHandler(console_handler)
     logger.addHandler(file_handler)
 
+def simulate_single_trajectory(total, recording, best_params, params_car, fixed_params):
+    """
+    Re-simulates a single model to record two trajectories:
+    1. Open-loop: Predicts all the way blindly starting from t=0.
+    2. One-step: Predicts one step blindly from the true state at every timestep.
+    """
+    # 1. Create a bank with a batch size of 1
+    single_db = dynamics.DBMPacejkaBank(
+        params_car['lf'], params_car['lr'], params_car['mass'], params_car['Iz'],
+        np.array([best_params[0]]), np.array([best_params[1]]), 
+        np.array([best_params[2]]), np.array([best_params[3]]), 
+        np.array([best_params[4]]), np.array([best_params[5]]), 
+        np.array([fixed_params['Cro']]), np.array([fixed_params['Cd']]),
+        np.array([best_params[6]]), np.array([best_params[7]]), 
+        0, 0, 1 # batch_size = 1
+    )
+
+    # 2. Instantiate the lookback history for a single model (using 1-step factory)
+    lb_single = history_no_record.LBHistory(
+        1, 1/40, np.array([1.0, 1.0, 0.1, 0.01, 0, 0]),
+        6, rk6Factory, single_db, dynamics.diffequation, buffer_size=[0, 0]
+    )
+
+    traj_open_loop = []
+    traj_one_step = []
+
+    # Initialize the open-loop state with the absolute first true state
+    current_ol_state = recording["state"][0]
+
+    for t in range(total):
+        u_opt = -recording["ctrl"][t]
+        true_state = recording["state"][t]
+        
+        # one-step prediction
+        lb_single.predict_states(true_state, u_opt)
+        pred_one_step = lb_single.predicted_states.copy()
+        traj_one_step.append(pred_one_step)
+
+        # open-loop prediction
+        lb_single.predict_states(current_ol_state, u_opt)
+        pred_ol = lb_single.predicted_states.copy()
+        traj_open_loop.append(pred_ol)
+        current_ol_state = pred_ol 
+
+    return np.array(traj_open_loop), np.array(traj_one_step)
 
 def grid_search_one_step(total, recording, lb_history, db_batch):
 
@@ -154,6 +199,7 @@ def main():
     total = len(recording["time"])-1
 
     global_best_cost= np.inf
+    batch_best_trajectories = []
 
     for b in range(num_batches):
         # 2. Extract the batch from the iterator
@@ -205,6 +251,21 @@ def main():
         best_idx_in_batch = lb_history.get_best_model()
         batch_min_cost = lb_history.running_cost[best_idx_in_batch]
 
+        best_params_in_batch = db_batch.get_model_params_arr(best_idx_in_batch)
+        
+        logger.info(f"Re-simulating batch {b+1} best model to record open-loop and one-step trajectories...")
+        
+        traj_open_loop, traj_one_step = simulate_single_trajectory(
+            total, recording, best_params_in_batch, params_car, fixed_params
+        )
+        
+        batch_best_trajectories.append({
+            "batch": b + 1,
+            "params": best_params_in_batch,
+            "traj_open_loop": traj_open_loop,
+            "traj_one_step": traj_one_step
+        })
+
         logger.info("-"*60)
         logger.info(f" Batch {b+1} Summary")
         logger.info(f" Best Model Index  : {best_idx_in_batch}")
@@ -219,6 +280,24 @@ def main():
         logger.info("-" * 60 + "\n")
         logger.info(f"  Global Cost      : {global_best_cost:.4f}")
         logger.info(f"  Global Parameters: {np.round(global_best_params, 4)}")
+
+        batches = [d["batch"] for d in batch_best_trajectories]
+    all_params = [d["params"] for d in batch_best_trajectories]
+    all_traj_open_loop = [d["traj_open_loop"] for d in batch_best_trajectories]
+    all_traj_one_step = [d["traj_one_step"] for d in batch_best_trajectories]
+
+    # Save to a single compressed .npz file
+    save_path = "all_batch_best_trajectories.npz"
+    np.savez_compressed(
+        save_path,
+        batch=batches,
+        params=all_params,
+        traj_open_loop=all_traj_open_loop,
+        traj_one_step=all_traj_one_step,
+        global_best_params=global_best_params, # Good idea to save the overall winner too!
+        global_best_cost=global_best_cost
+    )
+    logger.info(f"Successfully saved all trajectories to {save_path}")
 
 if __name__ == '__main__':
     main()
