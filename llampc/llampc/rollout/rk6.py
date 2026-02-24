@@ -94,3 +94,67 @@ def rk6Factory(bank_params, diffequation, h):
         return jax.vmap(rk6)(bank_params)
 
     return jax.jit(odeintRK6_batch)
+
+
+def eulerMultiStepFactory(bank_params, diffequation, h):
+    """Returns a batched N-step Euler rollout function."""
+    def odeintEuler_multistep(known_params, x0, U_seq):
+        def single_model_scan(b_p):
+            def step_fn(x_current, u_current):
+                x_next = x_current + h * diffequation(b_p, known_params, x_current, u_current)
+                return x_next, x_next  # (carry, output) for lax.scan
+            
+            # lax.scan automatically loops over the sequence of controls (U_seq)
+            final_state, _ = jax.lax.scan(step_fn, x0, U_seq)
+            return final_state
+
+        return jax.vmap(single_model_scan)(bank_params)
+
+    return jax.jit(odeintEuler_multistep)
+
+
+def rk4MultiStepFactory(bank_params, diffequation, h):
+    """Returns a batched N-step RK4 rollout function."""
+    def odeintRK4_multistep(known_params, x0, U_seq):
+        def single_model_scan(b_p):
+            def step_fn(x_current, u_current):
+                k1 = h * diffequation(b_p, known_params, x_current, u_current)
+                k2 = h * diffequation(b_p, known_params, x_current + k1 / 2, u_current)
+                k3 = h * diffequation(b_p, known_params, x_current + k2 / 2, u_current)
+                k4 = h * diffequation(b_p, known_params, x_current + k3, u_current)
+                x_next = x_current + (k1 + 2 * k2 + 2 * k3 + k4) / 6
+                return x_next, x_next
+            
+            final_state, _ = jax.lax.scan(step_fn, x0, U_seq)
+            return final_state
+
+        return jax.vmap(single_model_scan)(bank_params)
+
+    return jax.jit(odeintRK4_multistep)
+
+
+def rk6MultiStepFactory(bank_params, diffequation, h):
+    """Returns a batched N-step RK6 rollout function."""
+    gamma = jnp.array([16/135, 0, 6656/12825, 28561/56430, -9/50, 2/55])
+    
+    def odeintRK6_multistep(known_params, x0, U_seq):
+        def single_model_scan(b_p):
+            def step_fn(x_current, u_current):
+                k1 = h * diffequation(b_p, known_params, x_current, u_current)
+                k2 = h * diffequation(b_p, known_params, x_current + k1 * (1/4), u_current)
+                k3 = h * diffequation(b_p, known_params, x_current + k1 * (3/32) + k2 * (9/32), u_current)
+                k4 = h * diffequation(b_p, known_params, x_current + k1 * (1932/2197) - k2 * (7200/2197) + k3 * (7296/2197), u_current)
+                k5 = h * diffequation(b_p, known_params, x_current + k1 * (439/216) - k2 * 8 + k3 * (3680/513) - k4 * (845/4104), u_current)
+                k6 = h * diffequation(b_p, known_params, x_current - k1 * (8/27) + k2 * 2 - k3 * (3544/2565) + k4 * (1859/4104) - k5 * (11/40), u_current)
+
+                K = jnp.stack([k1, k2, k3, k4, k5, k6], axis=0)
+                x_next = x_current + jnp.sum(gamma[:, None] * K, axis=0)
+                return x_next, x_next
+            
+            final_state, _ = jax.lax.scan(step_fn, x0, U_seq)
+            return final_state
+
+        return jax.vmap(single_model_scan)(bank_params)
+
+    return jax.jit(odeintRK6_multistep)
+

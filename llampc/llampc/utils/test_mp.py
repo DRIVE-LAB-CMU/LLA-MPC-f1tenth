@@ -35,11 +35,11 @@ def main():
     
 
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'hallway_recording.npz')
+    filepath = os.path.join(dir_path,'run_visualizer', 'hall.npz')
 
     recording = np.load(filepath, allow_pickle=True)
-    for record in recording["ctrl"]:
-        print(record)
+    for i, record in enumerate(recording["ctrl"]):
+        print(f"{i}: {record}")
         
 
     

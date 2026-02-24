@@ -96,7 +96,7 @@ def _calc_forces(bank_params, known_params, x, u):
     Bf, Br, Cf, Cr, Df, Dr, Cro, Cd, Ce, Cm = bank_params
     mass, Iz, lf, lr, roll, pitch =  known_params
 
-    Frx = acc* ( Ce - Cm * vx ) - Cro - Cd * (vx * vx)
+    Frx = mass*acc* ( Ce - Cm * vx ) - Cro - Cd * (vx * vx)
     def small_velocity_case(_):
         alphaf = 0.0
         alphar = 0.0
