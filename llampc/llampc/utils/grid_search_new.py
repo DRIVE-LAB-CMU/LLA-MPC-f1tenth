@@ -85,7 +85,7 @@ def simulate_single_trajectory(total, recording, best_params, params_car, fixed_
 
         # open-loop prediction
         lb_single.predict_states(current_ol_state, u_opt)
-        pred_ol = np.array(lb_single.last_predicted_states.copy)
+        pred_ol = np.array(lb_single.last_predicted_states)
         traj_open_loop.append(pred_ol)
         current_ol_state = pred_ol 
 
