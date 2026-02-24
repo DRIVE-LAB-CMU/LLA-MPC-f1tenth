@@ -76,7 +76,6 @@ class LBHistory:
     
         t0 = time.perf_counter_ns()
 
-        print(type(x_t), flush=True)
         # buffered_u_t = u_t
 
         buffered_u_t = np.zeros_like(u_t)
@@ -91,8 +90,8 @@ class LBHistory:
         t2 = time.perf_counter_ns()
         self.last_predicted_states = self.integrator(
             known_params,
-            x_t,
-            buffered_u_t)
+            jnp.array(x_t),
+            jnp.array(buffered_u_t))
         
         
     def update_lookback_error(self, x_t):
