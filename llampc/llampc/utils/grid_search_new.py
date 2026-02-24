@@ -268,23 +268,23 @@ def main():
         logger.info(f"  Global Parameters: {np.round(global_best_params, 4)}")
 
 
-        best_params_in_batch = np.array(db_batch.get_model_params_arr(best_idx_in_batch))
+        # best_params_in_batch = np.array(db_batch.get_model_params_arr(best_idx_in_batch))
 
-        del lb_history
-        del db_batch
+        # del lb_history
+        # del db_batch
         
-        logger.info(f"Re-simulating batch {b+1} best model to record open-loop and one-step trajectories...")
+        # logger.info(f"Re-simulating batch {b+1} best model to record open-loop and one-step trajectories...")
         
-        traj_open_loop, traj_one_step = simulate_single_trajectory(
-            total, recording, best_params_in_batch, params_car, fixed_params
-        )
+        # traj_open_loop, traj_one_step = simulate_single_trajectory(
+        #     total, recording, best_params_in_batch, params_car, fixed_params
+        # )
         
-        batch_best_trajectories.append({
-            "batch": b + 1,
-            "params": best_params_in_batch,
-            "traj_open_loop": traj_open_loop,
-            "traj_one_step": traj_one_step
-        })
+        # batch_best_trajectories.append({
+        #     "batch": b + 1,
+        #     "params": best_params_in_batch,
+        #     "traj_open_loop": traj_open_loop,
+        #     "traj_one_step": traj_one_step
+        # })
 
 
     batches = [d["batch"] for d in batch_best_trajectories]
