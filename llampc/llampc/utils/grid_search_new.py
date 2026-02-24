@@ -100,6 +100,7 @@ def grid_search_one_step(total, recording, lb_history, db_batch):
 
         current_state =  recording["state"][t]
         u_opt = -recording["ctrl"][t]
+        logger.info(type(current_state))
         lb_history.predict_states(
             current_state, u_opt
         )
