@@ -128,7 +128,7 @@ def main():
 
     
     fixed_params = {'Cro': 0.0, 'Cd': 0.0}
-    discretization = 7
+    discretization = 10
     
     param_series = {
         k: np.linspace(v[0], v[1], discretization + 1, dtype=np.float32)
@@ -217,6 +217,8 @@ def main():
             logger.info(f"  Global Cost      : {global_best_cost:.4f}")
             logger.info(f"  Global Parameters: {np.round(global_best_params, 4)}")
         logger.info("-" * 60 + "\n")
+        logger.info(f"  Global Cost      : {global_best_cost:.4f}")
+        logger.info(f"  Global Parameters: {np.round(global_best_params, 4)}")
 
 if __name__ == '__main__':
     main()
