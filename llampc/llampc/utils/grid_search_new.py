@@ -45,50 +45,55 @@ if not logger.handlers:
     logger.addHandler(console_handler)
     logger.addHandler(file_handler)
 
-def simulate_single_trajectory(total, recording, best_params, params_car, fixed_params):
+def simulate_batched_trajectories(total, recording, all_best_params, params_car, fixed_params):
     """
-    Re-simulates a single model to record two trajectories:
-    1. Open-loop: Predicts all the way blindly starting from t=0.
-    2. One-step: Predicts one step blindly from the true state at every timestep.
+    Simulates all best batch models in parallel to record trajectories.
+    all_best_params should be a numpy array of shape (num_best_models, 8).
     """
-    # 1. Create a bank with a batch size of 1
-    single_db = dynamics.DBMPacejkaBank(
+    num_models = len(all_best_params)
+    logger.info(f"Building parallel simulation bank for {num_models} models...")
+
+    # 1. Create a bank with a batch size equal to the number of best models
+    best_db = dynamics.DBMPacejkaBank(
         params_car['lf'], params_car['lr'], params_car['mass'], params_car['Iz'],
-        np.array([best_params[0]]), np.array([best_params[1]]), 
-        np.array([best_params[2]]), np.array([best_params[3]]), 
-        np.array([best_params[4]]), np.array([best_params[5]]), 
-        np.array([fixed_params['Cro']]), np.array([fixed_params['Cd']]),
-        np.array([best_params[6]]), np.array([best_params[7]]), 
-        0, 0, 1 # batch_size = 1
+        all_best_params[:, 0], all_best_params[:, 1], # Bf, Br
+        all_best_params[:, 2], all_best_params[:, 3], # Cf, Cr
+        all_best_params[:, 4], all_best_params[:, 5], # Df, Dr
+        np.full(num_models, fixed_params['Cro']), 
+        np.full(num_models, fixed_params['Cd']),
+        all_best_params[:, 6], all_best_params[:, 7], # Ce, Cm
+        0, 0, num_models # batch_size = num_models
     )
 
-    # 2. Instantiate the lookback history for a single model (using 1-step factory)
-    lb_single = history_no_record.LBHistory(
-        1, 1/40, np.array([1.0, 1.0, 0.1, 0.01, 0, 0]),
-        6, rk6Factory, single_db, dynamics.diffequation, buffer_size=[0, 0]
+    # 2. Instantiate the lookback history for this specific batch
+    lb_batched = history_no_record.LBHistory(
+        num_models, 1/40, np.array([1.0, 1.0, 0.1, 0.01, 0, 0]),
+        6, rk6Factory, best_db, dynamics.diffequation, buffer_size=[0, 0]
     )
 
     traj_open_loop = []
     traj_one_step = []
 
-    # Initialize the open-loop state with the absolute first true state
+    # Initialize the open-loop state. 
+    # Shape starts as (6,) but will naturally broadcast to (num_models, 6) after step 1.
     current_ol_state = recording["state"][0]
 
     for t in range(total):
+        if t % 500 == 0 or t == total - 1:
+            logger.info(f"  Parallel Sim Timestep {t}/{total}")
+
         u_opt = -recording["ctrl"][t]
         true_state = recording["state"][t]
         
-        # one-step prediction
-        lb_single.predict_states(true_state, u_opt)
-        pred_one_step = np.array(lb_single.last_predicted_states)
+        lb_batched.predict_states(true_state, u_opt)
+        pred_one_step = np.array(lb_batched.last_predicted_states) # Shape: (num_models, 6)
         traj_one_step.append(pred_one_step)
 
-        # open-loop prediction
-        lb_single.predict_states(current_ol_state, u_opt)
-        pred_ol = np.array(lb_single.last_predicted_states)
+        lb_batched.predict_states(current_ol_state, u_opt)
+        pred_ol = np.array(lb_batched.last_predicted_states) # Shape: (num_models, 6)
         traj_open_loop.append(pred_ol)
+        
         current_ol_state = pred_ol 
-
     return np.array(traj_open_loop), np.array(traj_one_step)
 
 def grid_search_one_step(total, recording, lb_history, db_batch):
@@ -174,7 +179,7 @@ def main():
 
     
     fixed_params = {'Cro': 0.0, 'Cd': 0.0}
-    discretization = 20
+    discretization = 5
     
     param_series = {
         k: np.linspace(v[0], v[1], discretization + 1, dtype=np.float32)
@@ -268,24 +273,43 @@ def main():
         logger.info(f"  Global Parameters: {np.round(global_best_params, 4)}")
 
 
-        # best_params_in_batch = np.array(db_batch.get_model_params_arr(best_idx_in_batch))
+        best_params_in_batch = np.array(db_batch.get_model_params_arr(best_idx_in_batch))
 
-        # del lb_history
-        # del db_batch
-        
-        # logger.info(f"Re-simulating batch {b+1} best model to record open-loop and one-step trajectories...")
-        
-        # traj_open_loop, traj_one_step = simulate_single_trajectory(
-        #     total, recording, best_params_in_batch, params_car, fixed_params
-        # )
-        
-        # batch_best_trajectories.append({
-        #     "batch": b + 1,
-        #     "params": best_params_in_batch,
-        #     "traj_open_loop": traj_open_loop,
-        #     "traj_one_step": traj_one_step
-        # })
+        batch_best_trajectories.append({
+            "batch": b + 1,
+            "params": best_params_in_batch,
+            "traj_open_loop": None, # Will fill this in later
+            "traj_one_step": None   # Will fill this in later
+        })
 
+        del lb_history
+        del db_batch
+        import gc
+        gc.collect()
+
+    logger.info("All batches complete! Simulating trajectories for all best models simultaneously...")
+
+    # Extract all parameters into a single (num_batches, 8) array
+    all_best_params_stacked = np.array([item["params"] for item in batch_best_trajectories])
+
+    # Run the parallelized simulation once
+    all_traj_open_loop, all_traj_one_step = simulate_batched_trajectories(
+        total, recording, all_best_params_stacked, params_car, fixed_params
+    )
+
+    # all_traj_open_loop is shape: (total_timesteps, num_batches, state_dim)
+    # If you want to put them back into your dictionary format:
+    for i, item in enumerate(batch_best_trajectories):
+        # Slice out the i-th model's entire trajectory across all timesteps
+        item["traj_open_loop"] = all_traj_open_loop[:, i, :]
+        item["traj_one_step"] = all_traj_one_step[:, i, :]
+
+    logger.info("Parallel trajectory simulations complete. Ready to save!")
+
+    for i, item in enumerate(batch_best_trajectories):
+        # Slice out the i-th model's entire trajectory across all timesteps
+        item["traj_open_loop"] = all_traj_open_loop[:, i, :]
+        item["traj_one_step"] = all_traj_one_step[:, i, :]
 
     batches = [d["batch"] for d in batch_best_trajectories]
     all_params = [d["params"] for d in batch_best_trajectories]
