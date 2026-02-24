@@ -17,6 +17,7 @@ from ..rollout import history_no_record
 from ..rollout import dynamic as dynamics
 from llampc.params import F110
 from llampc.rollout.rk6 import rk6Factory, rk6MultiStepFactory
+import jax
 
 multi_step = True
 # Create a custom logger
@@ -78,8 +79,10 @@ def simulate_batched_trajectories(total, recording, all_best_params, params_car,
     # Shape starts as (6,) but will naturally broadcast to (num_models, 6) after step 1.
     current_ol_state = recording["state"][0]
 
+    jax.clear_caches()
+
     for t in range(total):
-        if t % 500 == 0 or t == total - 1:
+        if t % 20 == 0 or t == total - 1:
             logger.info(f"  Parallel Sim Timestep {t}/{total}")
 
         u_opt = -recording["ctrl"][t]
