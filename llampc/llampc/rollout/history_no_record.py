@@ -75,6 +75,8 @@ class LBHistory:
         """Batched version of _integrate"""
     
         t0 = time.perf_counter_ns()
+
+        print(type(x_t))
         # buffered_u_t = u_t
 
         buffered_u_t = np.zeros_like(u_t)
