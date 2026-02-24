@@ -212,7 +212,7 @@ def main():
         
         if batch_min_cost < global_best_cost:
             global_best_cost = batch_min_cost
-            global_best_params = batch_params[best_idx_in_batch]
+            global_best_params = db_batch.get_model_params_arr(best_idx_in_batch)
             logger.info("\n  *** NEW GLOBAL BEST FOUND ***")
             logger.info(f"  Global Cost      : {global_best_cost:.4f}")
             logger.info(f"  Global Parameters: {np.round(global_best_params, 4)}")
