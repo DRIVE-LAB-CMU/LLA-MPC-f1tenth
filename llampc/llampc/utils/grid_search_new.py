@@ -80,12 +80,12 @@ def simulate_single_trajectory(total, recording, best_params, params_car, fixed_
         
         # one-step prediction
         lb_single.predict_states(true_state, u_opt)
-        pred_one_step = lb_single.predicted_states.copy()
+        pred_one_step = np.array(lb_single.last_predicted_states)
         traj_one_step.append(pred_one_step)
 
         # open-loop prediction
         lb_single.predict_states(current_ol_state, u_opt)
-        pred_ol = lb_single.predicted_states.copy()
+        pred_ol = np.array(lb_single.last_predicted_states.copy)
         traj_open_loop.append(pred_ol)
         current_ol_state = pred_ol 
 
@@ -173,7 +173,7 @@ def main():
 
     
     fixed_params = {'Cro': 0.0, 'Cd': 0.0}
-    discretization = 10
+    discretization = 20
     
     param_series = {
         k: np.linspace(v[0], v[1], discretization + 1, dtype=np.float32)
