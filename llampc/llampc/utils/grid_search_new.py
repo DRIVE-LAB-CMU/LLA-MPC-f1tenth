@@ -252,21 +252,6 @@ def main():
         best_idx_in_batch = lb_history.get_best_model()
         batch_min_cost = lb_history.running_cost[best_idx_in_batch]
 
-        best_params_in_batch = db_batch.get_model_params_arr(best_idx_in_batch)
-        
-        logger.info(f"Re-simulating batch {b+1} best model to record open-loop and one-step trajectories...")
-        
-        traj_open_loop, traj_one_step = simulate_single_trajectory(
-            total, recording, best_params_in_batch, params_car, fixed_params
-        )
-        
-        batch_best_trajectories.append({
-            "batch": b + 1,
-            "params": best_params_in_batch,
-            "traj_open_loop": traj_open_loop,
-            "traj_one_step": traj_one_step
-        })
-
         logger.info("-"*60)
         logger.info(f" Batch {b+1} Summary")
         logger.info(f" Best Model Index  : {best_idx_in_batch}")
@@ -282,7 +267,27 @@ def main():
         logger.info(f"  Global Cost      : {global_best_cost:.4f}")
         logger.info(f"  Global Parameters: {np.round(global_best_params, 4)}")
 
-        batches = [d["batch"] for d in batch_best_trajectories]
+
+        best_params_in_batch = np.array(db_batch.get_model_params_arr(best_idx_in_batch))
+
+        del lb_history
+        del db_batch
+        
+        logger.info(f"Re-simulating batch {b+1} best model to record open-loop and one-step trajectories...")
+        
+        traj_open_loop, traj_one_step = simulate_single_trajectory(
+            total, recording, best_params_in_batch, params_car, fixed_params
+        )
+        
+        batch_best_trajectories.append({
+            "batch": b + 1,
+            "params": best_params_in_batch,
+            "traj_open_loop": traj_open_loop,
+            "traj_one_step": traj_one_step
+        })
+
+
+    batches = [d["batch"] for d in batch_best_trajectories]
     all_params = [d["params"] for d in batch_best_trajectories]
     all_traj_open_loop = [d["traj_open_loop"] for d in batch_best_trajectories]
     all_traj_one_step = [d["traj_one_step"] for d in batch_best_trajectories]
