@@ -51,8 +51,11 @@ def simulate_batched_trajectories(total, recording, all_best_params, params_car,
     Simulates all best batch models in parallel to record trajectories.
     all_best_params should be a numpy array of shape (num_best_models, 8).
     """
+    
     num_models = len(all_best_params)
     logger.info(f"Building parallel simulation bank for {num_models} models...")
+
+    logger.info(f"{all_best_params}")
 
     # 1. Create a bank with a batch size equal to the number of best models
     best_db = dynamics.DBMPacejkaBank(
@@ -79,8 +82,6 @@ def simulate_batched_trajectories(total, recording, all_best_params, params_car,
     # Shape starts as (6,) but will naturally broadcast to (num_models, 6) after step 1.
     current_ol_state = recording["state"][0]
 
-    jax.clear_caches()
-
     for t in range(total):
         if t % 20 == 0 or t == total - 1:
             logger.info(f"  Parallel Sim Timestep {t}/{total}")
@@ -96,7 +97,7 @@ def simulate_batched_trajectories(total, recording, all_best_params, params_car,
         pred_ol = np.array(lb_batched.last_predicted_states) # Shape: (num_models, 6)
         traj_open_loop.append(pred_ol)
         
-        current_ol_state = pred_ol 
+        # current_ol_state = pred_ol 
     return np.array(traj_open_loop), np.array(traj_one_step)
 
 def grid_search_one_step(total, recording, lb_history, db_batch):
@@ -182,7 +183,7 @@ def main():
 
     
     fixed_params = {'Cro': 0.0, 'Cd': 0.0}
-    discretization = 5
+    discretization = 7
     
     param_series = {
         k: np.linspace(v[0], v[1], discretization + 1, dtype=np.float32)
