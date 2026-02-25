@@ -184,7 +184,7 @@ def main():
 
     
     fixed_params = {'Cro': 0.0, 'Cd': 0.0}
-    discretization = 10
+    discretization = 12
     
     param_series = {
         k: np.linspace(v[0], v[1], discretization + 1, dtype=np.float32)
@@ -195,7 +195,7 @@ def main():
     num_total_models = (discretization + 1) ** len(params_range)
     logger.info(f"Total models to evaluate: {num_total_models}")
 
-    batch_size = 5000000 
+    batch_size = 50000 
     num_batches = int(np.ceil(num_total_models / batch_size))
     
 
@@ -306,15 +306,10 @@ def main():
     # If you want to put them back into your dictionary format:
     for i, item in enumerate(batch_best_trajectories):
         # Slice out the i-th model's entire trajectory across all timesteps
-        item["traj_open_loop"] = all_traj_open_loop[:, i, :]
-        item["traj_one_step"] = all_traj_one_step[:, i, :]
+        item["traj_open_loop"] = all_traj_open_loop[:, i]
+        item["traj_one_step"] = all_traj_one_step[:, i]
 
     logger.info("Parallel trajectory simulations complete. Ready to save!")
-
-    for i, item in enumerate(batch_best_trajectories):
-        # Slice out the i-th model's entire trajectory across all timesteps
-        item["traj_open_loop"] = all_traj_open_loop[:, i, :]
-        item["traj_one_step"] = all_traj_one_step[:, i, :]
 
     batches = [d["batch"] for d in batch_best_trajectories]
     all_params = [d["params"] for d in batch_best_trajectories]
