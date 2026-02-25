@@ -34,7 +34,6 @@ def _step_bank(last_predicted_states,  running_cost, x_t, cost_weights):
 
     best_model = jnp.argmin(running_cost)
 
-
     return diff, cost,  running_cost, best_model
 
 @jax.jit

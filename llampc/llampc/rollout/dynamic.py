@@ -106,8 +106,8 @@ def diffequation_nojit(bank_params, known_params, x, u):
 
     # jax.debug.print("Frx value: {x}", x=Frx)
     print("forces")
-    print()
-    print(mass * acc * ( Ce - Cm * vx))
+    print(mass, acc, ( Ce - Cm * vx))
+    print( Ce,  Cm * vx)
     print(Frx, x, u)
     
     vx_safe = jnp.where(jnp.abs(vx) < 1e-4, 1e-4, vx)

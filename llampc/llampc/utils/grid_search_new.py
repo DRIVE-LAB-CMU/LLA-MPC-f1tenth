@@ -65,7 +65,7 @@ def simulate_batched_trajectories(total, recording, all_best_params, params_car,
         all_best_params[:, 4], all_best_params[:, 5], # Df, Dr
         np.full(num_models, fixed_params['Cro']), 
         np.full(num_models, fixed_params['Cd']),
-        all_best_params[:, 6], all_best_params[:, 7], # Ce, Cm
+        all_best_params[:, 8], all_best_params[:, 9], # Ce, Cm
         0, 0, num_models # batch_size = num_models
     )
 
@@ -98,9 +98,8 @@ def simulate_batched_trajectories(total, recording, all_best_params, params_car,
         print(u_opt)
         print("hello")
         print(len(current_ol_state.shape))
+        print(best_db.param_bank[1])
         if len((current_ol_state.shape) ) == 1:
-
-
             derivs = dynamics.diffequation_nojit(best_db.param_bank[1], best_db.get_known_params(), current_ol_state, u_opt)
             print(f"Derivatives (dx/dt): {derivs}")
         else:
@@ -195,13 +194,13 @@ def main():
         'Cr': [1.0, 2.0], # at 2, tire force drops to 0 (any further is negative), at 1 never reaches peak force
         'Df': [0.1, 2.0 * mass * g], # maximum lateral friction tires can provide
         'Dr': [0.1, 2.0 * mass * g], # pulling 2 gs
-        'Ce': [0.1, 1.2], # should be maximum 1.1, i.e. how efficiently motor command turns a into F=ma
-        'Cm': [0, 1.2/ 10] # maximum at Ce/vmax, 
+        'Ce': [0.5, 1.2], # should be maximum 1.1, i.e. how efficiently motor command turns a into F=ma
+        'Cm': [0, 0] # maximum at Ce/vmax, 
     }
 
     
     fixed_params = {'Cro': 0.0, 'Cd': 0.0}
-    discretization = 10
+    discretization = 2
     
     param_series = {
         k: np.linspace(v[0], v[1], discretization + 1, dtype=np.float32)
@@ -212,7 +211,7 @@ def main():
     num_total_models = (discretization + 1) ** len(params_range)
     logger.info(f"Total models to evaluate: {num_total_models}")
 
-    batch_size = 5000000 
+    batch_size = 5000 
     num_batches = int(np.ceil(num_total_models / batch_size))
     
 
