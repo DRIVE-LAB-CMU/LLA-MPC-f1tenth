@@ -89,15 +89,32 @@ def simulate_batched_trajectories(total, recording, all_best_params, params_car,
         u_opt = -recording["ctrl"][t]
         true_state = recording["state"][t]
         
-        lb_batched.predict_states(true_state, u_opt)
-        pred_one_step = np.array(lb_batched.last_predicted_states) # Shape: (num_models, 6)
-        traj_one_step.append(pred_one_step)
+        # lb_batched.predict_states(true_state, u_opt)
+        # pred_one_step = np.array(lb_batched.last_predicted_states) # Shape: (num_models, 6)
+        # traj_one_step.append(pred_one_step)
+        # print(t)
+        # print(pred_one_step)
+
+        print(u_opt)
+        print("hello")
+        print(len(current_ol_state.shape))
+        if len((current_ol_state.shape) ) == 1:
+
+
+            derivs = dynamics.diffequation_nojit(best_db.param_bank[1], best_db.get_known_params(), current_ol_state, u_opt)
+            print(f"Derivatives (dx/dt): {derivs}")
+        else:
+            derivs = dynamics.diffequation_nojit(best_db.param_bank[1], best_db.get_known_params(), current_ol_state[0], u_opt)
+            print(f"Derivatives (dx/dt): {derivs}")
+
 
         lb_batched.predict_states(current_ol_state, u_opt)
         pred_ol = np.array(lb_batched.last_predicted_states) # Shape: (num_models, 6)
-        traj_open_loop.append(pred_ol[0])
+        traj_open_loop.append(pred_ol)
+
+        print(pred_ol)
     
-        current_ol_state = np.array(pred_ol[0]) 
+        current_ol_state = np.array(pred_ol) 
 
     return np.array(traj_open_loop), np.array(traj_one_step)
 
@@ -184,7 +201,7 @@ def main():
 
     
     fixed_params = {'Cro': 0.0, 'Cd': 0.0}
-    discretization = 12
+    discretization = 5
     
     param_series = {
         k: np.linspace(v[0], v[1], discretization + 1, dtype=np.float32)
@@ -195,7 +212,7 @@ def main():
     num_total_models = (discretization + 1) ** len(params_range)
     logger.info(f"Total models to evaluate: {num_total_models}")
 
-    batch_size = 5000000
+    batch_size = 5000 
     num_batches = int(np.ceil(num_total_models / batch_size))
     
 
@@ -306,10 +323,15 @@ def main():
     # If you want to put them back into your dictionary format:
     for i, item in enumerate(batch_best_trajectories):
         # Slice out the i-th model's entire trajectory across all timesteps
-        item["traj_open_loop"] = all_traj_open_loop[:, i]
-        item["traj_one_step"] = all_traj_one_step[:, i]
+        item["traj_open_loop"] = all_traj_open_loop[:, i, :]
+        item["traj_one_step"] = all_traj_one_step[:, i, :]
 
     logger.info("Parallel trajectory simulations complete. Ready to save!")
+
+    for i, item in enumerate(batch_best_trajectories):
+        # Slice out the i-th model's entire trajectory across all timesteps
+        item["traj_open_loop"] = all_traj_open_loop[:, i, :]
+        item["traj_one_step"] = all_traj_one_step[:, i, :]
 
     batches = [d["batch"] for d in batch_best_trajectories]
     all_params = [d["params"] for d in batch_best_trajectories]

@@ -16,7 +16,7 @@ from collections import deque
 import time
 
 cpu = jax.devices("cpu")[0]
-gpu = jax.devices("gpu")[0]
+gpu = jax.devices("cpu")[0]
 # gpu = jax.devices("cpu")[0]
 
 @jax.jit
@@ -70,6 +70,21 @@ class LBHistory:
         self.control_size = 2
         self.buffer_size = np.zeros(control_size) if buffer_size is None else buffer_size
         self.buffer = [deque() for _ in range(control_size)]
+
+    def predict_batched_states(self, batched_states, u_opt):
+        """
+        Predicts the next state for a batch of models, where each model 
+        starts from its own unique state.
+        batched_states shape: (num_models, 6)
+        u_opt shape: (2,)
+        """
+        # Assuming self.integrator is your rk6 step function. 
+        # It should naturally handle the (num_models, 6) state against the batched models.
+        next_states = self.integrator(batched_states, u_opt)
+        
+        # Store or return
+        self.last_predicted_states = next_states
+        return next_states
 
     def predict_states(self, x_t, u_t):
         """Batched version of _integrate"""
