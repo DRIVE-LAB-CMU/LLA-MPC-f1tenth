@@ -183,7 +183,7 @@ def main():
 
     
     fixed_params = {'Cro': 0.0, 'Cd': 0.0}
-    discretization = 7
+    discretization = 20
     
     param_series = {
         k: np.linspace(v[0], v[1], discretization + 1, dtype=np.float32)
