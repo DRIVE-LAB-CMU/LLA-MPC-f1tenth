@@ -95,9 +95,10 @@ def simulate_batched_trajectories(total, recording, all_best_params, params_car,
 
         lb_batched.predict_states(current_ol_state, u_opt)
         pred_ol = np.array(lb_batched.last_predicted_states) # Shape: (num_models, 6)
-        traj_open_loop.append(pred_ol)
-        
-        # current_ol_state = pred_ol 
+        traj_open_loop.append(pred_ol[0])
+    
+        current_ol_state = np.array(pred_ol[0]) 
+
     return np.array(traj_open_loop), np.array(traj_one_step)
 
 def grid_search_one_step(total, recording, lb_history, db_batch):
@@ -183,7 +184,7 @@ def main():
 
     
     fixed_params = {'Cro': 0.0, 'Cd': 0.0}
-    discretization = 15
+    discretization = 10
     
     param_series = {
         k: np.linspace(v[0], v[1], discretization + 1, dtype=np.float32)
