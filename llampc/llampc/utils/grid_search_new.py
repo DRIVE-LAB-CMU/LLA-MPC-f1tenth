@@ -89,16 +89,16 @@ def simulate_batched_trajectories(total, recording, all_best_params, params_car,
         u_opt = -recording["ctrl"][t]
         true_state = recording["state"][t]
         
-        # lb_batched.predict_states(true_state, u_opt)
-        # pred_one_step = np.array(lb_batched.last_predicted_states) # Shape: (num_models, 6)
-        # traj_one_step.append(pred_one_step)
+        lb_batched.predict_states(true_state, u_opt)
+        pred_one_step = np.array(lb_batched.last_predicted_states) # Shape: (num_models, 6)
+        traj_one_step.append(pred_one_step)
         # print(t)
         # print(pred_one_step)
 
-        print(u_opt)
-        print("hello")
-        print(len(current_ol_state.shape))
-        print(best_db.param_bank[1])
+        # print(u_opt)
+        # print("hello")
+        # print(len(current_ol_state.shape))
+        # print(best_db.param_bank[1])
         # if len((current_ol_state.shape) ) == 1:
         #     derivs = dynamics.diffequation(best_db.param_bank[1], best_db.get_known_params(), current_ol_state, u_opt)
         #     print(f"Derivatives (dx/dt): {derivs}")
@@ -110,7 +110,7 @@ def simulate_batched_trajectories(total, recording, all_best_params, params_car,
         pred_ol = np.array(lb_batched.last_predicted_states) # Shape: (num_models, 6)
         traj_open_loop.append(pred_ol)
 
-        print(pred_ol)
+        # print(pred_ol)
     
         current_ol_state = np.array(pred_ol) 
 
