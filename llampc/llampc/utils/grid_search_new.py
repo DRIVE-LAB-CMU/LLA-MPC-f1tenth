@@ -149,34 +149,34 @@ def grid_search_one_step(total, recording, lb_history, db_batch):
         best_idx_in_batch = lb_history.get_best_model()
         batch_min_cost = lb_history.running_cost[best_idx_in_batch]
 
-def grid_search_multi_step(N, total, recording, lb_history, db_batch):
-    # Jump by N steps at a time
-        for t in range(0, total - N, N):
-            
+def grid_search_multi_step(reset_interval, total, recording, lb_history, db_batch):
+    # e.g., reset_interval = 20
+    for t in range(total - 1):
+        
+        u_t = -recording["ctrl"][t]
+        
+        # 1. Predict the next state
+        if t % reset_interval == 0:
+            # RESET: Anchor the start of this window to the true state
             current_state = recording["state"][t]
-            # Grab the next N controls
-            U_seq = -recording["ctrl"][t : t+N] 
-            
-            # Predict N steps into the future blindly
-            lb_history.predict_multi_step(
-                current_state, U_seq
-            )
+            lb_history.predict_states(current_state, u_t)
+        else:
+            # CONTINUE: Predict from each model's individual last predicted state
+            lb_history.predict_states(lb_history.last_predicted_states, u_t)
 
-            if recording["ok_time"][t+N]:
-                true_future_state = recording["state"][t+N]
-                diff, costs = lb_history.update_multi_step_error(
-                    true_future_state
-                )
+        # 2. Evaluate and accrue error against reality for THIS timestep
+        if recording["ok_time"][t+1]:
+            true_next_state = recording["state"][t+1]
+            # This automatically adds the cost to self.running_cost
+            diff, costs = lb_history.update_lookback_error(true_next_state)
 
-                cur_best_model = lb_history.get_best_model()
-
-                # logger.info every 5 jumps (100 timesteps total) or on the last valid jump
-                logger.info(f"--- Timestep Window: {t:04d} -> {t+N:04d} (out of {total}) ---")
-                if (t % (5 * N) == 0) or (t >= total - 2 * N):
-                    logger.info(f"  Best Local Model : {cur_best_model}")
-                    logger.info(f"  Best Parameters  : {np.round(db_batch.get_model_params_arr(cur_best_model), 4)}")
-                    logger.info(f"  Multi-step Diff  : {np.round(diff[cur_best_model], 4)}")
-                    logger.info(f"  Multi-step Cost  : {costs[cur_best_model]:.4f}\n")
+        # 3. Log periodically (e.g., every 5 reset intervals)
+        if (t + 1) % (5 * reset_interval) == 0 or (t == total - 2):
+            cur_best_model = lb_history.get_best_model()
+            logger.info(f"--- Timestep: {t+1:04d} / {total} ---")
+            logger.info(f"  Best Local Model : {cur_best_model}")
+            logger.info(f"  Best Parameters  : {np.round(db_batch.get_model_params_arr(cur_best_model), 4)}")
+            logger.info(f"  Accrued Cost     : {costs[cur_best_model]:.4f}\n")
 
 def main():
     all_evaluated_params = []
@@ -256,7 +256,7 @@ def main():
             N = 20
             lb_history = history_no_record.LBHistory(
                 current_batch_count, 1/40, np.array([1.0, 1.0, 0.1, 0.01, 0, 0]),
-                6, rk6MultiStepFactory, db_batch, dynamics.diffequation, buffer_size=[0, 0]
+                6, rk6Factory, db_batch, dynamics.diffequation, buffer_size=[0, 0]
             )
 
             logger.info("\n" + "="*60)
@@ -294,6 +294,7 @@ def main():
 
 
         best_params_in_batch = np.array(db_batch.get_model_params_arr(best_idx_in_batch))
+        # best_params_in_batch = np.array(db_batch.get_model_params_arr(int(np.random.randint(current_batch_count))))
 
         batch_best_trajectories.append({
             "batch": b + 1,
