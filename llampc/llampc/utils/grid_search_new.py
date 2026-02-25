@@ -99,14 +99,13 @@ def simulate_batched_trajectories(total, recording, all_best_params, params_car,
         print("hello")
         print(len(current_ol_state.shape))
         print(best_db.param_bank[1])
-        if len((current_ol_state.shape) ) == 1:
-            derivs = dynamics.diffequation_nojit(best_db.param_bank[1], best_db.get_known_params(), current_ol_state, u_opt)
-            print(f"Derivatives (dx/dt): {derivs}")
-        else:
-            derivs = dynamics.diffequation_nojit(best_db.param_bank[1], best_db.get_known_params(), current_ol_state[0], u_opt)
-            print(f"Derivatives (dx/dt): {derivs}")
-
-
+        # if len((current_ol_state.shape) ) == 1:
+        #     derivs = dynamics.diffequation(best_db.param_bank[1], best_db.get_known_params(), current_ol_state, u_opt)
+        #     print(f"Derivatives (dx/dt): {derivs}")
+        # else:
+        #     derivs = dynamics.diffequation(best_db.param_bank[1], best_db.get_known_params(), current_ol_state[0], u_opt)
+        #     print(f"Derivatives (dx/dt): {derivs}")
+        
         lb_batched.predict_states(current_ol_state, u_opt)
         pred_ol = np.array(lb_batched.last_predicted_states) # Shape: (num_models, 6)
         traj_open_loop.append(pred_ol)
@@ -200,7 +199,7 @@ def main():
 
     
     fixed_params = {'Cro': 0.0, 'Cd': 0.0}
-    discretization = 2
+    discretization = 10
     
     param_series = {
         k: np.linspace(v[0], v[1], discretization + 1, dtype=np.float32)
@@ -211,7 +210,7 @@ def main():
     num_total_models = (discretization + 1) ** len(params_range)
     logger.info(f"Total models to evaluate: {num_total_models}")
 
-    batch_size = 5000 
+    batch_size = 5000000
     num_batches = int(np.ceil(num_total_models / batch_size))
     
 
