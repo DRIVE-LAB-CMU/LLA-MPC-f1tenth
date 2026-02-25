@@ -212,7 +212,7 @@ def main():
     num_total_models = (discretization + 1) ** len(params_range)
     logger.info(f"Total models to evaluate: {num_total_models}")
 
-    batch_size = 5000 
+    batch_size = 5000000 
     num_batches = int(np.ceil(num_total_models / batch_size))
     
 
