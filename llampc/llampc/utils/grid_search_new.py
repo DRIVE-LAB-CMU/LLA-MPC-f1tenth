@@ -88,6 +88,8 @@ def simulate_batched_trajectories(total, recording, all_best_params, params_car,
 
         u_opt = -recording["ctrl"][t]
         true_state = recording["state"][t]
+
+        
         
         lb_batched.predict_states(true_state, u_opt)
         pred_one_step = np.array(lb_batched.last_predicted_states) # Shape: (num_models, 6)
@@ -105,6 +107,9 @@ def simulate_batched_trajectories(total, recording, all_best_params, params_car,
         # else:
         #     derivs = dynamics.diffequation(best_db.param_bank[1], best_db.get_known_params(), current_ol_state[0], u_opt)
         #     print(f"Derivatives (dx/dt): {derivs}")
+
+        if t % 20 == 0:
+            current_ol_state = recording["state"][t]
         
         lb_batched.predict_states(current_ol_state, u_opt)
         pred_ol = np.array(lb_batched.last_predicted_states) # Shape: (num_models, 6)
@@ -187,19 +192,19 @@ def main():
     g = 9.81
     mass = params_car["mass"]
     params_range = {
-        'Bf': [0.1, 30] ,# tire stiffness 
-        'Br': [0.1, 30], # 30 like driving on glue, .1 like driving on ice
-        'Cf': [1.0, 2.0], # curve shape param, multiplied by pi/2
-        'Cr': [1.0, 2.0], # at 2, tire force drops to 0 (any further is negative), at 1 never reaches peak force
+        'Bf': [0.1, 40] ,# tire stiffness 
+        'Br': [0.1, 40], # 30 like driving on glue, .1 like driving on ice
+        'Cf': [1.0, 2], # curve shape param, multiplied by pi/2
+        'Cr': [1.0, 2], # at 2, tire force drops to 0 (any further is negative), at 1 never reaches peak force
         'Df': [0.1, 2.0 * mass * g], # maximum lateral friction tires can provide
         'Dr': [0.1, 2.0 * mass * g], # pulling 2 gs
         'Ce': [0.1, 1.2], # should be maximum 1.1, i.e. how efficiently motor command turns a into F=ma
-        'Cm': [0, 0] # maximum at Ce/vmax, 
+        'Cm': [0, 1.2/10] # maximum at Ce/vmax, 
     }
 
     
     fixed_params = {'Cro': 0.0, 'Cd': 0.0}
-    discretization = 10
+    discretization = 15
     
     param_series = {
         k: np.linspace(v[0], v[1], discretization + 1, dtype=np.float32)
