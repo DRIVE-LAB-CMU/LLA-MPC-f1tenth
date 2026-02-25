@@ -193,7 +193,7 @@ def main():
         'Cr': [1.0, 2.0], # at 2, tire force drops to 0 (any further is negative), at 1 never reaches peak force
         'Df': [0.1, 2.0 * mass * g], # maximum lateral friction tires can provide
         'Dr': [0.1, 2.0 * mass * g], # pulling 2 gs
-        'Ce': [0.5, 1.2], # should be maximum 1.1, i.e. how efficiently motor command turns a into F=ma
+        'Ce': [0.1, 1.2], # should be maximum 1.1, i.e. how efficiently motor command turns a into F=ma
         'Cm': [0, 0] # maximum at Ce/vmax, 
     }
 
