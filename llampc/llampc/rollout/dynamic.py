@@ -11,14 +11,13 @@ from functools import partial
 # @njit(parallel=True)
 # @njit(fastmath=True)
 cpu = jax.devices("cpu")[0]
-gpu = jax.devices("gpu")[0]
+gpu = jax.devices("cpu")[0]
 # gpu = jax.devices("cpu")[0]
 
 
 
 @jax.jit
-def diffequation_unoptimized(
-    bank_params, known_params,x, u):
+def diffequation_unoptimized(bank_params, known_params,x, u):
     """	write dynamics as first order ODE: dxdt = f(x(t))
         x is a 6x1 vector: [x, y, psi, vx, vy, omega]^T
         u is a 2x1 vector: [acc/pwm, steer]^T
@@ -105,10 +104,10 @@ def diffequation_nojit(bank_params, known_params, x, u):
     Frx = mass * acc * ( Ce - Cm * vx) - Cro - Cd * (vx * vx)
 
     # jax.debug.print("Frx value: {x}", x=Frx)
-    print("forces")
-    print(mass, acc, ( Ce - Cm * vx))
-    print( Ce,  Cm * vx)
-    print(Frx, x, u)
+    # print("forces")
+    # print(mass, acc, ( Ce - Cm * vx))
+    # print( Ce,  Cm * vx)
+    # print(Frx, x, u)
     
     vx_safe = jnp.where(jnp.abs(vx) < 1e-4, 1e-4, vx)
     alphaf = steer - jnp.arctan2((lf * omega + vy), vx_safe)
