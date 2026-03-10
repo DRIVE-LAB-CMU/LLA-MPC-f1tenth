@@ -140,9 +140,10 @@ class MPCNode(Node):
                 "params": [],
                 "model_idx": [],
                 "ctrl": [],
+                "cmd":[],
                 "predicted_state": [],
                 "one_step_cost": [],
-                "running_cost":[]
+                "running_cost":[],
             }
             self.get_logger().info(f"Logging MPC data to {self.log_file}")
     
@@ -717,6 +718,7 @@ class MPCNode(Node):
             self.log_buffer["params"].append(params.copy())
             self.log_buffer["model_idx"].append(model_index)
             self.log_buffer["ctrl"].append(self.last_control.copy())
+            self.log_buffer["cmd"].append(self.last_drive_command.copy())
 
     def log_rollout_data(self, lb_history, one_step_cost, ok_time):
         if(self.log_data):
@@ -738,7 +740,8 @@ class MPCNode(Node):
                 # states=np.array(self.log_buffer["predicted_state"]),
                 # one_step_cost=np.array(self.log_buffer["one_step_cost"]),
                 # running_cost=np.array(self.log_buffer["running_cost"]),
-                ok_time = np.array(self.log_buffer["ok_time"])
+                ok_time = np.array(self.log_buffer["ok_time"]),
+                cmd = np.array(self.log_buffer["cmd"])
             )
         super().destroy_node()
 
