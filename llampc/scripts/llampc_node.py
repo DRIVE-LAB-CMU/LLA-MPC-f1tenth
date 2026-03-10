@@ -501,25 +501,25 @@ class MPCNode(Node):
         ### BANK UPDATE
         one_step_cost = None
         ok_time = self.time_history[-1, self.count] * 1e-6 < 2 * self.dt * 1000
-        if(ok_time):
-            if not self.sim:
-                one_step_cost = self.lb_history.update_lookback_error(
-                    self.current_state
+        # if(ok_time):
+        if not self.sim:
+            one_step_cost = self.lb_history.update_lookback_error(
+                self.current_state
+            )
+        else:
+            one_step_cost = self.lb_history.update_lookback_error(
+                np.array(
+                    [
+                        self.current_state[0],
+                        self.current_state[1],
+                        self.current_state[2],
+                        self.current_state[3],
+                        np.arctan2(self.current_state[4], self.current_state[3]),
+                        self.current_state[5], 
+                        self.last_control[1]
+                    ]
                 )
-            else:
-                one_step_cost = self.lb_history.update_lookback_error(
-                    np.array(
-                        [
-                            self.current_state[0],
-                            self.current_state[1],
-                            self.current_state[2],
-                            self.current_state[3],
-                            np.arctan2(self.current_state[4], self.current_state[3]),
-                            self.current_state[5], 
-                            self.last_control[1]
-                        ]
-                    )
-                )
+            )
 
         self.log_rollout_data(self.lb_history, one_step_cost, ok_time)
 
