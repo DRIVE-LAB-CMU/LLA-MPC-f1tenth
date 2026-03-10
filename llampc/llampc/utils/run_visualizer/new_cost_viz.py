@@ -1,16 +1,25 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider, Button
+from matplotlib.widgets import Slider, Button, CheckButtons
 import os
 
 class GridSearchVisualizer:
     def __init__(self, recording_filepath, batch_filepath):
         self.load_data(recording_filepath, batch_filepath)
+        
+        self.show_ol = True
+        self.show_os = True
+        self.follow_camera = False 
+        self.show_model = [True] * self.num_models
+        
         self.setup_figure()
         self.setup_artists()
         self.setup_controls()
+        
         self.current_frame = 0
         self.playing = False
+        
+        self.refresh_visibility()
 
     def load_data(self, rec_path, batch_path):
         print("Loading data...")
@@ -21,91 +30,258 @@ class GridSearchVisualizer:
         self.actual_x = self.actual_state[:, 0]
         self.actual_y = self.actual_state[:, 1]
         
-        # Grid search predictions
         self.traj_open_loop = sim["traj_open_loop"] 
         self.traj_one_step = sim["traj_one_step"]
         self.params = sim["params"]
         self.global_best_cost = sim["global_best_cost"]
         self.global_best_params = sim["global_best_params"]
 
-        # CRITICAL: Ensure shape is (models, timesteps, states)
         if self.traj_open_loop.shape[0] != len(self.params):
             self.traj_open_loop = np.transpose(self.traj_open_loop, (1, 0, 2))
             self.traj_one_step = np.transpose(self.traj_one_step, (1, 0, 2))
             
         self.num_models = self.traj_open_loop.shape[0]
         self.n_frames = min(len(self.actual_x), self.traj_open_loop.shape[1])
-        
-        # Check if trajectories are identical (Data problem, not plot problem)
-        if self.num_models > 1:
-            diff = np.linalg.norm(self.traj_open_loop[0] - self.traj_open_loop[1])
-            if diff < 1e-6:
-                print("⚠️ WARNING: Model 0 and Model 1 trajectories are MATHEMATICALLY IDENTICAL.")
-            else:
-                print(f"Success: Models differ by {diff:.4f} units.")
+        print(f"Loaded {self.num_models} models with {self.n_frames} frames.")
+
+        self.optimal_idx = 0
+        for i, p in enumerate(self.params):
+            if np.allclose(p, self.global_best_params):
+                self.optimal_idx = i
+                break
+        print(f"Optimal model identified at index {self.optimal_idx}.")
 
     def setup_figure(self):
         self.fig, self.ax = plt.subplots(figsize=(12, 8))
-        plt.subplots_adjust(bottom=0.25, right=0.75)
+        plt.subplots_adjust(bottom=0.28, right=0.70)
         self.ax.set_aspect('equal')
         self.ax.grid(True, alpha=0.3)
 
+        x_min, x_max = np.min(self.actual_x), np.max(self.actual_x)
+        y_min, y_max = np.min(self.actual_y), np.max(self.actual_y)
+        margin_x = max((x_max - x_min) * 0.1, 5.0)
+        margin_y = max((y_max - y_min) * 0.1, 5.0)
+        
+        self.global_xlim = (x_min - margin_x, x_max + margin_x)
+        self.global_ylim = (y_min - margin_y, y_max + margin_y)
+        
+        self.ax.set_xlim(self.global_xlim)
+        self.ax.set_ylim(self.global_ylim)
+
     def setup_artists(self):
-        # 1. Info Box
-        self.info_text = self.fig.text(0.76, 0.4, '', verticalalignment='top',
+        self.info_text = self.fig.text(0.72, 0.60, '', verticalalignment='top',
             bbox=dict(boxstyle='round', facecolor='whitesmoke', alpha=0.9), family='monospace')
 
-        # 2. Ground Truth
-        self.ax.plot(self.actual_x, self.actual_y, 'k--', alpha=0.5, label='Actual Path')
-        self.actual_point, = self.ax.plot([], [], 'k*', markersize=12, label='Current Pos', zorder=10)
+        self.ax.plot(self.actual_x, self.actual_y, 'k--', linewidth=2, alpha=0.6, label='Actual Path', zorder=2)
+        self.actual_step_line, = self.ax.plot([], [], 'k-', linewidth=2, alpha=0.8, zorder=2)
+        self.actual_point, = self.ax.plot([], [], 'k*', markersize=14, label='Current Pos', zorder=3)
+        self.next_point, = self.ax.plot([], [], 'ko', markerfacecolor='none', markersize=10, 
+                                        markeredgewidth=2, label='Next Pos', zorder=3)
 
-        # 3. Trajectories
+        self.ol_lines = []
         self.os_points = []
-        colors = ['red', 'blue', 'green', 'orange', 'purple']
         
         for i in range(self.num_models):
-            color = colors[i % len(colors)]
-            # Draw the second model (blue) with a higher zorder and thicker line to ensure visibility
-            z = 5 if i == 0 else 6 
-            
-            # Plot the Open Loop Path
-            self.ax.plot(
+            if i == self.optimal_idx:
+                color = 'red'
+                lw = 3          
+                ms = 10         
+                alpha = 1.0     
+                z_line = 10     
+                z_dot = 11
+                label_str = f'Model {i} (Optimal)'
+            else:
+                color = 'blue'  
+                lw = 1          
+                ms = 4          
+                alpha = 0.6     
+                z_line = 20     
+                z_dot = 21      
+                label_str = f'Model {i}'
+
+            line, = self.ax.plot(
                 self.traj_open_loop[i, :, 0], 
                 self.traj_open_loop[i, :, 1], 
-                color=color, linewidth=2, alpha=0.7, 
-                label=f'Model {i} (OL)', zorder=z
+                color=color, linewidth=lw, alpha=alpha, 
+                label=label_str, zorder=z_line
             )
+            self.ol_lines.append(line)
 
-            # Setup the One-Step Prediction Dot
-            pt, = self.ax.plot([], [], 'o', color=color, markersize=8, zorder=z+1)
+            pt, = self.ax.plot([], [], 'o', color=color, markersize=ms, alpha=alpha, zorder=z_dot)
             self.os_points.append(pt)
 
-        self.ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1))
+        handles, labels = self.ax.get_legend_handles_labels()
+        desired_labels = ['Actual Path', 'Current Pos', 'Next Pos', f'Model {self.optimal_idx} (Optimal)']
+        filtered_handles = [h for h, l in zip(handles, labels) if l in desired_labels]
+        filtered_labels = [l for l in labels if l in desired_labels]
+                
+        self.ax.legend(filtered_handles, filtered_labels, loc='upper left', bbox_to_anchor=(1.02, 1))
+
+        self.annot = self.ax.annotate(
+            "", xy=(0,0), xytext=(10, 10),
+            textcoords="offset points",
+            bbox=dict(boxstyle="round,pad=0.5", fc="lightyellow", alpha=0.9),
+            arrowprops=dict(arrowstyle="->", connectionstyle="arc3,rad=0"),
+            zorder=30
+        )
+        self.annot.set_visible(False)
 
     def setup_controls(self):
-        ax_slider = plt.axes([0.15, 0.1, 0.6, 0.03])
+        ax_slider = plt.axes([0.15, 0.15, 0.6, 0.03])
         self.slider = Slider(ax_slider, 'Frame', 0, self.n_frames - 1, valinit=0, valstep=1)
         self.slider.on_changed(self.update_frame)
         
-        ax_play = plt.axes([0.15, 0.04, 0.1, 0.04])
+        ax_play = plt.axes([0.15, 0.05, 0.1, 0.05])
         self.btn_play = Button(ax_play, 'Play')
         self.btn_play.on_clicked(self.toggle_play)
+
+        ax_check_type = plt.axes([0.28, 0.01, 0.25, 0.12])
+        ax_check_type.axis('off') 
+        self.check_type = CheckButtons(
+            ax_check_type, 
+            ('Show Open-Loop', 'Show One-Step', 'Follow Camera'), 
+            (True, True, False)
+        )
+        self.check_type.on_clicked(self.toggle_type_visibility)
+
+        ax_check_models = plt.axes([0.55, 0.01, 0.3, 0.12])
+        ax_check_models.axis('off')
+        
+        model_labels = tuple([f'Model {i}' for i in range(self.num_models)])
+        self.check_models = CheckButtons(ax_check_models, model_labels, tuple(self.show_model))
+        self.cb_cid = self.check_models.on_clicked(self.toggle_model_visibility)
+
+        # Buttons specifically for toggling the Open-Loop traces
+        ax_btn_all_on = plt.axes([0.86, 0.07, 0.12, 0.04])
+        self.btn_all_on = Button(ax_btn_all_on, 'All OL On')
+        self.btn_all_on.on_clicked(self.turn_all_models_on)
+
+        ax_btn_all_off = plt.axes([0.86, 0.02, 0.12, 0.04])
+        self.btn_all_off = Button(ax_btn_all_off, 'All OL Off')
+        self.btn_all_off.on_clicked(self.turn_all_models_off)
         
         self.timer = self.fig.canvas.new_timer(interval=50)
         self.timer.add_callback(self.animate_step)
+
+        self.fig.canvas.mpl_connect("motion_notify_event", self.on_hover)
+
+    def turn_all_models_on(self, event):
+        self.check_models.disconnect(self.cb_cid)
+        for i in range(self.num_models):
+            if not self.check_models.get_status()[i]:
+                self.check_models.set_active(i)  
+            self.show_model[i] = True            
+        self.cb_cid = self.check_models.on_clicked(self.toggle_model_visibility)
+        self.refresh_visibility()
+
+    def turn_all_models_off(self, event):
+        self.check_models.disconnect(self.cb_cid)
+        for i in range(self.num_models):
+            if self.check_models.get_status()[i]:
+                self.check_models.set_active(i)  
+            self.show_model[i] = False           
+        self.cb_cid = self.check_models.on_clicked(self.toggle_model_visibility)
+        self.refresh_visibility()
+
+    def on_hover(self, event):
+        if event.inaxes == self.ax and self.show_os:
+            for i, pt in enumerate(self.os_points):
+                # We removed the condition that checks self.show_model[i] 
+                # so the tooltip works even if the open-loop line is hidden.
+                cont, ind = pt.contains(event)
+                if cont:
+                    x_data, y_data = pt.get_data()
+                    self.annot.xy = (x_data[0], y_data[0])
+                    
+                    param_str = np.array2string(self.params[i], precision=3, separator=', ')
+                    text = f"Model {i}\nParams: {param_str}"
+                    if i == self.optimal_idx:
+                        text += "\n(Optimal)"
+                        
+                    self.annot.set_text(text)
+                    self.annot.set_visible(True)
+                    self.fig.canvas.draw_idle()
+                    return 
+            
+        if self.annot.get_visible():
+            self.annot.set_visible(False)
+            self.fig.canvas.draw_idle()
+
+    def refresh_visibility(self):
+        for i in range(self.num_models):
+            # Model checkbox now ONLY affects the open-loop lines
+            self.ol_lines[i].set_visible(self.show_ol and self.show_model[i])
+            # One-step points are purely controlled by the global 'Show One-Step' toggle
+            self.os_points[i].set_visible(self.show_os)
+        self.fig.canvas.draw_idle()
+
+    def toggle_type_visibility(self, label):
+        if label == 'Show Open-Loop':
+            self.show_ol = not self.show_ol
+            self.refresh_visibility()
+        elif label == 'Show One-Step':
+            self.show_os = not self.show_os
+            self.refresh_visibility()
+        elif label == 'Follow Camera':
+            self.follow_camera = not self.follow_camera
+            if not self.follow_camera:
+                self.ax.set_xlim(self.global_xlim)
+                self.ax.set_ylim(self.global_ylim)
+                self.fig.canvas.draw_idle()
+            else:
+                self.update_frame(self.current_frame)
+
+    def toggle_model_visibility(self, label):
+        model_idx = int(label.split()[1])
+        self.show_model[model_idx] = not self.show_model[model_idx]
+        self.refresh_visibility()
 
     def update_frame(self, frame_idx):
         frame_idx = int(frame_idx)
         self.current_frame = frame_idx
 
-        self.actual_point.set_data([self.actual_x[frame_idx]], [self.actual_y[frame_idx]])
+        curr_x = self.actual_x[frame_idx]
+        curr_y = self.actual_y[frame_idx]
+        
+        if frame_idx < self.n_frames - 1:
+            next_x = self.actual_x[frame_idx + 1]
+            next_y = self.actual_y[frame_idx + 1]
+        else:
+            next_x = curr_x
+            next_y = curr_y
+
+        self.actual_point.set_data([curr_x], [curr_y])
+        self.next_point.set_data([next_x], [next_y])
+        self.actual_step_line.set_data([curr_x, next_x], [curr_y, next_y])
 
         for i, pt in enumerate(self.os_points):
-            pt.set_data([self.traj_one_step[i, frame_idx, 0]], 
-                        [self.traj_one_step[i, frame_idx, 1]])
+             pt.set_data([self.traj_one_step[i, frame_idx, 0]], 
+                         [self.traj_one_step[i, frame_idx, 1]])
 
-        best_p = np.round(self.global_best_params, 3)
-        self.info_text.set_text(f"FRAME: {frame_idx}\nCost: {self.global_best_cost:.4f}")
+        if self.follow_camera:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            
+            width = xlim[1] - xlim[0]
+            height = ylim[1] - ylim[0]
+            
+            self.ax.set_xlim(curr_x - width / 2, curr_x + width / 2)
+            self.ax.set_ylim(curr_y - height / 2, curr_y + height / 2)
+
+        best_p_str = np.array2string(self.global_best_params, precision=3, separator=',\n')
+        
+        info_str = (
+            f"FRAME: {frame_idx}\n"
+            f"Cost: {self.global_best_cost:.4f}\n"
+            f"-----------------\n"
+            f"OPTIMAL PARAMS:\n"
+            f"{best_p_str}"
+        )
+        self.info_text.set_text(info_str)
+        
+        if self.annot.get_visible():
+            self.annot.set_visible(False)
+            
         self.fig.canvas.draw_idle()
 
     def toggle_play(self, event):
@@ -125,7 +301,7 @@ class GridSearchVisualizer:
 
 def main():
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    visualizer = GridSearchVisualizer(os.path.join(dir_path, 'hall.npz'), os.path.join(dir_path, 'traj_3.npz'))
+    visualizer = GridSearchVisualizer(os.path.join(dir_path, 'hall.npz'), os.path.join(dir_path, 'traj_9.npz'))
     visualizer.show()
 
 if __name__ == "__main__":

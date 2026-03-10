@@ -198,13 +198,13 @@ def main():
         'Cr': [1.0, 2], # at 2, tire force drops to 0 (any further is negative), at 1 never reaches peak force
         'Df': [0.1, 2.0 * mass * g], # maximum lateral friction tires can provide
         'Dr': [0.1, 2.0 * mass * g], # pulling 2 gs
-        'Ce': [0.1, 1.2], # should be maximum 1.1, i.e. how efficiently motor command turns a into F=ma
+        'Ce': [0.0, 0.1], # should be maximum 1.1, i.e. how efficiently motor command turns a into F=ma
         'Cm': [0, 1.2/10] # maximum at Ce/vmax, 
     }
 
     
     fixed_params = {'Cro': 0.0, 'Cd': 0.0}
-    discretization = 15
+    discretization = 4
     
     param_series = {
         k: np.linspace(v[0], v[1], discretization + 1, dtype=np.float32)
@@ -215,7 +215,7 @@ def main():
     num_total_models = (discretization + 1) ** len(params_range)
     logger.info(f"Total models to evaluate: {num_total_models}")
 
-    batch_size = 5000000
+    batch_size = 50000
     num_batches = int(np.ceil(num_total_models / batch_size))
     
 
