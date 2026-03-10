@@ -141,6 +141,7 @@ class MPCNode(Node):
                 "model_idx": [],
                 "ctrl": [],
                 "cmd":[],
+                "ok_time":[],
                 "predicted_state": [],
                 "one_step_cost": [],
                 "running_cost":[],
