@@ -116,8 +116,8 @@ class MPCNode(Node):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
         self.declare_parameter('track_file_name', 'nshhall3.npz')
-        self.declare_parameter('odom_topic', '/pf/pose/odom')
-        #self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        # self.declare_parameter('odom_topic', '/pf/pose/odom')
+        self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
@@ -159,10 +159,10 @@ class MPCNode(Node):
             'Cr': 1.0,
             'Df': 0.7,
             'Dr': 0.7,
-            'Cro': 0.015,
-            'Cd': 0.001,
+            'Cro': 0.0,
+            'Cd': 0.0,
             'Ce': 0.7,
-            'Cm': .05, 
+            'Cm': .0, 
         }
 
         variation_dict = {
@@ -172,7 +172,7 @@ class MPCNode(Node):
                 'Cr': .5* mean_dict['Cr'],   # 15% variation
                 'Df': .3,   # 15% variation
                 'Dr': .3,   # 15% variation
-                'Cro': .01, # 15% variation
+                'Cro': 0, # 15% variation
                 'Cd': 0,  # assume negligible drag
                 'Ce': 0.3,  # motor efficiency conversion should never be above 1
                 'Cm': 0.5* mean_dict['Cm'],  # motor speed saturation
