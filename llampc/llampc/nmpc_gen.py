@@ -29,11 +29,11 @@ def export_model(params_car, linear = False):
 
     if not linear: 
         print("NONLINEAR MODEL USED")
-        Frx = mass * (x[6] * p[8]  -  p[9] * x[3]) - p[6] - p[7] * x[3] * x[3]
+        Frx = mass * x[6] * (p[8]  -  p[9] * x[3]) - p[6] - p[7] * x[3] * x[3]
         #nominal force * Cefficiency - Crolling - Cmotor vx - cdrag vx^2
         
-        alphaf = ca.if_else(x[3] < 1e-4, 0, x[7] - ca.atan2(x[5] * lf + x[4], x[3]))
-        alphar = ca.if_else(x[3] < 1e-4, 0, ca.atan2(x[5] * lr - x[4], x[3]))
+        alphaf = ca.if_else(x[3] < 0.01, 0, x[7] - ca.atan2(x[5] * lf + x[4], x[3]))
+        alphar = ca.if_else(x[3] < 0.01, 0, ca.atan2(x[5] * lr - x[4], x[3]))
         #arctan(omega * lr - vy, vx)
 
         Ffy = p[4] * ca.sin(p[2] * ca.atan(p[0] * alphaf))
@@ -49,7 +49,7 @@ def export_model(params_car, linear = False):
         dx7 = u[1] # steer rate
     else:
         print("LINEAR MODEL USED")
-        Frx = mass * (x[6] * p[8]  -  p[9] * x[3]) - p[6] - p[7] * x[3] * x[3]
+        Frx = mass * x[6]* ( p[8]  -  p[9] * x[3]) - p[6] - p[7] * x[3] * x[3]
 
         alphaf = ca.if_else(x[3] < 1e-4, 0, x[7] - ca.atan2(x[5] * lf + x[4], x[3]))
         alphar = ca.if_else(x[3] < 1e-4, 0, ca.atan2(x[5] * lr - x[4], x[3]))
@@ -113,7 +113,7 @@ def create_ocp(model, params_car, steps, horizon):
     w_steer = 0.03
     w_accel = 0.005
     w_jerk = .001
-    w_steer_v = 0.01
+    w_steer_v = 0.001
     Q_flat = [w_x, w_y, 0.0, 0.0, 0.0, 0.0]
     R_flat = [w_accel, w_steer]
     Rd_flat = [w_jerk, w_steer_v]
@@ -170,7 +170,9 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'
     ocp.solver_options.integrator_type = 'ERK'
     ocp.solver_options.nlp_solver_type = 'SQP_RTI'
-    ocp.solver_options.nlp_solver_max_iter = 1
+    ocp.solver_options.nlp_solver_max_iter = 5
+    ocp.solver_options.sim_method_num_stages = 4
+    ocp.solver_options.sim_method_num_steps = 100 # Sub-steps per dt
 
     # OPTIMIZATION 7: Relaxed tolerances for speed
     # ocp.solver_options.qp_solver_tol_stat = 1e-4              # Relaxed from 1e-8

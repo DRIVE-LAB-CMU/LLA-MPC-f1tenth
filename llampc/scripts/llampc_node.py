@@ -157,21 +157,21 @@ class MPCNode(Node):
             'Br': 15.0,
             'Cf': 1.0,
             'Cr': 1.0,
-            'Df': 0.7,
-            'Dr': 0.7,
+            'Df': 25.0,
+            'Dr': 25.0,
             'Cro': 0.0,
             'Cd': 0.0,
-            'Ce': 0.7,
+            'Ce': 1.0,
             'Cm': .0, 
         }
 
         variation_dict = {
-                'Bf': .5 * mean_dict['Bf'],   # 15% variation
-                'Br': .5* mean_dict['Br'],   # 15% variation
-                'Cf': .5* mean_dict['Cf'],   # 15% variation
-                'Cr': .5* mean_dict['Cr'],   # 15% variation
-                'Df': .3,   # 15% variation
-                'Dr': .3,   # 15% variation
+                'Bf': 0 * mean_dict['Bf'],   # 15% variation
+                'Br': 0 * mean_dict['Br'],   # 15% variation
+                'Cf': 0 * mean_dict['Cf'],   # 15% variation
+                'Cr': 0 * mean_dict['Cr'],   # 15% variation
+                'Df': 0 ,   # 15% variation
+                'Dr': 0 ,   # 15% variation
                 'Cro': 0, # 15% variation
                 'Cd': 0,  # assume negligible drag
                 'Ce': 0.3,  # motor efficiency conversion should never be above 1
@@ -368,10 +368,10 @@ class MPCNode(Node):
             'Cr': 1.0,
             'Df': 0.8,
             'Dr': 0.8,
-            'Cro': 0.02,
-            'Cd': 0.001,
+            'Cro': 0,
+            'Cd': 0,
             'Ce': 1.0,
-            'Cm': .05, 
+            'Cm': 0, 
             'roll': 0,
             'pitch': 0
         }
@@ -563,9 +563,12 @@ class MPCNode(Node):
         
         ########################################################
         #### SETUP AND SOLVE MPC
+        filtered_state = self.current_state.copy()
+        if( np.abs(self.current_state[3]) < 0.1):
+            filtered_state[3] = 0.1
 
-        self.solver.set(0, "lbx", np.concatenate([self.current_state, self.last_control]))
-        self.solver.set(0, "ubx", np.concatenate([self.current_state, self.last_control]))
+        self.solver.set(0, "lbx", np.concatenate([filtered_state, self.last_control]))
+        self.solver.set(0, "ubx", np.concatenate([filtered_state, self.last_control]))
         def construct_params(N, selected_model_params, ref_segment):
             full_params = np.zeros((N, 20), np.float64)
             full_params[:, :12] = selected_model_params
@@ -673,6 +676,7 @@ class MPCNode(Node):
         self.cmd_pub.publish(drive_msg) 
 
         self.last_drive_command = np.array([desired_speed, steer])
+        print( acceleration * self.dt)
         self.last_control = np.array([acceleration, steer])
         
 
