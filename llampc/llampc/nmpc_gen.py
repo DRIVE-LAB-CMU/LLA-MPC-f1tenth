@@ -106,12 +106,12 @@ def create_ocp(model, params_car, steps, horizon):
     # w_steer_v = 0
     
 
-    w_x = 2.0
-    w_y = 2.0
+    w_x = 1.0
+    w_y = 1.0
     w_xe = 0
     w_ye = 0
     w_steer = 0.03
-    w_accel = 0.005
+    w_accel = 0.01
     w_jerk = .001
     w_steer_v = 0.001
     Q_flat = [w_x, w_y, 0.0, 0.0, 0.0, 0.0]
@@ -172,7 +172,7 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.solver_options.nlp_solver_type = 'SQP_RTI'
     ocp.solver_options.nlp_solver_max_iter = 5
     ocp.solver_options.sim_method_num_stages = 4
-    ocp.solver_options.sim_method_num_steps = 100 # Sub-steps per dt
+    ocp.solver_options.sim_method_num_steps = 200 # Sub-steps per dt
 
     # OPTIMIZATION 7: Relaxed tolerances for speed
     # ocp.solver_options.qp_solver_tol_stat = 1e-4              # Relaxed from 1e-8
