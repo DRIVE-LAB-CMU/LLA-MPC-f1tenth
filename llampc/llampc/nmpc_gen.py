@@ -32,19 +32,44 @@ def export_model(params_car, linear = False):
         Frx = mass * x[6] * (p[8]  -  p[9] * x[3]) - p[6] - p[7] * x[3] * x[3]
         #nominal force * Cefficiency - Crolling - Cmotor vx - cdrag vx^2
         
-        alphaf = ca.if_else(x[3] < 0.01, 0, x[7] - ca.atan2(x[5] * lf + x[4], x[3]))
-        alphar = ca.if_else(x[3] < 0.01, 0, ca.atan2(x[5] * lr - x[4], x[3]))
-        #arctan(omega * lr - vy, vx)
+        # alphaf = ca.if_else(x[3] < 0.01, 0, x[7] - ca.atan2(x[5] * lf + x[4], x[3]))
+        # alphar = ca.if_else(x[3] < 0.01, 0, ca.atan2(x[5] * lr - x[4], x[3]))
+
+        vx_safe = ca.sqrt(x[3]**2 + 0.1**2)
+
+        # 2. --- KINEMATIC BICYCLE MODEL (Stable at zero speed) ---
+        # The steering angle x[7] directly controls yaw rate, preserving the Jacobian
+        beta = ca.atan((lr / (lf + lr)) * ca.tan(x[7]))
+        kin_dx4 = 0.0  # vy is practically zero at low speeds
+        kin_dx5 = (x[3] * ca.cos(beta) * ca.tan(x[7])) / (lf + lr) # Kinematic yaw rate
+
+        # 3. --- DYNAMIC PACEJKA MODEL (Accurate at high speeds) ---
+        alphaf = x[7] - ca.atan2(x[5] * lf + x[4], vx_safe)
+        alphar = ca.atan2(x[5] * lr - x[4], vx_safe)
 
         Ffy = p[4] * ca.sin(p[2] * ca.atan(p[0] * alphaf))
         Fry = p[5] * ca.sin(p[3] * ca.atan(p[1] * alphar))
+        
+        dyn_dx4 = (Fry + Ffy * ca.cos(x[7])) / mass - x[3] * x[5] + g * ca.sin(p[10])
+        dyn_dx5 = (lf * Ffy * ca.cos(x[7]) - lr * Fry) / Iz
 
-        dx0 = (x[3] * ca.cos(x[2])) - (x[4] * ca.sin(x[2])) #xdot
-        dx1 = (x[3] * ca.sin(x[2])) + (x[4] * ca.cos(x[2])) #ydot
-        dx2 = x[5] #phidot
-        dx3 = (Frx - Ffy * ca.sin(x[7])) / mass + x[4] * x[5] - g * ca.sin(p[11]) #vxdot
-        dx4 = (Fry + Ffy * ca.cos(x[7])) / mass - x[3] * x[5] + g * ca.sin(p[10])#vydot
-        dx5 = (lf * Ffy * ca.cos(x[7]) - lr * Fry) / Iz #omegadot
+        # 4. --- SMOOTH BLENDING ---
+        # Transition centered at 1.0 m/s
+        weight_dyn = 0.5 * (1.0 + ca.tanh(1.5 * (vx_safe - 1.0)))
+        weight_kin = 1.0 - weight_dyn
+
+        # 5. --- APPLY DIFFERENTIAL EQUATIONS ---
+        dx0 = (x[3] * ca.cos(x[2])) - (x[4] * ca.sin(x[2])) # xdot
+        dx1 = (x[3] * ca.sin(x[2])) + (x[4] * ca.cos(x[2])) # ydot
+        dx2 = x[5]                                          # phidot
+        
+        # Frx applies to both models, blend only the lateral Pacejka component
+        dx3 = (Frx - weight_dyn * Ffy * ca.sin(x[7])) / mass + x[4] * x[5] - g * ca.sin(p[11]) 
+        
+        # Blend the lateral dynamics
+        dx4 = weight_kin * kin_dx4 + weight_dyn * dyn_dx4
+        dx5 = weight_kin * kin_dx5 + weight_dyn * dyn_dx5
+        
         dx6 = u[0] # jerk
         dx7 = u[1] # steer rate
     else:
@@ -87,14 +112,59 @@ def create_ocp(model, params_car, steps, horizon):
 
     N = steps #steps
     Tf = horizon # total time horizon
-    nx, nu = model.x.size()[0] - 2, model.u.size()[0] 
-    ocp.dims.N = N
-    ocp.dims.nx = nx
-    ocp.dims.nu = nu
+
     ocp.solver_options.tf = Tf #set solver settings
 
     ocp.cost.cost_type = 'NONLINEAR_LS'
     ocp.cost.cost_type_e = 'NONLINEAR_LS'
+
+    nx = model.x.size()[0]  # MUST be 8
+    nu = model.u.size()[0]  # MUST be 2
+    ocp.dims.N = N
+    ocp.dims.nx = nx
+    ocp.dims.nu = nu
+
+    # 2. Correct running/terminal dimensions
+    ny = nx + nu  # 8 states + 2 controls = 10
+    ny_e = nx     # 8 states terminal
+    ocp.dims.ny = ny
+    ocp.dims.ny_e = ny_e
+
+    # 3. Clean up the Cost Matrices
+    w_x, w_y = 2.0, 2.0
+    w_accel, w_steer = 0.01, 0.03
+    w_jerk, w_steer_v = 0.001, 0.01
+
+    # Weight arrays mapped directly to your 8 states and 2 controls:
+    # [x, y, phi, vx, vy, omega, accel, delta]
+    Q_flat = [w_x, w_y, 0.0, 0.0, 0.0, 0.0, w_accel, w_steer]
+    # [jerk, steer_rate]
+    R_flat = [w_jerk, w_steer_v]
+
+    ocp.cost.W = np.diag(np.concatenate((Q_flat, R_flat))) # 10x10
+    
+    # Terminal cost (only applies to the 8 states)
+    Qf_flat = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] # Or add terminal w_x, w_y if desired
+    ocp.cost.W_e = np.diag(Qf_flat) 
+
+    x_ref = model.p[-8:]  # last 8 parameters
+    x = model.x
+    u = model.u
+
+    # 4. Correct Cost Expressions
+    ocp.model.cost_y_expr = ca.vertcat(x - x_ref, u) # Size 10
+    ocp.model.cost_y_expr_e = x - x_ref              # Size 8
+
+    # N = steps #steps
+    # Tf = horizon # total time horizon
+    # nx, nu = model.x.size()[0] - 2, model.u.size()[0] 
+    # ocp.dims.N = N
+    # ocp.dims.nx = nx
+    # ocp.dims.nu = nu
+    # ocp.solver_options.tf = Tf #set solver settings
+
+    # ocp.cost.cost_type = 'NONLINEAR_LS'
+    # ocp.cost.cost_type_e = 'NONLINEAR_LS'
 
     # w_x = 2.0
     # w_y = 2.0
@@ -106,45 +176,45 @@ def create_ocp(model, params_car, steps, horizon):
     # w_steer_v = 0
     
 
-    w_x = 2.0
-    w_y = 2.0
-    w_xe = 0
-    w_ye = 0
-    w_steer = 0.03
-    w_accel = 0.01
-    w_jerk = .001
-    w_steer_v = 0.01
-    Q_flat = [w_x, w_y, 0.0, 0.0, 0.0, 0.0]
-    R_flat = [w_accel, w_steer]
-    Rd_flat = [w_jerk, w_steer_v]
+    # w_x = 2.0
+    # w_y = 2.0
+    # w_xe = 0
+    # w_ye = 0
+    # w_steer = 0.03
+    # w_accel = 0.01
+    # w_jerk = .001
+    # w_steer_v = 0.01
+    # Q_flat = [w_x, w_y, 0.0, 0.0, 0.0, 0.0]
+    # R_flat = [w_accel, w_steer]
+    # Rd_flat = [w_jerk, w_steer_v]
 
-    Q = np.diag(Q_flat) # nx, for trajectory deviation 6x6
-    R = np.diag(R_flat)  # nu, for control magnitude 2x2
-    Rd = np.diag(Rd_flat)  # nu, for control smoothness 2x2
-    Qf = np.diag([w_xe, w_ye, 0.0, 0.0, 0.0, 0.0])  # nx, for final state deviation 6x6
+    # Q = np.diag(Q_flat) # nx, for trajectory deviation 6x6
+    # R = np.diag(R_flat)  # nu, for control magnitude 2x2
+    # Rd = np.diag(Rd_flat)  # nu, for control smoothness 2x2
+    # Qf = np.diag([w_xe, w_ye, 0.0, 0.0, 0.0, 0.0])  # nx, for final state deviation 6x6
 
-    ocp.cost.W = np.diag(np.concatenate((Q_flat, R_flat, Rd_flat))) #nx, nu, nu, 10x10
-    ocp.cost.W_e = Qf # cost matrix
+    # ocp.cost.W = np.diag(np.concatenate((Q_flat, R_flat, Rd_flat))) #nx, nu, nu, 10x10
+    # ocp.cost.W_e = Qf # cost matrix
 
-    x_ref = model.p[-8:]  # last 8 parameters
-    x = model.x
-    u = model.u
+    # x_ref = model.p[-8:]  # last 8 parameters
+    # x = model.x
+    # u = model.u
 
-    ny = nx + 2 * nu # running dimensions
-    ny_e = nx #terminal dimension
+    # ny = nx + 2 * nu # running dimensions
+    # ny_e = nx #terminal dimension
 
-    ocp.dims.ny = ny
-    ocp.dims.ny_e = ny_e
+    # ocp.dims.ny = ny
+    # ocp.dims.ny_e = ny_e
     
     ocp.cost.yref = np.zeros(ny) # running objective function reference
     ocp.cost.yref_e = np.zeros(ny_e) # terminal objective function reference
 
-    ocp.model.cost_y_expr =  ca.vertcat(
-        x - x_ref, # of size nx + nu
-        #trajectory deviation and control magnitude (make sure last 2 values of xref are 0s)
-        u #control smoothness of size nu
-    ) # running objective function value 10 long vector
-    ocp.model.cost_y_expr_e = x[:6] - x_ref[:6] # terminal objective funciton value 6 long
+    # ocp.model.cost_y_expr =  ca.vertcat(
+    #     x - x_ref, # of size nx + nu
+    #     #trajectory deviation and control magnitude (make sure last 2 values of xref are 0s)
+    #     u #control smoothness of size nu
+    # ) # running objective function value 10 long vector
+    # ocp.model.cost_y_expr_e = x[:6] - x_ref[:6] # terminal objective funciton value 6 long
     
     ocp.model.p = model.p  # Combine with existing parameters
     ocp.dims.np = model.p.size()[0]
@@ -166,13 +236,17 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.constraints.ubu = np.array([params_car['max_steer_vel']])
     ocp.constraints.idxbu = np.array([1])
 
-    ocp.solver_options.qp_solver = 'FULL_CONDENSING_QPOASES'
+    ocp.solver_options.qp_solver = 'PARTIAL_CONDENSING_HPIPM'
     ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'
     ocp.solver_options.integrator_type = 'ERK'
-    ocp.solver_options.nlp_solver_type = 'SQP_RTI'
-    ocp.solver_options.nlp_solver_max_iter = 5
+    ocp.solver_options.nlp_solver_type = 'SQP_RTI'  # Removed _RTI
+    
+    # Now you can safely drop the substeps!
     ocp.solver_options.sim_method_num_stages = 4
-    ocp.solver_options.sim_method_num_steps = 100 # Sub-steps per dt
+    ocp.solver_options.sim_method_num_steps = 3
+    
+    # For IRK, it helps to specify the number of Newton iterations for the integrator
+    # ocp.solver_options.sim_method_newton_iter = 3
 
     # OPTIMIZATION 7: Relaxed tolerances for speed
     # ocp.solver_options.qp_solver_tol_stat = 1e-4              # Relaxed from 1e-8
@@ -182,10 +256,10 @@ def create_ocp(model, params_car, steps, horizon):
     
     ocp.solver_options.qp_solver_iter_max = 50                 # Limit QP iterations
     ocp.solver_options.print_level = 0                         # No printing
-    # ocp.solver_options.qp_solver_warm_start = 2     
+    # ocp.solver_options.qp_solver_warm_start = 1     
 
 
-    # ocp.solver_options.hpipm_mode = 'SPEED' 
+    ocp.solver_options.hpipm_mode = 'SPEED_ABS' 
 
     return ocp
 

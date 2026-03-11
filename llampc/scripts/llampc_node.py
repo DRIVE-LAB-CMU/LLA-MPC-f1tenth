@@ -57,7 +57,7 @@ class MPCNode(Node):
         self.last_drive_command = np.array([0.0, 0.0]) #vx, steer
         self.last_control = np.array([0.0, 0.0]) #acceleration, steer
         self.rates = np.array([0.0, 0.0])
-        self.first_control = False
+        self.first_control = True
         
         self.projidx = 0
 
@@ -567,19 +567,25 @@ class MPCNode(Node):
         if( np.abs(self.current_state[3]) < 0.1):
             filtered_state[3] = 0.1
 
-        self.solver.set(0, "lbx", np.concatenate([filtered_state, self.last_control]))
-        self.solver.set(0, "ubx", np.concatenate([filtered_state, self.last_control]))
+        aug_state = np.concatenate([filtered_state, self.last_control])
+        self.solver.set(0, "lbx", aug_state)
+        self.solver.set(0, "ubx", aug_state)
         def construct_params(N, selected_model_params, ref_segment):
-            full_params = np.zeros((N, 20), np.float64)
+            full_params = np.zeros((N+1, 20), np.float64)
             full_params[:, :12] = selected_model_params
             # self.get_logger().info(f"{full_params}")
-            full_params[:, 12:14] = ref_segment[:2, :N].T #reference x, y
+            full_params[:, 12:14] = ref_segment[:2, :N+1].T #reference x, y
             return full_params
         
         full_params = construct_params(self.N, selected_model_params, ref_segment)
 
-        for i in range(self.N):
+        for i in range(self.N+1):
             self.solver.set(i, "p", full_params[i])
+
+            # if(self.first_control):
+            self.solver.set(i, "x", aug_state)
+            self.first_control = False
+            
             # self.solver.set(i, "yref", all_yref)
 
         self.checkpoint[3]= time.perf_counter_ns()
@@ -596,6 +602,8 @@ class MPCNode(Node):
             for i in range(self.N + 1):
                 x_pred = self.solver.get(i, "x")[:3]
                 predicted_states.append(x_pred)
+
+            
 
             self.publish_predicted_trajectory(predicted_states) # Publish predicted trajectory
 
