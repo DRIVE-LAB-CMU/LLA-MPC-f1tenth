@@ -39,7 +39,7 @@ def export_model(params_car, linear = False):
 
         # 2. --- KINEMATIC BICYCLE MODEL (Stable at zero speed) ---
         # The steering angle x[7] directly controls yaw rate, preserving the Jacobian
-        beta = ca.atan((lr / (lf + lr)) * ca.tan(x[7]))
+        beta = (lr / (lf + lr)) * x[7]
         kin_dx4 = 0.0  # vy is practically zero at low speeds
         kin_dx5 = (x[3] * ca.cos(beta) * ca.tan(x[7])) / (lf + lr) # Kinematic yaw rate
 
@@ -115,115 +115,81 @@ def create_ocp(model, params_car, steps, horizon):
 
     ocp.solver_options.tf = Tf #set solver settings
 
-    ocp.cost.cost_type = 'NONLINEAR_LS'
-    ocp.cost.cost_type_e = 'NONLINEAR_LS'
 
-    nx = model.x.size()[0]  # MUST be 8
-    nu = model.u.size()[0]  # MUST be 2
+    # N = steps #steps
+    # Tf = horizon # total time horizon
+    nx, nu = model.x.size()[0] - 2, model.u.size()[0] 
     ocp.dims.N = N
     ocp.dims.nx = nx
     ocp.dims.nu = nu
+    ocp.solver_options.tf = Tf #set solver settings
 
-    # 2. Correct running/terminal dimensions
-    ny = nx + nu  # 8 states + 2 controls = 10
-    ny_e = nx     # 8 states terminal
-    ocp.dims.ny = ny
-    ocp.dims.ny_e = ny_e
+    ocp.cost.cost_type = 'NONLINEAR_LS'
+    ocp.cost.cost_type_e = 'NONLINEAR_LS'
 
-    # 3. Clean up the Cost Matrices
-    w_x, w_y = 2.0, 2.0
-    w_accel, w_steer = 0.01, 0.03
-    w_jerk, w_steer_v = 0.001, 0.01
-
-    # Weight arrays mapped directly to your 8 states and 2 controls:
-    # [x, y, phi, vx, vy, omega, accel, delta]
-    Q_flat = [w_x, w_y, 0.0, 0.0, 0.0, 0.0, w_accel, w_steer]
-    # [jerk, steer_rate]
-    R_flat = [w_jerk, w_steer_v]
-
-    ocp.cost.W = np.diag(np.concatenate((Q_flat, R_flat))) # 10x10
+    w_x = 2.0
+    w_y = 2.0
+    w_xe = 0
+    w_ye = 0
+    w_steer = .001
+    w_accel = 0.001
+    w_jerk = 0
+    w_steer_v = 0
     
-    # Terminal cost (only applies to the 8 states)
-    Qf_flat = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] # Or add terminal w_x, w_y if desired
-    ocp.cost.W_e = np.diag(Qf_flat) 
+
+    w_x = 2.0
+    w_y = 2.0
+    w_xe = 0.01
+    w_ye = 0.01
+    w_steer = 0.03
+    w_accel = 0.01
+    w_jerk = .001
+    w_steer_v = 0.01
+    Q_flat = [w_x, w_y, 0.0, 0.0, 0.0, 0.0]
+    R_flat = [w_accel, w_steer]
+    Rd_flat = [w_jerk, w_steer_v]
+
+    Q = np.diag(Q_flat) # nx, for trajectory deviation 6x6
+    R = np.diag(R_flat)  # nu, for control magnitude 2x2
+    Rd = np.diag(Rd_flat)  # nu, for control smoothness 2x2
+    Qf = np.diag([w_xe, w_ye, 0.0, 0.0, 0.0, 0.0])  # nx, for final state deviation 6x6
+
+    ocp.cost.W = np.diag(np.concatenate((Q_flat, R_flat, Rd_flat))) #nx, nu, nu, 10x10
+    ocp.cost.W_e = Qf # cost matrix
 
     x_ref = model.p[-8:]  # last 8 parameters
     x = model.x
     u = model.u
 
-    # 4. Correct Cost Expressions
-    ocp.model.cost_y_expr = ca.vertcat(x - x_ref, u) # Size 10
-    ocp.model.cost_y_expr_e = x - x_ref              # Size 8
+    ny = nx + 2 * nu # running dimensions
+    ny_e = nx #terminal dimension
 
-    # N = steps #steps
-    # Tf = horizon # total time horizon
-    # nx, nu = model.x.size()[0] - 2, model.u.size()[0] 
-    # ocp.dims.N = N
-    # ocp.dims.nx = nx
-    # ocp.dims.nu = nu
-    # ocp.solver_options.tf = Tf #set solver settings
-
-    # ocp.cost.cost_type = 'NONLINEAR_LS'
-    # ocp.cost.cost_type_e = 'NONLINEAR_LS'
-
-    # w_x = 2.0
-    # w_y = 2.0
-    # w_xe = 0
-    # w_ye = 0
-    # w_steer = .001
-    # w_accel = 0.001
-    # w_jerk = 0
-    # w_steer_v = 0
-    
-
-    # w_x = 2.0
-    # w_y = 2.0
-    # w_xe = 0
-    # w_ye = 0
-    # w_steer = 0.03
-    # w_accel = 0.01
-    # w_jerk = .001
-    # w_steer_v = 0.01
-    # Q_flat = [w_x, w_y, 0.0, 0.0, 0.0, 0.0]
-    # R_flat = [w_accel, w_steer]
-    # Rd_flat = [w_jerk, w_steer_v]
-
-    # Q = np.diag(Q_flat) # nx, for trajectory deviation 6x6
-    # R = np.diag(R_flat)  # nu, for control magnitude 2x2
-    # Rd = np.diag(Rd_flat)  # nu, for control smoothness 2x2
-    # Qf = np.diag([w_xe, w_ye, 0.0, 0.0, 0.0, 0.0])  # nx, for final state deviation 6x6
-
-    # ocp.cost.W = np.diag(np.concatenate((Q_flat, R_flat, Rd_flat))) #nx, nu, nu, 10x10
-    # ocp.cost.W_e = Qf # cost matrix
-
-    # x_ref = model.p[-8:]  # last 8 parameters
-    # x = model.x
-    # u = model.u
-
-    # ny = nx + 2 * nu # running dimensions
-    # ny_e = nx #terminal dimension
-
-    # ocp.dims.ny = ny
-    # ocp.dims.ny_e = ny_e
+    ocp.dims.ny = ny
+    ocp.dims.ny_e = ny_e
     
     ocp.cost.yref = np.zeros(ny) # running objective function reference
     ocp.cost.yref_e = np.zeros(ny_e) # terminal objective function reference
 
-    # ocp.model.cost_y_expr =  ca.vertcat(
-    #     x - x_ref, # of size nx + nu
-    #     #trajectory deviation and control magnitude (make sure last 2 values of xref are 0s)
-    #     u #control smoothness of size nu
-    # ) # running objective function value 10 long vector
-    # ocp.model.cost_y_expr_e = x[:6] - x_ref[:6] # terminal objective funciton value 6 long
+    ocp.model.cost_y_expr =  ca.vertcat(
+        x - x_ref, # of size nx + nu
+        #trajectory deviation and control magnitude (make sure last 2 values of xref are 0s)
+        u #control smoothness of size nu
+    ) # running objective function value 10 long vector
+    ocp.model.cost_y_expr_e = x[:6] - x_ref[:6] # terminal objective funciton value 6 long
     
     ocp.model.p = model.p  # Combine with existing parameters
     ocp.dims.np = model.p.size()[0]
     ocp.parameter_values = np.zeros((ocp.dims.np, 1))
 
-    ocp.constraints.lbx = np.array([-1e9, -1e9, -1e9, params_car['min_v'], -1e9, -1e9, params_car['min_acc'], params_car['min_steer'] ])
-    ocp.constraints.ubx = np.array([1e9, 1e9, 1e9, params_car['max_v'], 1e9, 1e9, params_car['max_acc'], params_car['max_steer'] ])
-    ocp.constraints.idxbx = np.arange(8)  # vx, delta, acceleration, steer_Rate
+    ocp.constraints.idxbx = np.array([3, 6, 7])
+    ocp.constraints.lbx = np.array([params_car['min_v'], 
+                                params_car['min_acc'], 
+                                params_car['min_steer']])
 
+    ocp.constraints.ubx = np.array([params_car['max_v'], 
+                                    params_car['max_acc'], 
+                                    params_car['max_steer']])
+    
     ocp.constraints.idxbx_0 = np.arange(8) # IMPORTANT FOR RUNTIME
     ocp.constraints.lbx_0 = np.zeros(8)           # placeholder
     ocp.constraints.ubx_0 = np.zeros(8)           # placeholder
@@ -256,7 +222,7 @@ def create_ocp(model, params_car, steps, horizon):
     
     ocp.solver_options.qp_solver_iter_max = 50                 # Limit QP iterations
     ocp.solver_options.print_level = 0                         # No printing
-    # ocp.solver_options.qp_solver_warm_start = 1     
+    ocp.solver_options.qp_solver_warm_start = 1     
 
 
     ocp.solver_options.hpipm_mode = 'SPEED_ABS' 

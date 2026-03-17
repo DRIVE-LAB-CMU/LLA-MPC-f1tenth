@@ -582,13 +582,15 @@ class MPCNode(Node):
         for i in range(self.N+1):
             self.solver.set(i, "p", full_params[i])
 
-            # if(self.first_control):
-            self.solver.set(i, "x", aug_state)
-            self.first_control = False
-            
+            if(i == 0):
+                self.solver.set(i, "x", aug_state)
             # self.solver.set(i, "yref", all_yref)
 
+
         self.checkpoint[3]= time.perf_counter_ns()
+
+        print("DEBUG STATE:", aug_state)
+        print("DEBUG PARAMS NODE 0:", full_params[0])
 
         status = self.solver.solve()
 

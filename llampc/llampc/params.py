@@ -38,7 +38,7 @@ def F110():
 	Csr = 5.4562
 	hcog = 0.074
 	mu = 0.523
-	min_v = 0.0
+	min_v = -0.1
 	max_v = 20.
 	switch_v = 1.
 	max_acc = 9.51 			# max acceleration [m/s^2]
