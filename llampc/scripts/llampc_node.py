@@ -583,9 +583,12 @@ class MPCNode(Node):
         for i in range(self.N+1):
             self.solver.set(i, "p", full_params[i])
 
-            if(i == 0):
+            if(self.first_control or i == 0):
                 self.solver.set(i, "x", aug_state)
             # self.solver.set(i, "yref", all_yref)
+
+        if(self.first_control):
+            self.first_control = False
 
 
         self.checkpoint[3]= time.perf_counter_ns()
@@ -594,6 +597,7 @@ class MPCNode(Node):
         print("DEBUG PARAMS NODE 0:", full_params[0])
 
         status = self.solver.solve()
+        self.solver.print_statistics()
 
         # if status != 0:
         #     self.get_logger().warn(f"MPC solver failed with status: {status}. Resetting memory!")

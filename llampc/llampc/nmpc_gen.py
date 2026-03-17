@@ -56,50 +56,41 @@ def export_model(params_car, linear = False):
         # alphaf = ca.if_else(x[3] < 0.01, 0, x[7] - ca.atan2(x[5] * lf + x[4], x[3]))
         # alphar = ca.if_else(x[3] < 0.01, 0, ca.atan2(x[5] * lr - x[4], x[3]))
 
-        # 1. --- SAFE VELOCITY ---
-        # Shrunk buffer so it doesn't artificially inflate low speeds
-        vx_safe = ca.sqrt(x[3]**2 + 0.05**2)
+        # 1. Hard clamp for Jacobian conditioning
+        # 1. Hard clamp for Jacobian conditioning
+        vx_clamped = ca.fmax(x[3], 0.5)
 
-        # 2. --- KINEMATIC BICYCLE MODEL (Stable at zero speed) ---
+        # 2. Kinematic model
         beta = (lr / (lf + lr)) * x[7]
-        kin_dx4 = 0.0  
-        # REMOVED ca.tan() to prevent intermediate step singularities
-        kin_dx5 = (x[3] * ca.cos(beta) * x[7]) / (lf + lr) 
+        kin_dx4 = 0.0
+        kin_dx5 = (x[3] * ca.cos(beta) * x[7]) / (lf + lr)
 
-       # 3. --- DYNAMIC PACEJKA MODEL (Accurate at high speeds) ---
-        
-        # CRITICAL FIX 1: Use atan instead of atan2. 
-        # Because vx_safe is strictly positive, atan(y/x) is mathematically identical 
-        # to atan2(y, x), but it avoids the hidden conditional logic in CasADi 
-        # that shatters the solver's Hessian matrix.
-        alphaf = x[7] - ca.atan((x[5] * lf + x[4]) / vx_safe)
-        alphar = ca.atan((x[5] * lr - x[4]) / vx_safe)
+        # 3. Dynamic Pacejka model
+        alphaf = x[7] - ca.atan((x[5] * lf + x[4]) / vx_clamped)
+        alphar = ca.atan((x[5] * lr - x[4]) / vx_clamped)
 
-        # Calculate standard Pacejka forces
         Ffy = p[4] * ca.sin(p[2] * ca.atan(p[0] * alphaf))
         Fry = p[5] * ca.sin(p[3] * ca.atan(p[1] * alphar))
 
         dyn_dx4 = (Fry + Ffy * ca.cos(x[7])) / mass - x[3] * x[5] + g * ca.sin(p[10])
         dyn_dx5 = (lf * Ffy * ca.cos(x[7]) - lr * Fry) / Iz
 
-        # 4. --- SMOOTH BLENDING ---
-        # Center at 0.5 m/s, steepness at 10.0. 
-        # This completely kills the dynamic model at v < 0.1 m/s.
-        weight_dyn = 0.5 * (1.0 + ca.tanh(10.0 * (vx_safe - 0.25)))
+        # 4. Blending based on actual velocity
+        weight_dyn = 0.5 * (1.0 + ca.tanh(10.0 * (x[3] - 0.5)))
         weight_kin = 1.0 - weight_dyn
 
-        # 5. --- APPLY DIFFERENTIAL EQUATIONS ---
-        dx0 = (x[3] * ca.cos(x[2])) - (x[4] * ca.sin(x[2])) 
-        dx1 = (x[3] * ca.sin(x[2])) + (x[4] * ca.cos(x[2])) 
-        dx2 = x[5]                                          
-        
-        Frx = mass * x[6] * (p[8]  -  p[9] * x[3]) - p[6] - p[7] * x[3] * x[3]
-        dx3 = (Frx - weight_dyn * Ffy * ca.sin(x[7])) / mass + x[4] * x[5] - g * ca.sin(p[11]) 
-        
+        # 5. Differential equations
+        dx0 = (x[3] * ca.cos(x[2])) - (x[4] * ca.sin(x[2]))
+        dx1 = (x[3] * ca.sin(x[2])) + (x[4] * ca.cos(x[2]))
+        dx2 = x[5]
+
+        Frx = mass * x[6] * (p[8] - p[9] * x[3]) - p[6] - p[7] * x[3] * x[3]
+        dx3 = (Frx - weight_dyn * Ffy * ca.sin(x[7])) / mass + x[4] * x[5] - g * ca.sin(p[11])
+
         dx4 = weight_kin * kin_dx4 + weight_dyn * dyn_dx4
         dx5 = weight_kin * kin_dx5 + weight_dyn * dyn_dx5
-        
-        dx6 = u[0] 
+
+        dx6 = u[0]
         dx7 = u[1]
     else:
         print("LINEAR MODEL USED")
@@ -221,14 +212,16 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.constraints.ubu = np.array([params_car['max_steer_vel']])
     ocp.constraints.idxbu = np.array([1])
 
-    ocp.solver_options.qp_solver = 'PARTIAL_CONDENSING_HPIPM'
+    ocp.solver_options.qp_solver = 'FULL_CONDENSING_QPOASES'
     ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'
     ocp.solver_options.integrator_type = 'ERK'
-    ocp.solver_options.nlp_solver_type = 'SQP_RTI'  # Removed _RTI
+    # ocp.solver_options.sim_method_num_stages = 2  # Gauss-Legendre, 4th order
+    # ocp.solver_options.sim_method_num_steps = 10   # Much fewer needed
+    ocp.solver_options.nlp_solver_type = 'SQP'  # Removed _RTI
     
     # Now you can safely drop the substeps!
     ocp.solver_options.sim_method_num_stages = 4
-    ocp.solver_options.sim_method_num_steps = 4
+    ocp.solver_options.sim_method_num_steps = 5
     
     # For IRK, it helps to specify the number of Newton iterations for the integrator
     # ocp.solver_options.sim_method_newton_iter = 3
@@ -239,12 +232,12 @@ def create_ocp(model, params_car, steps, horizon):
     # ocp.solver_options.qp_solver_tol_ineq = 1e-4
     # ocp.solver_options.qp_solver_tol_comp = 1e-4
     
-    ocp.solver_options.qp_solver_iter_max = 50                 # Limit QP iterations
+    ocp.solver_options.qp_solver_iter_max = 50                # Limit QP iterations
     ocp.solver_options.print_level = 0                         # No printing
     ocp.solver_options.qp_solver_warm_start = 1     
 
 
-    ocp.solver_options.hpipm_mode = 'SPEED_ABS' 
+    ocp.solver_options.hpipm_mode = 'SPEED' 
 
     return ocp
 
