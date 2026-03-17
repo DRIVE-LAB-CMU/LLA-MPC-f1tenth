@@ -28,6 +28,27 @@ def export_model(params_car, linear = False):
     g = 9.81
 
     if not linear: 
+        # print("NONLINEAR MODEL USED")
+        # Frx = mass * x[6] * ( p[8]  -  p[9] * x[3]) - p[6] - p[7] * x[3] * x[3]
+        # #nominal force * Cefficiency - Crolling - Cmotor vx - cdrag vx^2
+        
+        # alphaf = ca.if_else(x[3] < 1e-4, 0, x[7] - ca.atan2(x[5] * lf + x[4], x[3]))
+        # alphar = ca.if_else(x[3] < 1e-4, 0, ca.atan2(x[5] * lr - x[4], x[3]))
+        # #arctan(omega * lr - vy, vx)
+
+        # Ffy = p[4] * ca.sin(p[2] * ca.atan(p[0] * alphaf))
+        # Fry = p[5] * ca.sin(p[3] * ca.atan(p[1] * alphar))
+
+        # dx0 = (x[3] * ca.cos(x[2])) - (x[4] * ca.sin(x[2])) #xdot
+        # dx1 = (x[3] * ca.sin(x[2])) + (x[4] * ca.cos(x[2])) #ydot
+        # dx2 = x[5] #phidot
+        # dx3 = (Frx - Ffy * ca.sin(x[7])) / mass + x[4] * x[5] - g * ca.sin(p[11]) #vxdot
+        # dx4 = (Fry + Ffy * ca.cos(x[7])) / mass - x[3] * x[5] + g * ca.sin(p[10])#vydot
+        # dx5 = (lf * Ffy * ca.cos(x[7]) - lr * Fry) / Iz #omegadot
+        # dx6 = u[0] # jerk
+        # dx7 = u[1] # steer rate
+
+
         print("NONLINEAR MODEL USED")
         Frx = mass * x[6] * (p[8]  -  p[9] * x[3]) - p[6] - p[7] * x[3] * x[3]
         #nominal force * Cefficiency - Crolling - Cmotor vx - cdrag vx^2
@@ -35,43 +56,51 @@ def export_model(params_car, linear = False):
         # alphaf = ca.if_else(x[3] < 0.01, 0, x[7] - ca.atan2(x[5] * lf + x[4], x[3]))
         # alphar = ca.if_else(x[3] < 0.01, 0, ca.atan2(x[5] * lr - x[4], x[3]))
 
-        vx_safe = ca.sqrt(x[3]**2 + 0.1**2)
+        # 1. --- SAFE VELOCITY ---
+        # Shrunk buffer so it doesn't artificially inflate low speeds
+        vx_safe = ca.sqrt(x[3]**2 + 0.05**2)
 
         # 2. --- KINEMATIC BICYCLE MODEL (Stable at zero speed) ---
-        # The steering angle x[7] directly controls yaw rate, preserving the Jacobian
         beta = (lr / (lf + lr)) * x[7]
-        kin_dx4 = 0.0  # vy is practically zero at low speeds
-        kin_dx5 = (x[3] * ca.cos(beta) * ca.tan(x[7])) / (lf + lr) # Kinematic yaw rate
+        kin_dx4 = 0.0  
+        # REMOVED ca.tan() to prevent intermediate step singularities
+        kin_dx5 = (x[3] * ca.cos(beta) * x[7]) / (lf + lr) 
 
-        # 3. --- DYNAMIC PACEJKA MODEL (Accurate at high speeds) ---
-        alphaf = x[7] - ca.atan2(x[5] * lf + x[4], vx_safe)
-        alphar = ca.atan2(x[5] * lr - x[4], vx_safe)
+       # 3. --- DYNAMIC PACEJKA MODEL (Accurate at high speeds) ---
+        
+        # CRITICAL FIX 1: Use atan instead of atan2. 
+        # Because vx_safe is strictly positive, atan(y/x) is mathematically identical 
+        # to atan2(y, x), but it avoids the hidden conditional logic in CasADi 
+        # that shatters the solver's Hessian matrix.
+        alphaf = x[7] - ca.atan((x[5] * lf + x[4]) / vx_safe)
+        alphar = ca.atan((x[5] * lr - x[4]) / vx_safe)
 
+        # Calculate standard Pacejka forces
         Ffy = p[4] * ca.sin(p[2] * ca.atan(p[0] * alphaf))
         Fry = p[5] * ca.sin(p[3] * ca.atan(p[1] * alphar))
-        
+
         dyn_dx4 = (Fry + Ffy * ca.cos(x[7])) / mass - x[3] * x[5] + g * ca.sin(p[10])
         dyn_dx5 = (lf * Ffy * ca.cos(x[7]) - lr * Fry) / Iz
 
         # 4. --- SMOOTH BLENDING ---
-        # Transition centered at 1.0 m/s
-        weight_dyn = 0.5 * (1.0 + ca.tanh(1.5 * (vx_safe - 1.0)))
+        # Center at 0.5 m/s, steepness at 10.0. 
+        # This completely kills the dynamic model at v < 0.1 m/s.
+        weight_dyn = 0.5 * (1.0 + ca.tanh(10.0 * (vx_safe - 0.25)))
         weight_kin = 1.0 - weight_dyn
 
         # 5. --- APPLY DIFFERENTIAL EQUATIONS ---
-        dx0 = (x[3] * ca.cos(x[2])) - (x[4] * ca.sin(x[2])) # xdot
-        dx1 = (x[3] * ca.sin(x[2])) + (x[4] * ca.cos(x[2])) # ydot
-        dx2 = x[5]                                          # phidot
+        dx0 = (x[3] * ca.cos(x[2])) - (x[4] * ca.sin(x[2])) 
+        dx1 = (x[3] * ca.sin(x[2])) + (x[4] * ca.cos(x[2])) 
+        dx2 = x[5]                                          
         
-        # Frx applies to both models, blend only the lateral Pacejka component
+        Frx = mass * x[6] * (p[8]  -  p[9] * x[3]) - p[6] - p[7] * x[3] * x[3]
         dx3 = (Frx - weight_dyn * Ffy * ca.sin(x[7])) / mass + x[4] * x[5] - g * ca.sin(p[11]) 
         
-        # Blend the lateral dynamics
         dx4 = weight_kin * kin_dx4 + weight_dyn * dyn_dx4
         dx5 = weight_kin * kin_dx5 + weight_dyn * dyn_dx5
         
-        dx6 = u[0] # jerk
-        dx7 = u[1] # steer rate
+        dx6 = u[0] 
+        dx7 = u[1]
     else:
         print("LINEAR MODEL USED")
         Frx = mass * x[6]* ( p[8]  -  p[9] * x[3]) - p[6] - p[7] * x[3] * x[3]
@@ -129,18 +158,8 @@ def create_ocp(model, params_car, steps, horizon):
 
     w_x = 2.0
     w_y = 2.0
-    w_xe = 0
-    w_ye = 0
-    w_steer = .001
-    w_accel = 0.001
-    w_jerk = 0
-    w_steer_v = 0
-    
-
-    w_x = 2.0
-    w_y = 2.0
-    w_xe = 0.01
-    w_ye = 0.01
+    w_xe = 1.0
+    w_ye = 1.0
     w_steer = 0.03
     w_accel = 0.01
     w_jerk = .001
@@ -209,7 +228,7 @@ def create_ocp(model, params_car, steps, horizon):
     
     # Now you can safely drop the substeps!
     ocp.solver_options.sim_method_num_stages = 4
-    ocp.solver_options.sim_method_num_steps = 3
+    ocp.solver_options.sim_method_num_steps = 4
     
     # For IRK, it helps to specify the number of Newton iterations for the integrator
     # ocp.solver_options.sim_method_newton_iter = 3
@@ -262,8 +281,57 @@ def setup_mpc(steps, horizon, json_file='f1tenth_acados_ocp.json', solver_config
     finally:
         os.chdir(original_cwd) 
 
+def debug_high_speed_crash(solver, params_car):
+    print("\n--- INITIATING HIGH SPEED DEBUG RUN ---")
+    
+    # Initial state: x, y, phi, vx, vy, omega, accel, steer
+    # Pushing it to 15 m/s with a slight yaw rate to provoke the tire model
+    x0 = np.array([0.0, 0.0, 0.0, 15.0, 0.1, 0.5, 0.0, 0.0])
+    
+    # Set dummy reference trajectory (straight line ahead)
+    for i in range(solver.acados_ocp.dims.N):
+        yref = np.zeros(solver.acados_ocp.dims.ny)
+        yref[3] = 15.0 # command 15 m/s
+        solver.set(i, "yref", yref)
+        # Set parameters (Bf, Br, etc + xref)
+        # Assuming you just pass zeros for parameters if they are hardcoded, 
+        # or pass your actual parameter array here.
+        p_val = np.zeros(solver.acados_ocp.dims.np)
+        solver.set(i, "p", p_val)
+
+    solver.set(solver.acados_ocp.dims.N, "yref", np.zeros(solver.acados_ocp.dims.ny_e))
+    solver.set(solver.acados_ocp.dims.N, "p", p_val)
+
+    # Simulation loop
+    for step in range(10):
+        # Constrain current state
+        solver.set(0, "lbx", x0)
+        solver.set(0, "ubx", x0)
+        
+        status = solver.solve()
+        
+        # Get next state prediction
+        x_next = solver.get(1, "x")
+        u_opt = solver.get(0, "u")
+        
+        print(f"Step {step} | Status: {status}")
+        print(f"  Inputs -> Jerk: {u_opt[0]:.2f}, SteerRate: {u_opt[1]:.2f}")
+        print(f"  States -> vx: {x_next[3]:.2f}, vy: {x_next[4]:.2f}, yaw_rate: {x_next[5]:.2f}, steer: {x_next[7]:.2f}")
+        
+        if status != 0:
+            print(f"\n[!] SOLVER CRASHED WITH STATUS {status}")
+            print("Status 3/4 = Matrix went singular (Math error/inf/NaN).")
+            print("Dumping internal solver statistics:")
+            solver.print_statistics()
+            break
+            
+        x0 = x_next # step forward
+
 def main(args=None):
-    solver = setup_mpc(build=True)
+    solver = setup_mpc(steps=20, horizon=1.0, build=True)
+    
+    debug_high_speed_crash(solver, F110)
 
 if __name__ == '__main__':
     main()
+

@@ -537,6 +537,7 @@ class MPCNode(Node):
 
         if self.publish_trajectories:
             self.publish_ref_trajectory(ref_segment)
+            print(f"REF: {ref_segment}")
 
         self.checkpoint[2] = time.perf_counter_ns()
         
@@ -594,6 +595,20 @@ class MPCNode(Node):
 
         status = self.solver.solve()
 
+        # if status != 0:
+        #     self.get_logger().warn(f"MPC solver failed with status: {status}. Resetting memory!")
+            
+        #     # Rescue the solver from the death spiral by flatlining the guess
+        #     for i in range(self.N + 1):
+        #         self.solver.set(i, "x", aug_state)
+            
+        #     # Reset the controls to 0.0 to prevent steering spikes
+        #     for i in range(self.N):
+        #         self.solver.set(i, "u", np.zeros(2))
+
+        # status = self.solver.solve()
+
+
         self.checkpoint[4] = time.perf_counter_ns()
 
         u_opt = self.solver.get(1, "x")[-2:] # acceleration, delta
@@ -604,6 +619,8 @@ class MPCNode(Node):
             for i in range(self.N + 1):
                 x_pred = self.solver.get(i, "x")[:3]
                 predicted_states.append(x_pred)
+
+            print(f"PREDICTED STATES: {predicted_states}")
 
             
 
