@@ -163,8 +163,9 @@ def grid_search_multi_step(reset_interval, total, recording, lb_history, db_batc
         # 1. Predict the next state
         if t % reset_interval == 0:
             # RESET: Anchor the start of this window to the true state
-            current_state = recording["state"][t]
-            lb_history.predict_states(current_state, u_t)
+            # current_state = recording["state"][t]
+            # lb_history.predict_states(current_state, u_t)
+            pass
         else:
             # CONTINUE: Predict from each model's individual last predicted state
             lb_history.predict_states(lb_history.last_predicted_states, u_t)
