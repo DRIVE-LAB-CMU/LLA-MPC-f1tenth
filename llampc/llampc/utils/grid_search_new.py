@@ -71,7 +71,7 @@ def simulate_batched_trajectories(total, recording, all_best_params, params_car,
 
     # 2. Instantiate the lookback history for this specific batch
     lb_batched = history_no_record.LBHistory(
-        num_models, 1/40, np.array([1.0, 1.0, 0.1, 0.01, 0, 0]),
+        num_models, 1/40, np.array([1.0, 1.0, 1.0, 0.01, 0, 0]),
         6, rk6Factory, best_db, dynamics.diffequation, buffer_size=[0, 0]
     )
 
