@@ -356,7 +356,7 @@ class LLAMPCVisualizer:
 
 def main():
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'hall.npz')
+    filepath = os.path.join(dir_path, 'nshtrack.npz')
     # filepath = os.path.join(dir_path, 'spinout.npz')
 
     visualizer = LLAMPCVisualizer(filepath, show_all_models=False)

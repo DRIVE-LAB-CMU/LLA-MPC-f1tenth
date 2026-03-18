@@ -301,7 +301,7 @@ class GridSearchVisualizer:
 
 def main():
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    visualizer = GridSearchVisualizer(os.path.join(dir_path, 'hall.npz'), os.path.join(dir_path, 'traj_9.npz'))
+    visualizer = GridSearchVisualizer(os.path.join(dir_path, 'nshtrack.npz'), os.path.join(dir_path, 'traj_9.npz'))
     visualizer.show()
 
 if __name__ == "__main__":
