@@ -108,8 +108,8 @@ def simulate_batched_trajectories(total, recording, all_best_params, params_car,
         #     derivs = dynamics.diffequation(best_db.param_bank[1], best_db.get_known_params(), current_ol_state[0], u_opt)
         #     print(f"Derivatives (dx/dt): {derivs}")
 
-        if t % 20 == 0:
-            current_ol_state = recording["state"][t]
+        # if t % 20 == 0:
+        #     current_ol_state = recording["state"][t]
         
         lb_batched.predict_states(current_ol_state, u_opt)
         pred_ol = np.array(lb_batched.last_predicted_states) # Shape: (num_models, 6)
@@ -224,7 +224,7 @@ def main():
     grid_iterator = itertools.product(*param_series.values())
 
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'run_visualizer', 'rec_circle.npz')
+    filepath = os.path.join(dir_path, 'run_visualizer', 'nshtrack.npz')
 
     recording = np.load(filepath, allow_pickle=True)
     total = len(recording["time"])-1
