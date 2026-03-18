@@ -225,7 +225,7 @@ def main():
     grid_iterator = itertools.product(*param_series.values())
 
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'run_visualizer', 'nshtrack.npz')
+    filepath = os.path.join(dir_path, 'run_visualizer', 'rec_circle.npz')
 
     recording = np.load(filepath, allow_pickle=True)
     total = len(recording["time"])-1
