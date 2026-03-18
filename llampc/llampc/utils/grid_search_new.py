@@ -299,8 +299,8 @@ def main():
         logger.info(f"  Global Parameters: {np.round(global_best_params, 4)}")
 
 
-        best_params_in_batch = np.array(db_batch.get_model_params_arr(best_idx_in_batch))
-        # best_params_in_batch = np.array(db_batch.get_model_params_arr(int(np.random.randint(current_batch_count))))
+        # best_params_in_batch = np.array(db_batch.get_model_params_arr(best_idx_in_batch))
+        best_params_in_batch = np.array(db_batch.get_model_params_arr(int(np.random.randint(current_batch_count))))
 
         batch_best_trajectories.append({
             "batch": b + 1,

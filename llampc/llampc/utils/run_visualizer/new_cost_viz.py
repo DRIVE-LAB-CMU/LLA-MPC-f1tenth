@@ -301,9 +301,11 @@ class GridSearchVisualizer:
 
 def main():
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    # visualizer = GridSearchVisualizer(os.path.join(dir_path, 'rec_circle.npz'), os.path.join(dir_path, 'traj_circle_ol.npz'))
-    # visualizer = GridSearchVisualizer(os.path.join(dir_path, 'nshtrack.npz'), os.path.join(dir_path, 'traj_nsh_ol.npz'))
-    visualizer = GridSearchVisualizer(os.path.join(dir_path, 'nshtrack.npz'), os.path.join(dir_path, 'traj_nsh_ol.npz'))
+    visualizer = GridSearchVisualizer(os.path.join(dir_path, 'rec_circle.npz'), os.path.join(dir_path, 'traj_circle.npz'))
+    # visualizer = GridSearchVisualizer(os.path.join(dir_path, 'nshtrack.npz'), os.path.join(dir_path, 'traj_nsh_ol_ranked.npz'))
+    # visualizer = GridSearchVisualizer(os.path.join(dir_path, 'nshtrack.npz'), os.path.join(dir_path, 'traj_nsh.npz'))
+    # visualizer = GridSearchVisualizer(os.path.join(dir_path, 'hall.npz'), os.path.join(dir_path, 'traj_8.npz')) # ol
+    # visualizer = GridSearchVisualizer(os.path.join(dir_path, 'hall.npz'), os.path.join(dir_path, 'traj_9.npz')) # 20 reset
     visualizer.show()
 
 if __name__ == "__main__":
