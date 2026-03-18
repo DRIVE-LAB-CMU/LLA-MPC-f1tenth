@@ -149,12 +149,12 @@ def create_ocp(model, params_car, steps, horizon):
 
     w_x = 2.0
     w_y = 2.0
-    w_xe = 1.0
-    w_ye = 1.0
-    w_steer = 0.03
-    w_accel = 0.01
-    w_jerk = .001
-    w_steer_v = 0.01
+    w_xe = 0
+    w_ye = 0
+    w_steer = 0.1
+    w_accel = 0.3
+    w_jerk = .01
+    w_steer_v = 0.1
     Q_flat = [w_x, w_y, 0.0, 0.0, 0.0, 0.0]
     R_flat = [w_accel, w_steer]
     Rd_flat = [w_jerk, w_steer_v]
@@ -217,11 +217,11 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.solver_options.integrator_type = 'ERK'
     # ocp.solver_options.sim_method_num_stages = 2  # Gauss-Legendre, 4th order
     # ocp.solver_options.sim_method_num_steps = 10   # Much fewer needed
-    ocp.solver_options.nlp_solver_type = 'SQP'  # Removed _RTI
+    ocp.solver_options.nlp_solver_type = 'SQP_RTI'  # Removed _RTI
     
     # Now you can safely drop the substeps!
     ocp.solver_options.sim_method_num_stages = 4
-    ocp.solver_options.sim_method_num_steps = 5
+    ocp.solver_options.sim_method_num_steps = 8
     
     # For IRK, it helps to specify the number of Newton iterations for the integrator
     # ocp.solver_options.sim_method_newton_iter = 3
