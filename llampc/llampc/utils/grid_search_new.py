@@ -261,7 +261,7 @@ def main():
         if(multi_step):
             N = 20
             lb_history = history_no_record.LBHistory(
-                current_batch_count, 1/40, np.array([1.0, 1.0, 0.1, 0.01, 0, 0]),
+                current_batch_count, 1/40, np.array([1.0, 1.0, 1.0, 0.01, 0, 0]),
                 6, rk6Factory, db_batch, dynamics.diffequation, buffer_size=[0, 0]
             )
 
@@ -272,7 +272,7 @@ def main():
 
         else:
             lb_history = history_no_record.LBHistory(
-                current_batch_count, 1/40, np.array([1.0, 1.0, 0.1, 0.01, 0, 0]),
+                current_batch_count, 1/40, np.array([1.0, 1.0, 1.0, 0.01, 0, 0]),
                 6, rk6Factory, db_batch, dynamics.diffequation, buffer_size=[0, 0]
             )
 
@@ -299,8 +299,8 @@ def main():
         logger.info(f"  Global Parameters: {np.round(global_best_params, 4)}")
 
 
-        # best_params_in_batch = np.array(db_batch.get_model_params_arr(best_idx_in_batch))
-        best_params_in_batch = np.array(db_batch.get_model_params_arr(int(np.random.randint(current_batch_count))))
+        best_params_in_batch = np.array(db_batch.get_model_params_arr(best_idx_in_batch))
+        # best_params_in_batch = np.array(db_batch.get_model_params_arr(int(np.random.randint(current_batch_count))))
 
         batch_best_trajectories.append({
             "batch": b + 1,
