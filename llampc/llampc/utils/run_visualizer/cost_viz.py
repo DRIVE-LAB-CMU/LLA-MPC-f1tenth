@@ -356,6 +356,9 @@ class LLAMPCVisualizer:
 
 def main():
     dir_path = os.path.dirname(os.path.abspath(__file__))
+    debug_data = np.load(filepath)
+    print("Keys in this NPZ file:", debug_data.files)
+
     filepath = os.path.join(dir_path, 'nshtrack.npz')
     # filepath = os.path.join(dir_path, 'spinout.npz')
 

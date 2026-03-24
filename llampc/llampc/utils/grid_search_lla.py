@@ -260,7 +260,7 @@ def main():
     }
 
     fixed_params = {'Cro': 0.0, 'Cd': 0.0}
-    discretization = 6
+    discretization = 5
     
     param_series = {k: np.linspace(v[0], v[1], discretization + 1, dtype=np.float32) for k, v in params_range.items()}
     num_total_models = (discretization + 1) ** len(params_range)
@@ -309,7 +309,7 @@ def main():
         logger.info("="*60)
 
         # ROUTING LOGIC based on flags
-        cost_form = np.array([1.0, 1.0, 50.0, 0.001, 0, 0])
+        cost_form = np.array([1.0, 1.0, 100.0, 0.01, 0, 0])
         if lla:
             N = 20
             lb_history = history.LBHistory(
@@ -417,7 +417,7 @@ def main():
     all_traj_open_loop_list = [d["traj_open_loop"] for d in batch_best_trajectories]
     all_traj_one_step_list = [d["traj_one_step"] for d in batch_best_trajectories]
     
-    save_path = os.path.join("llampc", "utils", "run_visualizer", "test.npz")
+    save_path = os.path.join("llampc", "utils", "run_visualizer", "test1.npz")
     save_data = {
         "batch": batches,
         "params": all_params,
