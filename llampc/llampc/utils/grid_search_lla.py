@@ -232,12 +232,11 @@ def main():
         if lla:
             N = 20
             lb_history = history.LBHistory(
-                current_batch_count, 1/40, np.array([1.0, 1.0, 1.0, 0.01, 0, 0]),
+                current_batch_count, 20, 1/40, np.array([1.0, 1.0, 1.0, 0.01, 0, 0]),
                 6, rk6Factory, db_batch, dynamics.diffequation, buffer_size=[0, 0]
             )
             batch_models_over_time, batch_costs_over_time = grid_search_multi_step_LLA(N, total, recording, lb_history, db_batch)
-            
-            # Store timestep histories for global comparison
+        
             all_batches_costs.append(batch_costs_over_time)
             all_batches_models.append(batch_models_over_time)
             all_batches_params.append(batch_params)
@@ -290,7 +289,6 @@ def main():
     global_dynamic_trajectory = simulate_dynamic_rollout(
         num_timesteps, recording, global_optimal_params_over_time, params_car, fixed_params
     )
-
 
     all_best_params_stacked = np.array([item["params"] for item in batch_best_trajectories])
     all_traj_open_loop, all_traj_one_step = simulate_batched_trajectories(
