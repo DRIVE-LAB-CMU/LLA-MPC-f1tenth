@@ -197,6 +197,9 @@ def grid_search_multi_step(reset_interval, total, recording, lb_history, db_batc
 def grid_search_multi_step_LLA(reset_interval, total, recording, lb_history, db_batch):
     batch_best_models_over_time = []
     batch_best_costs_over_time = []
+    
+    # NEW: Track cumulative cost forever, ignoring the rolling window
+    total_static_costs = np.zeros(lb_history.num_models)
 
     for t in range(total):
         u_t = -recording["ctrl"][t]
@@ -209,7 +212,12 @@ def grid_search_multi_step_LLA(reset_interval, total, recording, lb_history, db_
 
         if recording["ok_time"][t+1]:
             true_next_state = recording["state"][t+1]
-            lb_history.update_lookback_error(true_next_state)
+            
+            # Catch the instantaneous step cost for all models
+            step_costs = lb_history.update_lookback_error(true_next_state)
+            
+            # Accumulate it forever
+            total_static_costs += step_costs
 
         cur_best_model = lb_history.get_best_model()
         cur_cost = lb_history.running_cost[cur_best_model]
@@ -222,7 +230,8 @@ def grid_search_multi_step_LLA(reset_interval, total, recording, lb_history, db_
             logger.info(f"  Best Local Model : {cur_best_model}")
             logger.info(f"  Accrued Cost     : {cur_cost:.4f}\n")
             
-    return np.array(batch_best_models_over_time), np.array(batch_best_costs_over_time)
+    # Return the true static costs as well
+    return np.array(batch_best_models_over_time), np.array(batch_best_costs_over_time), total_static_costs
 
 # ---------------------------------------------------------------------------
 # Main Execution Pipeline
@@ -302,15 +311,16 @@ def main():
         # ROUTING LOGIC based on flags
         if lla:
             N = 20
-            lb_history = history.LBHistory(
-                current_batch_count, 20, 1/40, np.array([1.0, 1.0, 1.0, 0.01, 0, 0]),
-                6, rk6Factory, db_batch, dynamics.diffequation, buffer_size=[0, 0]
-            )
-            batch_models_over_time, batch_costs_over_time = grid_search_multi_step_LLA(N, total, recording, lb_history, db_batch)
+            lb_history = history.LBHistory(...)
+            
+            batch_models_over_time, batch_costs_over_time, total_static_costs = grid_search_multi_step_LLA(N, total, recording, lb_history, db_batch)
             
             all_batches_costs.append(batch_costs_over_time)
             all_batches_models.append(batch_models_over_time)
             all_batches_params.append(batch_params)
+
+            best_idx_in_batch = np.argmin(total_static_costs)
+            batch_min_cost = total_static_costs[best_idx_in_batch]
             
         else:
             lb_history = history_no_record.LBHistory(
@@ -323,9 +333,10 @@ def main():
             else:
                 grid_search_one_step(total, recording, lb_history, db_batch)
         
-        # Get the standard static winner for the batch
-        best_idx_in_batch = lb_history.get_best_model()
-        batch_min_cost = lb_history.running_cost[best_idx_in_batch]
+            # Get the standard static winner for the batch
+            best_idx_in_batch = lb_history.get_best_model()
+            batch_min_cost = lb_history.running_cost[best_idx_in_batch]
+            
         best_params_in_batch = np.array(db_batch.get_model_params_arr(best_idx_in_batch))
         
         logger.info("-" * 60)
