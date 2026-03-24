@@ -208,6 +208,16 @@ class GridSearchVisualizer:
 
         self.fig.canvas.mpl_connect("motion_notify_event", self.on_hover)
 
+
+    def toggle_model_visibility(self, label):
+        # Extract the model index from the label string (e.g., "Model 0" -> 0)
+        try:
+            model_idx = int(label.split()[1])
+            self.show_model[model_idx] = not self.show_model[model_idx]
+            self.refresh_visibility()
+        except (ValueError, IndexError):
+            pass
+        
     def turn_all_models_on(self, event):
         self.check_models.disconnect(self.cb_cid)
         for i in range(self.num_models):
