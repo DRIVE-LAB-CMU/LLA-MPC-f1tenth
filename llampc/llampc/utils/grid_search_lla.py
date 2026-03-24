@@ -311,7 +311,10 @@ def main():
         # ROUTING LOGIC based on flags
         if lla:
             N = 20
-            lb_history = history.LBHistory(...)
+            lb_history = history.LBHistory(
+                current_batch_count, 20, 1/40, np.array([1.0, 1.0, 1.0, 0.01, 0, 0]),
+                6, rk6Factory, db_batch, dynamics.diffequation, buffer_size=[0, 0]
+            )
             
             batch_models_over_time, batch_costs_over_time, total_static_costs = grid_search_multi_step_LLA(N, total, recording, lb_history, db_batch)
             
