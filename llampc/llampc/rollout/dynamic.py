@@ -11,7 +11,7 @@ from functools import partial
 # @njit(parallel=True)
 # @njit(fastmath=True)
 cpu = jax.devices("cpu")[0]
-gpu = jax.devices("cpu")[0]
+gpu = jax.devices("gpu")[0]
 # gpu = jax.devices("cpu")[0]
 
 
