@@ -113,22 +113,22 @@ def simulate_dynamic_rollout(total, recording, optimal_params_over_time, params_
     
     traj_dynamic = [recording["state"][0]]
     current_state = recording["state"][0]
-    
+
     for t in range(num_steps):
         u_t = -recording["ctrl"][t]
         
-        # We broadcast the current state and control to match the batch size of the integrator,
-        # but we specifically extract the t-th index since it contains the parameters for time t.
+        # We broadcast the current state to match the batch size of the integrator.
         batched_state = np.tile(current_state, (num_steps, 1))
-        batched_ctrl = np.tile(u_t, (2, 1)).T # Assuming control is size 2
         
-        # Step physics
-        next_states = integrator(known_params, batched_state, batched_ctrl)
+        # Pass the unbatched u_t directly!
+        next_states = integrator(known_params, batched_state, u_t)
         
         # Extract purely the prediction mapped to the t-th parameter set
         current_state = np.array(next_states[t])
         traj_dynamic.append(current_state)
-        
+
+        current_state = recording["state"][t]
+
     return np.array(traj_dynamic)
 
 
