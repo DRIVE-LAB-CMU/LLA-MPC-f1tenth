@@ -5,13 +5,13 @@ import os
 
 class GridSearchVisualizer:
     def __init__(self, recording_filepath, batch_filepath, reset_interval=None):
-        # Set the interval at which trajectories reset (e.g., every 50 frames)
         self.reset_interval = reset_interval
         
         self.load_data(recording_filepath, batch_filepath)
         
         self.show_ol = True
         self.show_os = True
+        self.show_lla = True
         self.follow_camera = False 
         self.show_model = [True] * self.num_models
         
@@ -36,8 +36,20 @@ class GridSearchVisualizer:
         self.traj_open_loop = sim["traj_open_loop"] 
         self.traj_one_step = sim["traj_one_step"]
         self.params = sim["params"]
-        self.global_best_cost = sim["global_best_cost"]
-        self.global_best_params = sim["global_best_params"]
+        
+        # Accommodate the naming conventions from the grid search saving logic
+        self.global_best_cost = sim.get("global_best_static_cost", sim.get("global_best_cost", 0.0))
+        self.global_best_params = sim.get("global_best_static_params", sim.get("global_best_params", self.params[0]))
+
+        # --- NEW: Load LLA dynamic rollout data ---
+        self.has_lla = "lla_dynamic_trajectory" in sim
+        if self.has_lla:
+            self.lla_traj = sim["lla_dynamic_trajectory"]
+            self.lla_params = sim["lla_optimal_params"]
+            self.lla_costs = sim["lla_optimal_costs"]
+            print("LLA dynamic trajectory and parameters loaded.")
+        else:
+            print("No LLA data found in simulation file.")
 
         if self.traj_open_loop.shape[0] != len(self.params):
             self.traj_open_loop = np.transpose(self.traj_open_loop, (1, 0, 2))
@@ -45,24 +57,19 @@ class GridSearchVisualizer:
             
         self.num_models = self.traj_open_loop.shape[0]
         self.n_frames = min(len(self.actual_x), self.traj_open_loop.shape[1])
-        print(f"Loaded {self.num_models} models with {self.n_frames} frames.")
+        print(f"Loaded {self.num_models} static models with {self.n_frames} frames.")
 
         self.optimal_idx = 0
         for i, p in enumerate(self.params):
             if np.allclose(p, self.global_best_params):
                 self.optimal_idx = i
                 break
-        print(f"Optimal model identified at index {self.optimal_idx}.")
+        print(f"Optimal static model identified at index {self.optimal_idx}.")
 
     def filter_interval(self, x, y):
-        """
-        Inserts np.nan exactly at the reset interval boundaries 
-        to break matplotlib lines cleanly.
-        """
         if not self.reset_interval or self.reset_interval <= 0:
             return x, y
             
-        # Find exactly where the intervals land 
         insert_indices = np.arange(self.reset_interval, len(x), self.reset_interval)
         
         if len(insert_indices) == 0:
@@ -94,7 +101,6 @@ class GridSearchVisualizer:
         self.info_text = self.fig.text(0.72, 0.60, '', verticalalignment='top',
             bbox=dict(boxstyle='round', facecolor='whitesmoke', alpha=0.9), family='monospace')
 
-        # Filter the actual path before plotting statically
         plot_act_x, plot_act_y = self.filter_interval(self.actual_x, self.actual_y)
         self.ax.plot(plot_act_x, plot_act_y, 'k--', linewidth=2, alpha=0.6, label='Actual Path', zorder=2)
         
@@ -102,6 +108,12 @@ class GridSearchVisualizer:
         self.actual_point, = self.ax.plot([], [], 'k*', markersize=14, label='Current Pos', zorder=3)
         self.next_point, = self.ax.plot([], [], 'ko', markerfacecolor='none', markersize=10, 
                                         markeredgewidth=2, label='Next Pos', zorder=3)
+
+        # --- NEW: Setup LLA dynamic artists ---
+        if self.has_lla:
+            plot_lla_x, plot_lla_y = self.filter_interval(self.lla_traj[:, 0], self.lla_traj[:, 1])
+            self.lla_line, = self.ax.plot(plot_lla_x, plot_lla_y, 'm-', linewidth=3, alpha=0.9, label='LLA Dynamic', zorder=15)
+            self.lla_point, = self.ax.plot([], [], 'mo', markersize=8, zorder=16)
 
         self.ol_lines = []
         self.os_points = []
@@ -124,7 +136,6 @@ class GridSearchVisualizer:
                 z_dot = 21      
                 label_str = f'Model {i}'
 
-            # Filter the open loop lines for interval resets before plotting
             plot_ol_x, plot_ol_y = self.filter_interval(self.traj_open_loop[i, :, 0], self.traj_open_loop[i, :, 1])
             line, = self.ax.plot(
                 plot_ol_x, 
@@ -139,6 +150,8 @@ class GridSearchVisualizer:
 
         handles, labels = self.ax.get_legend_handles_labels()
         desired_labels = ['Actual Path', 'Current Pos', 'Next Pos', f'Model {self.optimal_idx} (Optimal)']
+        if self.has_lla: desired_labels.append('LLA Dynamic')
+        
         filtered_handles = [h for h, l in zip(handles, labels) if l in desired_labels]
         filtered_labels = [l for l in labels if l in desired_labels]
                 
@@ -164,11 +177,15 @@ class GridSearchVisualizer:
 
         ax_check_type = plt.axes([0.28, 0.01, 0.25, 0.12])
         ax_check_type.axis('off') 
-        self.check_type = CheckButtons(
-            ax_check_type, 
-            ('Show Open-Loop', 'Show One-Step', 'Follow Camera'), 
-            (True, True, False)
-        )
+        
+        # Inject LLA toggle if data exists
+        labels = ['Show Open-Loop', 'Show One-Step', 'Follow Camera']
+        actives = [True, True, False]
+        if self.has_lla:
+            labels.insert(2, 'Show LLA Dynamic')
+            actives.insert(2, True)
+
+        self.check_type = CheckButtons(ax_check_type, tuple(labels), tuple(actives))
         self.check_type.on_clicked(self.toggle_type_visibility)
 
         ax_check_models = plt.axes([0.55, 0.01, 0.3, 0.12])
@@ -235,27 +252,28 @@ class GridSearchVisualizer:
         for i in range(self.num_models):
             self.ol_lines[i].set_visible(self.show_ol and self.show_model[i])
             self.os_points[i].set_visible(self.show_os)
+            
+        if self.has_lla:
+            self.lla_line.set_visible(self.show_lla)
+            self.lla_point.set_visible(self.show_lla)
+            
         self.fig.canvas.draw_idle()
 
     def toggle_type_visibility(self, label):
         if label == 'Show Open-Loop':
             self.show_ol = not self.show_ol
-            self.refresh_visibility()
         elif label == 'Show One-Step':
             self.show_os = not self.show_os
-            self.refresh_visibility()
+        elif label == 'Show LLA Dynamic':
+            self.show_lla = not self.show_lla
         elif label == 'Follow Camera':
             self.follow_camera = not self.follow_camera
             if not self.follow_camera:
                 self.ax.set_xlim(self.global_xlim)
                 self.ax.set_ylim(self.global_ylim)
-                self.fig.canvas.draw_idle()
             else:
                 self.update_frame(self.current_frame)
-
-    def toggle_model_visibility(self, label):
-        model_idx = int(label.split()[1])
-        self.show_model[model_idx] = not self.show_model[model_idx]
+                
         self.refresh_visibility()
 
     def update_frame(self, frame_idx):
@@ -275,7 +293,6 @@ class GridSearchVisualizer:
         self.actual_point.set_data([curr_x], [curr_y])
         self.next_point.set_data([next_x], [next_y])
         
-        # Hide the stepping line exactly at the boundary of a reset interval
         if self.reset_interval and (frame_idx + 1) % self.reset_interval == 0:
             self.actual_step_line.set_data([], [])
         else:
@@ -284,6 +301,11 @@ class GridSearchVisualizer:
         for i, pt in enumerate(self.os_points):
              pt.set_data([self.traj_one_step[i, frame_idx, 0]], 
                          [self.traj_one_step[i, frame_idx, 1]])
+
+        # Update LLA position dot
+        if self.has_lla:
+            lla_idx = min(frame_idx, len(self.lla_traj) - 1)
+            self.lla_point.set_data([self.lla_traj[lla_idx, 0]], [self.lla_traj[lla_idx, 1]])
 
         if self.follow_camera:
             xlim = self.ax.get_xlim()
@@ -295,13 +317,27 @@ class GridSearchVisualizer:
             self.ax.set_xlim(curr_x - width / 2, curr_x + width / 2)
             self.ax.set_ylim(curr_y - height / 2, curr_y + height / 2)
 
+        # --- UPDATE INFO TEXT ---
         best_p_str = np.array2string(self.global_best_params, precision=3, separator=',\n')
         
+        lla_str = ""
+        if self.has_lla:
+            lla_p_idx = min(frame_idx, len(self.lla_params) - 1)
+            cur_lla_p = np.array2string(self.lla_params[lla_p_idx], precision=3, separator=',\n')
+            cur_lla_cost = self.lla_costs[lla_p_idx]
+            lla_str = (
+                f"--- LLA DYNAMIC ---\n"
+                f"Cost at t={lla_p_idx}: {cur_lla_cost:.4f}\n"
+                f"Params at t={lla_p_idx}:\n{cur_lla_p}\n"
+                f"-------------------\n"
+            )
+
         info_str = (
             f"FRAME: {frame_idx}\n"
-            f"Cost: {self.global_best_cost:.4f}\n"
-            f"-----------------\n"
-            f"OPTIMAL PARAMS:\n"
+            f"Static Cost: {self.global_best_cost:.4f}\n"
+            f"-------------------\n"
+            f"{lla_str}"
+            f"GLOBAL STATIC PARAMS:\n"
             f"{best_p_str}"
         )
         self.info_text.set_text(info_str)
@@ -328,12 +364,8 @@ class GridSearchVisualizer:
 
 def main():
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    
-    # Just pass in your interval here (e.g., 50 means a reset every 50 frames)
-    # visualizer = GridSearchVisualizer(os.path.join(dir_path, 'rec_circle.npz'), os.path.join(dir_path, 'traj_circle.npz'))
-    visualizer = GridSearchVisualizer(os.path.join(dir_path, 'nshtrack.npz'), os.path.join(dir_path, 'traj_nsh_theta1.npz'), 20)
-    # visualizer = GridSearchVisualizer(os.path.join(dir_path, 'hall.npz'), os.path.join(dir_path, 'traj_8.npz')) # ol
-    # visualizer = GridSearchVisualizer(os.path.join(dir_path, 'hall.npz'), os.path.join(dir_path, 'traj_6.npz')) # 20 reset
+    # Assuming 'all_batch_best_trajectories.npz' or similar is the output
+    visualizer = GridSearchVisualizer(os.path.join(dir_path, 'nshtrack.npz'), os.path.join(dir_path, 'all_batch_best_trajectories.npz'), 20)
     visualizer.show()
 
 if __name__ == "__main__":
