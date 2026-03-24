@@ -121,40 +121,40 @@ class LBHistory:
 
         return diff, cost
     
-    def predict_multi_step(self, x_t, U_seq):
-        """
-        Rolls out the simulation N steps into the future.
-        U_seq should be an array of shape (N, control_size).
-        """
-        # Note: If you want to buffer U_seq for actuation delay, 
-        # you will need to pre-process U_seq before passing it to the integrator.
+    # def predict_multi_step(self, x_t, U_seq):
+    #     """
+    #     Rolls out the simulation N steps into the future.
+    #     U_seq should be an array of shape (N, control_size).
+    #     """
+    #     # Note: If you want to buffer U_seq for actuation delay, 
+    #     # you will need to pre-process U_seq before passing it to the integrator.
         
-        gpu_x = jax.device_put(jnp.array(x_t, dtype='float32'), device=gpu)
-        gpu_U = jax.device_put(jnp.array(U_seq, dtype='float32'), device=gpu)
+    #     gpu_x = jax.device_put(jnp.array(x_t, dtype='float32'), device=gpu)
+    #     gpu_U = jax.device_put(jnp.array(U_seq, dtype='float32'), device=gpu)
         
-        known_params = self.dynamics_bank.get_known_params()
+    #     known_params = self.dynamics_bank.get_known_params()
         
-        # The multi-step factory naturally expects (known_params, x0, U_seq)
-        self.last_predicted_states = self.integrator(
-            known_params,
-            gpu_x,
-            gpu_U
-        )
+    #     # The multi-step factory naturally expects (known_params, x0, U_seq)
+    #     self.last_predicted_states = self.integrator(
+    #         known_params,
+    #         gpu_x,
+    #         gpu_U
+    #     )
 
-    def update_multi_step_error(self, true_future_state):
-        """
-        Grades all 200,000 models against reality at the end of the N-step horizon.
-        """
-        gpu_x_true = jax.device_put(jnp.array(true_future_state, dtype='float32'), device=gpu)
+    # def update_multi_step_error(self, true_future_state):
+    #     """
+    #     Grades all 200,000 models against reality at the end of the N-step horizon.
+    #     """
+    #     gpu_x_true = jax.device_put(jnp.array(true_future_state, dtype='float32'), device=gpu)
         
-        # We can perfectly reuse your existing _step_bank function!
-        diff, cost, self.running_cost, self.current_best_model = _step_bank(
-            self.last_predicted_states,
-            self.running_cost,
-            gpu_x_true,
-            self.cost_weights
-        )
-        return diff, cost
+    #     # We can perfectly reuse your existing _step_bank function!
+    #     diff, cost, self.running_cost, self.current_best_model = _step_bank(
+    #         self.last_predicted_states,
+    #         self.running_cost,
+    #         gpu_x_true,
+    #         self.cost_weights
+    #     )
+    #     return diff, cost
     
 
     def reset(self):

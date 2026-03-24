@@ -4,7 +4,10 @@ from matplotlib.widgets import Slider, Button, CheckButtons
 import os
 
 class GridSearchVisualizer:
-    def __init__(self, recording_filepath, batch_filepath):
+    def __init__(self, recording_filepath, batch_filepath, reset_interval=None):
+        # Set the interval at which trajectories reset (e.g., every 50 frames)
+        self.reset_interval = reset_interval
+        
         self.load_data(recording_filepath, batch_filepath)
         
         self.show_ol = True
@@ -51,6 +54,25 @@ class GridSearchVisualizer:
                 break
         print(f"Optimal model identified at index {self.optimal_idx}.")
 
+    def filter_interval(self, x, y):
+        """
+        Inserts np.nan exactly at the reset interval boundaries 
+        to break matplotlib lines cleanly.
+        """
+        if not self.reset_interval or self.reset_interval <= 0:
+            return x, y
+            
+        # Find exactly where the intervals land 
+        insert_indices = np.arange(self.reset_interval, len(x), self.reset_interval)
+        
+        if len(insert_indices) == 0:
+            return x, y
+        
+        x_filtered = np.insert(x, insert_indices, np.nan)
+        y_filtered = np.insert(y, insert_indices, np.nan)
+        
+        return x_filtered, y_filtered
+
     def setup_figure(self):
         self.fig, self.ax = plt.subplots(figsize=(12, 8))
         plt.subplots_adjust(bottom=0.28, right=0.70)
@@ -72,7 +94,10 @@ class GridSearchVisualizer:
         self.info_text = self.fig.text(0.72, 0.60, '', verticalalignment='top',
             bbox=dict(boxstyle='round', facecolor='whitesmoke', alpha=0.9), family='monospace')
 
-        self.ax.plot(self.actual_x, self.actual_y, 'k--', linewidth=2, alpha=0.6, label='Actual Path', zorder=2)
+        # Filter the actual path before plotting statically
+        plot_act_x, plot_act_y = self.filter_interval(self.actual_x, self.actual_y)
+        self.ax.plot(plot_act_x, plot_act_y, 'k--', linewidth=2, alpha=0.6, label='Actual Path', zorder=2)
+        
         self.actual_step_line, = self.ax.plot([], [], 'k-', linewidth=2, alpha=0.8, zorder=2)
         self.actual_point, = self.ax.plot([], [], 'k*', markersize=14, label='Current Pos', zorder=3)
         self.next_point, = self.ax.plot([], [], 'ko', markerfacecolor='none', markersize=10, 
@@ -99,9 +124,11 @@ class GridSearchVisualizer:
                 z_dot = 21      
                 label_str = f'Model {i}'
 
+            # Filter the open loop lines for interval resets before plotting
+            plot_ol_x, plot_ol_y = self.filter_interval(self.traj_open_loop[i, :, 0], self.traj_open_loop[i, :, 1])
             line, = self.ax.plot(
-                self.traj_open_loop[i, :, 0], 
-                self.traj_open_loop[i, :, 1], 
+                plot_ol_x, 
+                plot_ol_y, 
                 color=color, linewidth=lw, alpha=alpha, 
                 label=label_str, zorder=z_line
             )
@@ -151,7 +178,6 @@ class GridSearchVisualizer:
         self.check_models = CheckButtons(ax_check_models, model_labels, tuple(self.show_model))
         self.cb_cid = self.check_models.on_clicked(self.toggle_model_visibility)
 
-        # Buttons specifically for toggling the Open-Loop traces
         ax_btn_all_on = plt.axes([0.86, 0.07, 0.12, 0.04])
         self.btn_all_on = Button(ax_btn_all_on, 'All OL On')
         self.btn_all_on.on_clicked(self.turn_all_models_on)
@@ -186,8 +212,6 @@ class GridSearchVisualizer:
     def on_hover(self, event):
         if event.inaxes == self.ax and self.show_os:
             for i, pt in enumerate(self.os_points):
-                # We removed the condition that checks self.show_model[i] 
-                # so the tooltip works even if the open-loop line is hidden.
                 cont, ind = pt.contains(event)
                 if cont:
                     x_data, y_data = pt.get_data()
@@ -209,9 +233,7 @@ class GridSearchVisualizer:
 
     def refresh_visibility(self):
         for i in range(self.num_models):
-            # Model checkbox now ONLY affects the open-loop lines
             self.ol_lines[i].set_visible(self.show_ol and self.show_model[i])
-            # One-step points are purely controlled by the global 'Show One-Step' toggle
             self.os_points[i].set_visible(self.show_os)
         self.fig.canvas.draw_idle()
 
@@ -252,7 +274,12 @@ class GridSearchVisualizer:
 
         self.actual_point.set_data([curr_x], [curr_y])
         self.next_point.set_data([next_x], [next_y])
-        self.actual_step_line.set_data([curr_x, next_x], [curr_y, next_y])
+        
+        # Hide the stepping line exactly at the boundary of a reset interval
+        if self.reset_interval and (frame_idx + 1) % self.reset_interval == 0:
+            self.actual_step_line.set_data([], [])
+        else:
+            self.actual_step_line.set_data([curr_x, next_x], [curr_y, next_y])
 
         for i, pt in enumerate(self.os_points):
              pt.set_data([self.traj_one_step[i, frame_idx, 0]], 
@@ -301,11 +328,12 @@ class GridSearchVisualizer:
 
 def main():
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    visualizer = GridSearchVisualizer(os.path.join(dir_path, 'rec_circle.npz'), os.path.join(dir_path, 'traj_circle.npz'))
-    # visualizer = GridSearchVisualizer(os.path.join(dir_path, 'nshtrack.npz'), os.path.join(dir_path, 'traj_nsh_ol_ranked.npz'))
-    # visualizer = GridSearchVisualizer(os.path.join(dir_path, 'nshtrack.npz'), os.path.join(dir_path, 'traj_nsh.npz'))
+    
+    # Just pass in your interval here (e.g., 50 means a reset every 50 frames)
+    # visualizer = GridSearchVisualizer(os.path.join(dir_path, 'rec_circle.npz'), os.path.join(dir_path, 'traj_circle.npz'))
+    visualizer = GridSearchVisualizer(os.path.join(dir_path, 'nshtrack.npz'), os.path.join(dir_path, 'traj_nsh_theta1.npz'), 20)
     # visualizer = GridSearchVisualizer(os.path.join(dir_path, 'hall.npz'), os.path.join(dir_path, 'traj_8.npz')) # ol
-    # visualizer = GridSearchVisualizer(os.path.join(dir_path, 'hall.npz'), os.path.join(dir_path, 'traj_9.npz')) # 20 reset
+    # visualizer = GridSearchVisualizer(os.path.join(dir_path, 'hall.npz'), os.path.join(dir_path, 'traj_6.npz')) # 20 reset
     visualizer.show()
 
 if __name__ == "__main__":
