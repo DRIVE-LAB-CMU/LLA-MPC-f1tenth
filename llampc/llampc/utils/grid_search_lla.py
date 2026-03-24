@@ -124,24 +124,24 @@ def simulate_dynamic_rollout(total, recording, optimal_params_over_time, params_
     integrator = rk6Factory(jax.device_put(dynamic_db.param_bank), dynamics.diffequation, 1/40)
     known_params = dynamic_db.get_known_params()
     
-    traj_dynamic = [recording["state"][0]]
+    traj_dynamic = []
     current_state = recording["state"][0]
 
     for t in range(num_steps):
         u_t = -recording["ctrl"][t]
         
-        # We broadcast the current state to match the batch size of the integrator.
+        # 1. Anchor periodically just like the open-loop batch simulation
+        if t % 20 == 0:
+            current_state = recording["state"][t]
+            
         batched_state = np.tile(current_state, (num_steps, 1))
-        
-        # Pass the unbatched u_t directly!
         next_states = integrator(known_params, batched_state, u_t)
         
-        # Extract purely the prediction mapped to the t-th parameter set
+        # 2. Extract prediction mapped to the t-th parameter set
         current_state = np.array(next_states[t])
         traj_dynamic.append(current_state)
 
-        # Re-anchor to reality (if treating this like an iterative closed-loop step)
-        current_state = recording["state"][t]
+        # Do NOT unconditionally reset current_state to reality here!
 
     return np.array(traj_dynamic)
 
