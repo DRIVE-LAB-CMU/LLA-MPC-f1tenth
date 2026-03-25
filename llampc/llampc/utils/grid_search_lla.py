@@ -262,13 +262,13 @@ def main():
     }
 
     fixed_params = {'Cro': 0.0, 'Cd': 0.0}
-    discretization = 5
+    discretization = 4
     
     param_series = {k: np.linspace(v[0], v[1], discretization + 1, dtype=np.float32) for k, v in params_range.items()}
     num_total_models = (discretization + 1) ** len(params_range)
     logger.info(f"Total models to evaluate: {num_total_models}")
 
-    batch_size = 50000
+    batch_size = 100000
     num_batches = int(np.ceil(num_total_models / batch_size))
     grid_iterator = itertools.product(*param_series.values())
 
@@ -419,7 +419,7 @@ def main():
     all_traj_open_loop_list = [d["traj_open_loop"] for d in batch_best_trajectories]
     all_traj_one_step_list = [d["traj_one_step"] for d in batch_best_trajectories]
     
-    save_path = os.path.join("llampc", "utils", "run_visualizer", "test1.npz")
+    save_path = os.path.join("llampc", "utils", "run_visualizer", "test2.npz")
     save_data = {
         "batch": batches,
         "params": all_params,
