@@ -19,6 +19,8 @@ from llampc.params import F110
 from llampc.rollout.rk6 import rk6Factory
 import jax
 
+OL_reset_interval = 5
+
 # Create a custom logger
 logger = logging.getLogger("BatchOptimization")
 logger.setLevel(logging.INFO)
@@ -88,7 +90,7 @@ def simulate_batched_trajectories(total, recording, all_best_params, params_car,
         traj_one_step.append(pred_one_step)
 
         # OPEN LOOP (Anchor periodically)
-        if t % 20 == 0:
+        if t % OL_reset_interval == 0:
             current_ol_state = recording["state"][t]
         
         lb_batched.predict_states(current_ol_state, u_opt)
@@ -131,7 +133,7 @@ def simulate_dynamic_rollout(total, recording, optimal_params_over_time, params_
         u_t = -recording["ctrl"][t]
         
         # 1. Anchor periodically just like the open-loop batch simulation
-        if t % 20 == 0:
+        if t %  OL_reset_interval == 0:
             current_state = recording["state"][t]
             
         batched_state = np.tile(current_state, (num_steps, 1))
@@ -309,9 +311,9 @@ def main():
         logger.info("="*60)
 
         # ROUTING LOGIC based on flags
-        cost_form = np.array([1.0, 1.0, 100.0, 0.01, 0, 0])
+        cost_form = np.array([1.0, 1.0, 100.0, 0.1, 0, 0])
         if lla:
-            N = 20
+            N = OL_reset_interval
             lb_history = history.LBHistory(
                 current_batch_count, 20, 1/40, cost_form,
                 6, rk6Factory, db_batch, dynamics.diffequation, buffer_size=[0, 0]
@@ -332,7 +334,7 @@ def main():
                 6, rk6Factory, db_batch, dynamics.diffequation, buffer_size=[0, 0]
             )
             if multi_step:
-                N = 20
+                N = OL_reset_interval
                 grid_search_multi_step(N, total, recording, lb_history, db_batch)
             else:
                 grid_search_one_step(total, recording, lb_history, db_batch)
