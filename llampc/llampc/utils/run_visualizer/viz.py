@@ -1,3 +1,4 @@
+from matplotlib.lines import Line2D
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button
@@ -79,7 +80,7 @@ class StateVisualizer:
         self.ax = self.fig.add_subplot(gs[:, 0])
         
         # Set axis properties for trajectory
-        margin = max(1.0, 0.1 * max(self.x.ptp(), self.y.ptp()))
+        margin = max(1.0, 0.1 * max(np.ptp(self.x), np.ptp(self.y)))
         self.ax.set_xlim(self.x.min() - margin, self.x.max() + margin)
         self.ax.set_ylim(self.y.min() - margin, self.y.max() + margin)
         self.ax.set_xlabel('X Position', fontsize=10)
@@ -114,7 +115,7 @@ class StateVisualizer:
             ax_p.set_xlim(self.time[0], self.time[-1])
             
             # Add some margin to y-axis
-            param_range = param_data.ptp()
+            param_range = np.ptp(param_data)
             if param_range > 0:
                 margin = 0.1 * param_range
                 ax_p.set_ylim(param_data.min() - margin, param_data.max() + margin)
@@ -128,7 +129,8 @@ class StateVisualizer:
         
         # Current position
         self.point, = self.ax.plot([], [], 'ko', markersize=10, label='Position', zorder=5)
-        
+        self.heading_line, = self.ax.plot([], [], 'k-', linewidth=2, zorder=4)
+
         # Direction/velocity arrows
         self.x_vel_arrow = None
         self.y_vel_arrow = None
@@ -137,6 +139,7 @@ class StateVisualizer:
         # Create legend
         from matplotlib.patches import Patch
         legend_elements = [
+            Line2D([0], [0], color='black', lw=2, label='Heading (Yaw)'), # <-- Add this line
             Patch(facecolor='blue', alpha=0.7, label='X Velocity'),
             Patch(facecolor='green', alpha=0.7, label='Y Velocity'),
             Patch(facecolor='red', alpha=0.7, label='Acceleration')
@@ -218,6 +221,11 @@ class StateVisualizer:
         
         # Update position marker
         self.point.set_data([self.x[frame_idx]], [self.y[frame_idx]])
+
+        line_length = 0.5  # Adjust this length (in meters) to look good on your specific map
+        end_x = self.x[frame_idx] + line_length * np.cos(self.theta[frame_idx])
+        end_y = self.y[frame_idx] + line_length * np.sin(self.theta[frame_idx])
+        self.heading_line.set_data([self.x[frame_idx], end_x], [self.y[frame_idx], end_y])
         
         # Remove old arrows
         if self.x_vel_arrow and self.x_vel_arrow in self.ax.patches:

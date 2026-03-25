@@ -195,13 +195,15 @@ def grid_search_multi_step(reset_interval, total, recording, lb_history, db_batc
             logger.info(f"  Best Parameters  : {np.round(db_batch.get_model_params_arr(cur_best_model), 4)}")
             logger.info(f"  Accrued Cost     : {costs[cur_best_model]:.4f}\n")
 
-
-def grid_search_multi_step_LLA(reset_interval, total, recording, lb_history, db_batch):
+def grid_search_multi_step_LLA(reset_interval, total, recording, lb_history, db_batch, cost_form):
     batch_best_models_over_time = []
     batch_best_costs_over_time = []
     
-    # NEW: Track cumulative cost forever, ignoring the rolling window
+    # Track cumulative cost forever for the global best static model
     total_static_costs = np.zeros(lb_history.num_models)
+    
+    # --- DEBUG: Track cumulative cost components for the LLA chosen models ---
+    cumulative_cost_components = np.zeros(6) 
 
     for t in range(total):
         u_t = -recording["ctrl"][t]
@@ -217,9 +219,15 @@ def grid_search_multi_step_LLA(reset_interval, total, recording, lb_history, db_
             
             # Catch the instantaneous step cost for all models
             step_costs = lb_history.update_lookback_error(true_next_state)
-            
-            # Accumulate it forever
             total_static_costs += step_costs
+
+            # --- DEBUG: Calculate component cost for the best model ---
+            cur_best_model = lb_history.get_best_model()
+            best_pred = lb_history.last_predicted_states[cur_best_model]
+            
+            # Weighted squared error for each of the 6 states [x, y, yaw, vx, vy, yaw_rate]
+            step_component_cost = ((best_pred - true_next_state) ** 2) * cost_form
+            cumulative_cost_components += step_component_cost
 
         cur_best_model = lb_history.get_best_model()
         cur_cost = lb_history.running_cost[cur_best_model]
@@ -227,14 +235,23 @@ def grid_search_multi_step_LLA(reset_interval, total, recording, lb_history, db_
         batch_best_models_over_time.append(int(cur_best_model))
         batch_best_costs_over_time.append(float(cur_cost))
 
+        # Log periodically
         if (t + 1) % (5 * reset_interval) == 0 or t == total - 1:
             logger.info(f"--- Timestep: {t+1:04d} / {total} ---")
             logger.info(f"  Best Local Model : {cur_best_model}")
-            logger.info(f"  Accrued Cost     : {cur_cost:.4f}\n")
+            logger.info(f"  Accrued Cost     : {cur_cost:.4f}")
             
-    # Return the true static costs as well
+            # --- DEBUG: Log the breakdown ---
+            total_component_sum = np.sum(cumulative_cost_components)
+            if total_component_sum > 0:
+                pcts = (cumulative_cost_components / total_component_sum) * 100
+                logger.info(f"  Cost Breakdown   :")
+                logger.info(f"    X: {pcts[0]:.1f}% | Y: {pcts[1]:.1f}% | Yaw: {pcts[2]:.1f}%")
+                logger.info(f"    Vx: {pcts[3]:.1f}% | Vy: {pcts[4]:.1f}% | Yaw Rate: {pcts[5]:.1f}%\n")
+            else:
+                logger.info("  Cost Breakdown   : 0.0 for all components\n")
+            
     return np.array(batch_best_models_over_time), np.array(batch_best_costs_over_time), total_static_costs
-
 # ---------------------------------------------------------------------------
 # Main Execution Pipeline
 # ---------------------------------------------------------------------------
