@@ -336,7 +336,7 @@ def main():
                 6, rk6Factory, db_batch, dynamics.diffequation, buffer_size=[0, 0]
             )
             
-            batch_models_over_time, batch_costs_over_time, total_static_costs = grid_search_multi_step_LLA(N, total, recording, lb_history, db_batch)
+            batch_models_over_time, batch_costs_over_time, total_static_costs = grid_search_multi_step_LLA(N, total, recording, lb_history, db_batch, cost_form)
             
             all_batches_costs.append(batch_costs_over_time)
             all_batches_models.append(batch_models_over_time)
