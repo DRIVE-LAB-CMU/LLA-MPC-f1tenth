@@ -115,7 +115,7 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'circle.npz')
+        self.declare_parameter('track_file_name', 'nshtrack.npz')
         self.declare_parameter('odom_topic', '/pf/pose/odom')
         # self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
@@ -489,7 +489,8 @@ class MPCNode(Node):
         omega = msg.twist.twist.angular.z
 
         self.current_state = np.array([x, y, phi, vx, vy, omega])
-        # self.get_logger().info(f"Logging State {self.current_state}")
+
+        self.get_logger().info(f"Logging State {self.current_state}")
 
     def control_callback(self):
         self.checkpoint[0] = time.perf_counter_ns()
