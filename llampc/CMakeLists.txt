@@ -61,9 +61,9 @@ install(PROGRAMS
   scripts/particle_filter_init.py
   scripts/step_response_test.py
   scripts/lla_manual.py
+  scripts/imu_zupt_prep.py      # <--- ADD THIS LINE
   DESTINATION lib/${PROJECT_NAME}
 )
-
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights

@@ -147,8 +147,8 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.cost.cost_type = 'NONLINEAR_LS'
     ocp.cost.cost_type_e = 'NONLINEAR_LS'
 
-    w_x = 2.0
-    w_y = 2.0
+    w_x = 1.0
+    w_y = 1.0
     w_xe = 0
     w_ye = 0
     w_steer = 0.01
@@ -217,7 +217,7 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.solver_options.integrator_type = 'ERK'
     # ocp.solver_options.sim_method_num_stages = 2  # Gauss-Legendre, 4th order
     # ocp.solver_options.sim_method_num_steps = 10   # Much fewer needed
-    ocp.solver_options.nlp_solver_type = 'SQP_RTI'  # Removed _RTI
+    ocp.solver_options.nlp_solver_type = 'SQP'  # Removed _RTI
     
     # Now you can safely drop the substeps!
     ocp.solver_options.sim_method_num_stages = 4

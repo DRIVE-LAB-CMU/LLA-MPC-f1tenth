@@ -116,8 +116,8 @@ class MPCNode(Node):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
         self.declare_parameter('track_file_name', 'nshtrack.npz')
-        self.declare_parameter('odom_topic', '/pf/pose/odom')
-        # self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        # self.declare_parameter('odom_topic', '/pf/pose/odom')
+        self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
@@ -533,7 +533,7 @@ class MPCNode(Node):
         ### GET REF TRAJECTORY AND MODEL FOR ROLLOUT
 
         # no need to copy states and trajectory in case of update b/c node is single thread
-        ref_segment, idx = get_reference_trajectory_segment(x0, v0, self.track, self.N, self.dt, self.projidx)
+        ref_segment, idx = get_reference_trajectory_segment(x0, v0, self.track, self.N+1, self.dt, self.projidx)
         self.projidx = idx
 
         if self.publish_trajectories:
