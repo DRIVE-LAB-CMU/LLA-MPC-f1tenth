@@ -1,0 +1,43 @@
+ekf_filter_node:
+  ros__parameters:
+    frequency: 50.0
+    two_d_mode: true          # Essential for ground vehicles (locks Z, Roll, Pitch to 0)
+    publish_tf: true          # EKF publishes odom -> base_link
+    print_diagnostics: true
+
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_link
+    world_frame: odom
+
+    # ---------------------------------------------------------
+    # INPUT 1: Particle Filter (Absolute Location)
+    # ---------------------------------------------------------
+    odom0: /pf/pose/odom
+    odom0_config: [true,  true,  false,  # X, Y
+                   false, false, true,   # Yaw
+                   false, false, false,
+                   false, false, false,
+                   false, false, false]
+    
+    # ---------------------------------------------------------
+    # INPUT 2: Cleaned VESC IMU (Drift & Momentum)
+    # ---------------------------------------------------------
+    imu0: /sensors/imu/data
+    imu0_config: [false, false, false,
+                  false, false, false,
+                  false, false, false,
+                  false, false, true,    # Yaw Velocity (Gyro Z)
+                  true,  true,  false]   # X, Y Acceleration (Drift detection!)
+    imu0_relative: true
+    imu0_linear_acceleration_rejection_threshold: 0.2
+
+    # ---------------------------------------------------------
+    # INPUT 3: ZUPT (Anti-Phantom Drift)
+    # ---------------------------------------------------------
+    twist0: /zupt
+    twist0_config: [false, false, false,
+                    false, false, false,
+                    true,  true,  false,  # Locks Vx, Vy to 0 when parked
+                    false, false, true,   # Locks Vyaw to 0 when parked
+                    false, false, false]
