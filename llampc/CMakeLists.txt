@@ -42,6 +42,11 @@ include_directories(
 #   rclcpp geometry_msgs ackermann_msgs nav_msgs sensor_msgs std_msgs visualization_msgs tf2_ros
 # )
 
+install(DIRECTORY
+  config
+  DESTINATION share/${PROJECT_NAME}
+)
+
 # Install Cpp executables
 # install(TARGETS
 #   pure_pursuit_node
