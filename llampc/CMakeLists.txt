@@ -43,10 +43,10 @@ include_directories(
 # )
 
 install(DIRECTORY
+  launch
   config
   DESTINATION share/${PROJECT_NAME}
 )
-
 # Install Cpp executables
 # install(TARGETS
 #   pure_pursuit_node
