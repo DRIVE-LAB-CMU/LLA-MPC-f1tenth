@@ -149,20 +149,20 @@ def create_ocp(model, params_car, steps, horizon):
 
     w_x = 1.0
     w_y = 1.0
-    w_xe = 0
-    w_ye = 0
-    w_steer = 0.01
-    w_accel = 0.001
-    w_jerk = .01
-    w_steer_v = 0.005
-    Q_flat = [w_x, w_y, 0.0, 0.0, 0.0, 0.0]
+    w_xe = 3.0
+    w_ye = 3.0
+    w_steer = 0.2
+    w_accel = 0.005
+    w_jerk = .05
+    w_steer_v = 0.5
+    Q_flat = [w_x, w_y, 1e-5, 1e-5, 1e-5, 1e-5]
     R_flat = [w_accel, w_steer]
     Rd_flat = [w_jerk, w_steer_v]
 
     Q = np.diag(Q_flat) # nx, for trajectory deviation 6x6
     R = np.diag(R_flat)  # nu, for control magnitude 2x2
     Rd = np.diag(Rd_flat)  # nu, for control smoothness 2x2
-    Qf = np.diag([w_xe, w_ye, 0.0, 0.0, 0.0, 0.0])  # nx, for final state deviation 6x6
+    Qf = np.diag([w_xe, w_ye, 1e-5, 1e-5, 1e-5, 1e-5])  # nx, for final state deviation 6x6
 
     ocp.cost.W = np.diag(np.concatenate((Q_flat, R_flat, Rd_flat))) #nx, nu, nu, 10x10
     ocp.cost.W_e = Qf # cost matrix
@@ -212,12 +212,12 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.constraints.ubu = np.array([params_car['max_steer_vel']])
     ocp.constraints.idxbu = np.array([1])
 
-    ocp.solver_options.qp_solver = 'FULL_CONDENSING_QPOASES'
+    ocp.solver_options.qp_solver = 'PARTIAL_CONDENSING_HPIPM'
     ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'
     ocp.solver_options.integrator_type = 'ERK'
     # ocp.solver_options.sim_method_num_stages = 2  # Gauss-Legendre, 4th order
     # ocp.solver_options.sim_method_num_steps = 10   # Much fewer needed
-    ocp.solver_options.nlp_solver_type = 'SQP'  # Removed _RTI
+    ocp.solver_options.nlp_solver_type = 'SQP_RTI'  # Removed _RTI
     
     # Now you can safely drop the substeps!
     ocp.solver_options.sim_method_num_stages = 4
@@ -274,57 +274,4 @@ def setup_mpc(steps, horizon, json_file='f1tenth_acados_ocp.json', solver_config
     finally:
         os.chdir(original_cwd) 
 
-def debug_high_speed_crash(solver, params_car):
-    print("\n--- INITIATING HIGH SPEED DEBUG RUN ---")
-    
-    # Initial state: x, y, phi, vx, vy, omega, accel, steer
-    # Pushing it to 15 m/s with a slight yaw rate to provoke the tire model
-    x0 = np.array([0.0, 0.0, 0.0, 15.0, 0.1, 0.5, 0.0, 0.0])
-    
-    # Set dummy reference trajectory (straight line ahead)
-    for i in range(solver.acados_ocp.dims.N):
-        yref = np.zeros(solver.acados_ocp.dims.ny)
-        yref[3] = 15.0 # command 15 m/s
-        solver.set(i, "yref", yref)
-        # Set parameters (Bf, Br, etc + xref)
-        # Assuming you just pass zeros for parameters if they are hardcoded, 
-        # or pass your actual parameter array here.
-        p_val = np.zeros(solver.acados_ocp.dims.np)
-        solver.set(i, "p", p_val)
-
-    solver.set(solver.acados_ocp.dims.N, "yref", np.zeros(solver.acados_ocp.dims.ny_e))
-    solver.set(solver.acados_ocp.dims.N, "p", p_val)
-
-    # Simulation loop
-    for step in range(10):
-        # Constrain current state
-        solver.set(0, "lbx", x0)
-        solver.set(0, "ubx", x0)
-        
-        status = solver.solve()
-        
-        # Get next state prediction
-        x_next = solver.get(1, "x")
-        u_opt = solver.get(0, "u")
-        
-        print(f"Step {step} | Status: {status}")
-        print(f"  Inputs -> Jerk: {u_opt[0]:.2f}, SteerRate: {u_opt[1]:.2f}")
-        print(f"  States -> vx: {x_next[3]:.2f}, vy: {x_next[4]:.2f}, yaw_rate: {x_next[5]:.2f}, steer: {x_next[7]:.2f}")
-        
-        if status != 0:
-            print(f"\n[!] SOLVER CRASHED WITH STATUS {status}")
-            print("Status 3/4 = Matrix went singular (Math error/inf/NaN).")
-            print("Dumping internal solver statistics:")
-            solver.print_statistics()
-            break
-            
-        x0 = x_next # step forward
-
-def main(args=None):
-    solver = setup_mpc(steps=20, horizon=1.0, build=True)
-    
-    debug_high_speed_crash(solver, F110)
-
-if __name__ == '__main__':
-    main()
 
