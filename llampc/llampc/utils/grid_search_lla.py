@@ -290,7 +290,7 @@ def main():
     grid_iterator = itertools.product(*param_series.values())
 
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'run_visualizer', 'nshtrack.npz')
+    filepath = os.path.join(dir_path, 'run_visualizer', 'rec_nsh3.npz')
 
     recording = np.load(filepath, allow_pickle=True)
     total = len(recording["time"]) - 1  # -1 to protect ok_time[t+1]
@@ -328,7 +328,7 @@ def main():
         logger.info("="*60)
 
         # ROUTING LOGIC based on flags
-        cost_form = np.array([1.0, 1.0, 100.0, 0.1, 0, 0])
+        cost_form = np.array([1.0, 1.0, 100.0, 0.1, 0.1, 0.1])
         if lla:
             N = OL_reset_interval
             lb_history = history.LBHistory(
@@ -436,7 +436,7 @@ def main():
     all_traj_open_loop_list = [d["traj_open_loop"] for d in batch_best_trajectories]
     all_traj_one_step_list = [d["traj_one_step"] for d in batch_best_trajectories]
     
-    save_path = os.path.join("llampc", "utils", "run_visualizer", "test2.npz")
+    save_path = os.path.join("llampc", "utils", "run_visualizer", "traj_nsht1.npz")
     save_data = {
         "batch": batches,
         "params": all_params,
