@@ -533,8 +533,8 @@ class MPCNode(Node):
                 )
         self.lla_reset_counter = (self.lla_reset_counter + 1) % self.lla_reset_interval
         one_step_cost = self.lb_history.update_lookback_error(
-                self.lla_init_state
-            )
+                lla_init_state
+        )
         # if not self.sim:
         #     one_step_cost = self.lb_history.update_lookback_error(
         #         self.current_state
