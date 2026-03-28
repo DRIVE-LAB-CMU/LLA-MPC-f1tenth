@@ -69,5 +69,5 @@ def generate_launch_description():
         f1tenth_stack_action,
         particle_filter_action,
         zupt_node,
-        # ekf_node
+        ekf_node
     ])
