@@ -49,13 +49,16 @@ def generate_launch_description():
     )
 
     # # Action to run robot_localization EKF with your yaml file
-    # ekf_node = Node(
-    #     package='robot_localization',
-    #     executable='ekf_node',
-    #     name='ekf_filter_node',
-    #     output='screen',
-    #     parameters=[ekf_config_path]
-    # )
+    ekf_node = Node(
+        package='robot_localization',
+        executable='ekf_node',
+        name='ekf_filter_node',
+        output='screen',
+        parameters=[ekf_config_path],
+        remappings=[
+            ('/set_pose', '/initialpose') # <--- Routes RViz directly into the EKF's reset switch
+        ]
+    )
 
 
     # =================================================================
