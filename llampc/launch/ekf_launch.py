@@ -20,8 +20,9 @@ def generate_launch_description():
         name='ekf_filter_node',
         output='screen',
         parameters=[ekf_config_path],
-        # If your EKF publishes to a specific topic name, uncomment and adjust this line:
-        # remappings=[('odometry/filtered', '/odom')]
+        remappings=[
+            ('/set_pose', '/initialpose') # <--- Routes RViz directly into the EKF's reset switch
+        ]
     )
 
     return LaunchDescription([

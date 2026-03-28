@@ -8,7 +8,7 @@ ekf_filter_node:
     map_frame: map
     odom_frame: odom
     base_link_frame: base_link
-    world_frame: odom
+    world_frame: map
 
     # ---------------------------------------------------------
     # INPUT 1: Particle Filter (Absolute Location)
