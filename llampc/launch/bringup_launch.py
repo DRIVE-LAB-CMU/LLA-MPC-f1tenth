@@ -48,14 +48,14 @@ def generate_launch_description():
         output='screen'
     )
 
-    # Action to run robot_localization EKF with your yaml file
-    ekf_node = Node(
-        package='robot_localization',
-        executable='ekf_node',
-        name='ekf_filter_node',
-        output='screen',
-        parameters=[ekf_config_path]
-    )
+    # # Action to run robot_localization EKF with your yaml file
+    # ekf_node = Node(
+    #     package='robot_localization',
+    #     executable='ekf_node',
+    #     name='ekf_filter_node',
+    #     output='screen',
+    #     parameters=[ekf_config_path]
+    # )
 
 
     # =================================================================
@@ -66,5 +66,5 @@ def generate_launch_description():
         f1tenth_stack_action,
         particle_filter_action,
         zupt_node,
-        ekf_node
+        # ekf_node
     ])
