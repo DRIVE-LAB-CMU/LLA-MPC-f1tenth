@@ -115,9 +115,9 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'nshtest.npz')
-        # self.declare_parameter('odom_topic', '/odom/filtered')
-        self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        self.declare_parameter('track_file_name', 'straight.npz')
+        self.declare_parameter('odom_topic', '/odometry/filtered')
+        #self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
@@ -493,6 +493,8 @@ class MPCNode(Node):
         # self.get_logger().info(f"Logging State {self.current_state}")
 
     def control_callback(self):
+        print(self.track)
+        print(self.current_state)
         self.checkpoint[0] = time.perf_counter_ns()
 
         if self.track is None or self.current_state is None:
