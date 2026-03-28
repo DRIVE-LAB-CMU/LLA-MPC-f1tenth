@@ -115,9 +115,9 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'nshtrack.npz')
-        self.declare_parameter('odom_topic', '/pf/pose/odom')
-        # self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        self.declare_parameter('track_file_name', 'straight.npz')
+        self.declare_parameter('odom_topic', '/odometry/filtered')
+        #self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
@@ -490,9 +490,11 @@ class MPCNode(Node):
 
         self.current_state = np.array([x, y, phi, vx, vy, omega])
 
-        self.get_logger().info(f"Logging State {self.current_state}")
+        # self.get_logger().info(f"Logging State {self.current_state}")
 
     def control_callback(self):
+        print(self.track)
+        print(self.current_state)
         self.checkpoint[0] = time.perf_counter_ns()
 
         if self.track is None or self.current_state is None:
@@ -533,12 +535,12 @@ class MPCNode(Node):
         ### GET REF TRAJECTORY AND MODEL FOR ROLLOUT
 
         # no need to copy states and trajectory in case of update b/c node is single thread
-        ref_segment, idx = get_reference_trajectory_segment(x0, v0, self.track, self.N, self.dt, self.projidx)
+        ref_segment, idx = get_reference_trajectory_segment(x0, v0, self.track, self.N+1, self.dt, self.projidx)
         self.projidx = idx
 
         if self.publish_trajectories:
             self.publish_ref_trajectory(ref_segment)
-            print(f"REF: {ref_segment}")
+            # print(f"REF: {ref_segment}")
 
         self.checkpoint[2] = time.perf_counter_ns()
         
@@ -594,11 +596,11 @@ class MPCNode(Node):
 
         self.checkpoint[3]= time.perf_counter_ns()
 
-        print("DEBUG STATE:", aug_state)
-        print("DEBUG PARAMS NODE 0:", full_params[0])
+        # print("DEBUG STATE:", aug_state)
+        # print("DEBUG PARAMS NODE 0:", full_params[0])
 
         status = self.solver.solve()
-        self.solver.print_statistics()
+        # self.solver.print_statistics()
 
         # if status != 0:
         #     self.get_logger().warn(f"MPC solver failed with status: {status}. Resetting memory!")
@@ -625,9 +627,7 @@ class MPCNode(Node):
                 x_pred = self.solver.get(i, "x")[:3]
                 predicted_states.append(x_pred)
 
-            print(f"PREDICTED STATES: {predicted_states}")
-
-            
+            # print(f"PREDICTED STATES: {predicted_states}")
 
             self.publish_predicted_trajectory(predicted_states) # Publish predicted trajectory
 
@@ -708,7 +708,7 @@ class MPCNode(Node):
         self.cmd_pub.publish(drive_msg) 
 
         self.last_drive_command = np.array([desired_speed, steer])
-        print( acceleration * self.dt)
+        # print( acceleration * self.dt)
         self.last_control = np.array([acceleration, steer])
         
 

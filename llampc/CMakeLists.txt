@@ -42,6 +42,11 @@ include_directories(
 #   rclcpp geometry_msgs ackermann_msgs nav_msgs sensor_msgs std_msgs visualization_msgs tf2_ros
 # )
 
+install(DIRECTORY
+  launch
+  config
+  DESTINATION share/${PROJECT_NAME}
+)
 # Install Cpp executables
 # install(TARGETS
 #   pure_pursuit_node
@@ -56,9 +61,9 @@ install(PROGRAMS
   scripts/particle_filter_init.py
   scripts/step_response_test.py
   scripts/lla_manual.py
+  scripts/imu_zupt_prep.py      # <--- ADD THIS LINE
   DESTINATION lib/${PROJECT_NAME}
 )
-
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights

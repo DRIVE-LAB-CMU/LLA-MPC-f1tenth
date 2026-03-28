@@ -38,7 +38,7 @@ def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., cu
     # when loading the raceline
 	dist0 = np.sum(np.linalg.norm(np.diff(start), 2, axis=0))
 	dist = dist0
-	v = max(v0,.1)
+	v = max(v0,.3)
 	# vr = 0.
 	eps=1e-4
 	for idh in range(1,N+1):
