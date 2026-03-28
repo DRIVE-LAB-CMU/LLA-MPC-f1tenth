@@ -41,6 +41,14 @@ class GridSearchVisualizer:
         self.global_best_cost = sim.get("global_best_static_cost", sim.get("global_best_cost", 0.0))
         self.global_best_params = sim.get("global_best_static_params", sim.get("global_best_params", self.params[0]))
 
+        if "ctrl" in rec:
+            self.actual_control = rec["ctrl"]
+        elif "u" in rec:
+            self.actual_control = rec["u"]
+        else:
+            self.actual_control = None
+            print("Warning: No control data found in recording file.")
+
         # --- NEW: Load LLA dynamic rollout data ---
         self.has_lla = "lla_dynamic_trajectory" in sim
         if self.has_lla:
@@ -330,6 +338,19 @@ class GridSearchVisualizer:
         # --- UPDATE INFO TEXT ---
         best_p_str = np.array2string(self.global_best_params, precision=3, separator=',\n')
         
+        # --- NEW: Format control string ---
+        control_str = ""
+        if self.actual_control is not None:
+            # Clamp index in case control array is 1 step shorter than state array
+            c_idx = min(frame_idx, len(self.actual_control) - 1) 
+            u = self.actual_control[c_idx]
+            control_str = (
+                f"ACTUAL CONTROLS at t={c_idx}:\n"
+                f"u0 (acc): {u[0]:.4f}\n"
+                f"u1 (steer)   : {u[1]:.4f}\n"
+                f"-------------------\n"
+            )
+        
         lla_str = ""
         if self.has_lla:
             lla_p_idx = min(frame_idx, len(self.lla_params) - 1)
@@ -346,6 +367,7 @@ class GridSearchVisualizer:
             f"FRAME: {frame_idx}\n"
             f"Static Cost: {self.global_best_cost:.4f}\n"
             f"-------------------\n"
+            f"{control_str}"   # <-- Inject control string here
             f"{lla_str}"
             f"GLOBAL STATIC PARAMS:\n"
             f"{best_p_str}"
@@ -375,7 +397,7 @@ class GridSearchVisualizer:
 def main():
     dir_path = os.path.dirname(os.path.abspath(__file__))
     # Assuming 'all_batch_best_trajectories.npz' or similar is the output
-    visualizer = GridSearchVisualizer(os.path.join(dir_path, 'rec_circle.npz'), os.path.join(dir_path, 'test5.npz'), 5)
+    visualizer = GridSearchVisualizer(os.path.join(dir_path, 'rec_nsh3.npz'), os.path.join(dir_path, 'traj_nsht1.npz'), 20)
     visualizer.show()
 
 if __name__ == "__main__":

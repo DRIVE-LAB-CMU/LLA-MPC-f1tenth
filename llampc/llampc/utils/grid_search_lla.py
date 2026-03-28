@@ -81,7 +81,7 @@ def simulate_batched_trajectories(total, recording, all_best_params, params_car,
         if t % 100 == 0 or t == total - 1:
             logger.info(f"  Parallel Sim Timestep {t}/{total}")
 
-        u_opt = -recording["ctrl"][t]
+        u_opt = recording["ctrl"][t]
         true_state = recording["state"][t]
         
         # ONE STEP
@@ -157,7 +157,7 @@ def grid_search_one_step(total, recording, lb_history, db_batch):
             logger.info(f"--- Processing Timestep {t} of {total} ---")
 
         current_state = recording["state"][t]
-        u_opt = -recording["ctrl"][t]
+        u_opt = recording["ctrl"][t]
         lb_history.predict_states(current_state, u_opt)
 
         if recording["ok_time"][t+1]:
@@ -279,7 +279,7 @@ def main():
     }
 
     fixed_params = {'Cro': 0.0, 'Cd': 0.0}
-    discretization = 4
+    discretization = 10
     
     param_series = {k: np.linspace(v[0], v[1], discretization + 1, dtype=np.float32) for k, v in params_range.items()}
     num_total_models = (discretization + 1) ** len(params_range)
@@ -328,7 +328,7 @@ def main():
         logger.info("="*60)
 
         # ROUTING LOGIC based on flags
-        cost_form = np.array([1.0, 1.0, 100.0, 0.1, 0.1, 0.1])
+        cost_form = np.array([10.0, 10.0, 10, 0.1, 0.001, 5.0])
         if lla:
             N = OL_reset_interval
             lb_history = history.LBHistory(
@@ -436,7 +436,7 @@ def main():
     all_traj_open_loop_list = [d["traj_open_loop"] for d in batch_best_trajectories]
     all_traj_one_step_list = [d["traj_one_step"] for d in batch_best_trajectories]
     
-    save_path = os.path.join("llampc", "utils", "run_visualizer", "traj_nsht1.npz")
+    save_path = os.path.join("llampc", "utils", "run_visualizer", "traj_nsht2.npz")
     save_data = {
         "batch": batches,
         "params": all_params,

@@ -1,50 +1,16 @@
 # integrate vehicle dynamics by 1 step
 import numpy as np
-# from numba import njit, float64, boolean, int64
-# from numba.experimental import jitclass
-
 import jax
 import jax.numpy as jnp
 from functools import partial
 
-
-# @njit(parallel=True)
-# @njit(fastmath=True)
 cpu = jax.devices("cpu")[0]
-# gpu = jax.devices("gpu")[0]
-gpu = jax.devices("cpu")[0]
-
-
-
-@jax.jit
-def diffequation_unoptimized(bank_params, known_params,x, u):
-    """	write dynamics as first order ODE: dxdt = f(x(t))
-        x is a 6x1 vector: [x, y, psi, vx, vy, omega]^T
-        u is a 2x1 vector: [acc/pwm, steer]^T
-    """
-    g = 9.81
-    steer = u[1]
-    psi = x[2]
-    vx = x[3]
-    vy = x[4]
-    omega = x[5]
-
-    mass, Iz, lf, lr, roll, pitch = known_params
-    Ffy, Frx, Fry = _calc_forces(bank_params, known_params, x, u)
-
-    
-    return jnp.array([
-        vx*jnp.cos(psi) - vy*jnp.sin(psi),
-        vx*jnp.sin(psi) + vy*jnp.cos(psi),
-        omega,
-        1/mass * (Frx - Ffy*jnp.sin(steer)) + vy*omega - g * jnp.sin(pitch),
-        1/mass * (Fry + Ffy*jnp.cos(steer)) - vx*omega + g * jnp.sin(roll),
-        1/Iz * (Ffy* lf*jnp.cos(steer) - Fry * lr)
-    ])#, jnp.array([Frx, Ffy, Fry])
+gpu = jax.devices("gpu")[0]
+#gpu = jax.devices("cpu")[0]
 
 @jax.jit
 def diffequation(bank_params, known_params, x, u):
-    """Optimized for GPU - no conditionals"""
+    """Optimized for GPU - Blended Kinematic/Dynamic Model matching CasADi"""
     g = 9.81
 
     acc = u[0]
@@ -59,33 +25,48 @@ def diffequation(bank_params, known_params, x, u):
     # Inline force calculation to reduce function call overhead
     Bf, Br, Cf, Cr, Df, Dr, Cro, Cd, Ce, Cm = bank_params
     
-    # Forces
-    Frx = mass * acc * ( Ce - Cm * vx) - Cro - Cd * (vx * vx)
+    # 1. Hard clamp for Jacobian conditioning (Match CasADi: ca.fmax(x[3], 0.5))
+    vx_clamped = jnp.maximum(vx, 0.5)
 
-    # jax.debug.print("Frx value: {x}", x=Frx)
-    
-    vx_safe = jnp.where(jnp.abs(vx) < 1e-4, 1e-4, vx)
-    alphaf = steer - jnp.arctan2((lf * omega + vy), vx_safe)
-    alphar = jnp.arctan2((lr * omega - vy), vx_safe)
-    
-    mask = jnp.abs(vx) >= 1e-4
-    alphaf = jnp.where(mask, alphaf, 0.0)
-    alphar = jnp.where(mask, alphar, 0.0)
-    
+    # 2. Kinematic model components
+    beta = (lr / (lf + lr)) * steer
+    kin_dx4 = 0.0
+    kin_dx5 = (vx * jnp.cos(beta) * steer) / (lf + lr)
+
+    # 3. Dynamic Pacejka model components
+    # Using jnp.arctan instead of arctan2 to perfectly match CasADi: ca.atan(...)
+    alphaf = steer - jnp.arctan((omega * lf + vy) / vx_clamped)
+    alphar = jnp.arctan((omega * lr - vy) / vx_clamped)
+
     Ffy = Df * jnp.sin(Cf * jnp.arctan(Bf * alphaf))
     Fry = Dr * jnp.sin(Cr * jnp.arctan(Br * alphar))
 
-    return jnp.array([
-        vx*jnp.cos(psi) - vy*jnp.sin(psi),
-        vx*jnp.sin(psi) + vy*jnp.cos(psi),
-        omega,
-        1/mass * (Frx - Ffy*jnp.sin(steer)) + vy*omega - g * jnp.sin(pitch),
-        1/mass * (Fry + Ffy*jnp.cos(steer)) - vx*omega + g * jnp.sin(roll),
-        1/Iz * (Ffy * lf*jnp.cos(steer) - Fry * lr),
-    ])
+    dyn_dx4 = (Fry + Ffy * jnp.cos(steer)) / mass - vx * omega + g * jnp.sin(roll)
+    dyn_dx5 = (lf * Ffy * jnp.cos(steer) - lr * Fry) / Iz
+
+    # 4. Blending based on actual velocity
+    weight_dyn = 0.5 * (1.0 + jnp.tanh(10.0 * (vx - 0.5)))
+    weight_kin = 1.0 - weight_dyn
+
+    # 5. Longitudinal Force
+    Frx = mass * acc * (Ce - Cm * vx) - Cro - Cd * (vx * vx)
+
+    # 6. Differential equations
+    dx0 = (vx * jnp.cos(psi)) - (vy * jnp.sin(psi))
+    dx1 = (vx * jnp.sin(psi)) + (vy * jnp.cos(psi))
+    dx2 = omega
+    
+    # Note: Using weight_dyn to scale the lateral force contribution to vxdot, matching CasADi
+    dx3 = (Frx - weight_dyn * Ffy * jnp.sin(steer)) / mass + vy * omega - g * jnp.sin(pitch)
+    
+    dx4 = weight_kin * kin_dx4 + weight_dyn * dyn_dx4
+    dx5 = weight_kin * kin_dx5 + weight_dyn * dyn_dx5
+
+    return jnp.array([dx0, dx1, dx2, dx3, dx4, dx5])
+
 
 def diffequation_nojit(bank_params, known_params, x, u):
-    """Optimized for GPU - no conditionals"""
+    """Unoptimized version - Blended Kinematic/Dynamic Model matching CasADi"""
     g = 9.81
 
     acc = u[0]
@@ -96,76 +77,38 @@ def diffequation_nojit(bank_params, known_params, x, u):
     omega = x[5]
 
     mass, Iz, lf, lr, roll, pitch = known_params
-    
-    # Inline force calculation to reduce function call overhead
     Bf, Br, Cf, Cr, Df, Dr, Cro, Cd, Ce, Cm = bank_params
     
-    # Forces
-    Frx = mass * acc * ( Ce - Cm * vx) - Cro - Cd * (vx * vx)
+    vx_clamped = jnp.maximum(vx, 0.5)
 
-    # jax.debug.print("Frx value: {x}", x=Frx)
-    # print("forces")
-    # print(mass, acc, ( Ce - Cm * vx))
-    # print( Ce,  Cm * vx)
-    # print(Frx, x, u)
-    
-    vx_safe = jnp.where(jnp.abs(vx) < 1e-4, 1e-4, vx)
-    alphaf = steer - jnp.arctan2((lf * omega + vy), vx_safe)
-    alphar = jnp.arctan2((lr * omega - vy), vx_safe)
-    
-    mask = jnp.abs(vx) >= 1e-4
-    alphaf = jnp.where(mask, alphaf, 0.0)
-    alphar = jnp.where(mask, alphar, 0.0)
-    
-    Ffy = Df * jnp.sin(Cf * jnp.arctan(Bf * alphaf))
-    Fry = Dr * jnp.sin(Cr * jnp.arctan(Br * alphar))
+    beta = (lr / (lf + lr)) * steer
+    kin_dx4 = 0.0
+    kin_dx5 = (vx * jnp.cos(beta) * steer) / (lf + lr)
 
-    return jnp.array([
-        vx*jnp.cos(psi) - vy*jnp.sin(psi),
-        vx*jnp.sin(psi) + vy*jnp.cos(psi),
-        omega,
-        1/mass * (Frx - Ffy*jnp.sin(steer)) + vy*omega - g * jnp.sin(pitch),
-        1/mass * (Fry + Ffy*jnp.cos(steer)) - vx*omega + g * jnp.sin(roll),
-        1/Iz * (Ffy * lf*jnp.cos(steer) - Fry * lr),
-    ])
-    
-
-@jax.jit
-def _calc_forces(bank_params, known_params, x, u):
-    acc = u[0]
-    steer = u[1]
-    psi = x[2]
-    vx = x[3]
-    vy = x[4]
-    omega = x[5]
-
-    Bf, Br, Cf, Cr, Df, Dr, Cro, Cd, Ce, Cm = bank_params
-    mass, Iz, lf, lr, roll, pitch =  known_params
-
-    Frx = mass*acc* ( Ce - Cm * vx ) - Cro - Cd * (vx * vx)
-    def small_velocity_case(_):
-        alphaf = 0.0
-        alphar = 0.0
-        return alphaf, alphar
-
-    def normal_case(_):
-        alphaf = steer - jnp.arctan2((lf * omega + vy), jnp.abs(vx))
-        alphar = jnp.arctan2((lr * omega - vy), jnp.abs(vx))
-        return alphaf, alphar
-
-    alphaf, alphar = jax.lax.cond(
-        jnp.abs(vx) < 1e-4,
-        small_velocity_case,
-        normal_case,
-        operand=None  # no additional input needed
-    )
+    alphaf = steer - jnp.arctan((omega * lf + vy) / vx_clamped)
+    alphar = jnp.arctan((omega * lr - vy) / vx_clamped)
 
     Ffy = Df * jnp.sin(Cf * jnp.arctan(Bf * alphaf))
     Fry = Dr * jnp.sin(Cr * jnp.arctan(Br * alphar))
 
-    return Ffy, Frx, Fry # each of these should end up being num_models long
-        
-# @jitclass(spec)
+    dyn_dx4 = (Fry + Ffy * jnp.cos(steer)) / mass - vx * omega + g * jnp.sin(roll)
+    dyn_dx5 = (lf * Ffy * jnp.cos(steer) - lr * Fry) / Iz
+
+    weight_dyn = 0.5 * (1.0 + jnp.tanh(10.0 * (vx - 0.5)))
+    weight_kin = 1.0 - weight_dyn
+
+    Frx = mass * acc * (Ce - Cm * vx) - Cro - Cd * (vx * vx)
+
+    dx0 = (vx * jnp.cos(psi)) - (vy * jnp.sin(psi))
+    dx1 = (vx * jnp.sin(psi)) + (vy * jnp.cos(psi))
+    dx2 = omega
+    dx3 = (Frx - weight_dyn * Ffy * jnp.sin(steer)) / mass + vy * omega - g * jnp.sin(pitch)
+    dx4 = weight_kin * kin_dx4 + weight_dyn * dyn_dx4
+    dx5 = weight_kin * kin_dx5 + weight_dyn * dyn_dx5
+
+    return jnp.array([dx0, dx1, dx2, dx3, dx4, dx5])
+
+
 class DBMPacejkaBank():
     def __init__(self, 
                  lf, lr, 
@@ -205,10 +148,6 @@ class DBMPacejkaBank():
             device=gpu
         )
 
-        # non-sampled state parameters
-
-        self.num_models = num_models
-
         self.param_bank = jax.device_put(
             jnp.stack([
             self.Bf, self.Br, self.Cf, self.Cr, self.Df, self.Dr,
@@ -240,6 +179,3 @@ class DBMPacejkaBank():
             self.roll,
             self.pitch
         ])
-
-
-    
