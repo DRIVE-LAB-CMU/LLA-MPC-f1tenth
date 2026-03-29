@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from functools import partial
 
 cpu = jax.devices("cpu")[0]
-gpu = jax.devices("gpu")[0]
+gpu = jax.devices("gpu")[1]
 #gpu = jax.devices("cpu")[0]
 
 @jax.jit

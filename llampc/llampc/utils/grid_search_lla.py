@@ -19,7 +19,7 @@ from llampc.params import F110
 from llampc.rollout.rk6 import rk6Factory
 import jax
 
-OL_reset_interval = 5
+OL_reset_interval = 10
 
 # Create a custom logger
 logger = logging.getLogger("BatchOptimization")
@@ -279,7 +279,7 @@ def main():
     }
 
     fixed_params = {'Cro': 0.0, 'Cd': 0.0}
-    discretization = 4
+    discretization = 9
     
     param_series = {k: np.linspace(v[0], v[1], discretization + 1, dtype=np.float32) for k, v in params_range.items()}
     num_total_models = (discretization + 1) ** len(params_range)
@@ -436,7 +436,7 @@ def main():
     all_traj_open_loop_list = [d["traj_open_loop"] for d in batch_best_trajectories]
     all_traj_one_step_list = [d["traj_one_step"] for d in batch_best_trajectories]
     
-    save_path = os.path.join("llampc", "utils", "run_visualizer", "traj_nsht_os.npz")
+    save_path = os.path.join("llampc", "utils", "run_visualizer", "traj_nsht_ol.npz")
     save_data = {
         "batch": batches,
         "params": all_params,
