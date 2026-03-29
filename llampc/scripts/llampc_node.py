@@ -54,6 +54,7 @@ class MPCNode(Node):
         self.declare_params()
         self.initialize_mpc()
        
+        # drive commands
         self.last_drive_command = np.array([0.0, 0.0]) #vx, steer
         self.last_control = np.array([0.0, 0.0]) #acceleration, steer
         self.rates = np.array([0.0, 0.0])
@@ -61,6 +62,7 @@ class MPCNode(Node):
         
         self.projidx = 0
 
+        # timing
         self.count = 0
         self.time_window = 1
         self.time_index = 0
@@ -73,6 +75,8 @@ class MPCNode(Node):
         track_name = self.get_parameter('track_file_name').get_parameter_value().string_value
 
         self.track = Track(track_name)
+
+        
     
 
         self.odom_subscriber = self.create_subscription(
@@ -125,6 +129,8 @@ class MPCNode(Node):
         self.dt = self.Tf / self.N
         self.control_callback_speed = 0.04
         self.lla_predict_horizon = 0.04
+        self.lla_reset_interval = 0
+        self.lla_reset_counter = 0
 
         if(self.log_data):
             out_file =  self.get_parameter('out_file').get_parameter_value().string_value
@@ -445,6 +451,7 @@ class MPCNode(Node):
         self.get_logger().info("Warm starting bank")
         # warm start bank
         self.lb_history.predict_states(np.zeros(self.state_size), np.zeros(2))
+        self.lb_history.predict_states(self.lb_history.last_predicted_states, np.zeros(2))
         self.lb_history.update_lookback_error(np.zeros(self.state_size))
         self.lb_history.get_best_model()
         self.lb_history.reset()
@@ -503,15 +510,17 @@ class MPCNode(Node):
         ##############################################
         ### BANK UPDATE
         one_step_cost = None
-        ok_time = self.time_history[-1, self.count] * 1e-6 < 2 * self.dt * 1000
-        # if(ok_time):
-        if not self.sim:
-            one_step_cost = self.lb_history.update_lookback_error(
-                self.current_state
-            )
-        else:
-            one_step_cost = self.lb_history.update_lookback_error(
-                np.array(
+        # ok_time = self.time_history[-1, self.count] * 1e-6 < 2 * self.dt * 1000
+        ok_time = True
+        if(not ok_time):
+            self.lla_reset_counter = 0
+
+        lla_init_state = self.lb_history.last_predicted_states
+        if(self.lla_reset_interval == 0 or self.lla_reset_counter == 0):
+            if not self.sim:
+                lla_init_state = self.current_state
+            else:
+                lla_init_state = np.array(
                     [
                         self.current_state[0],
                         self.current_state[1],
@@ -522,7 +531,28 @@ class MPCNode(Node):
                         self.last_control[1]
                     ]
                 )
-            )
+        self.lla_reset_counter = (self.lla_reset_counter + 1) % self.lla_reset_interval
+        one_step_cost = self.lb_history.update_lookback_error(
+                lla_init_state
+        )
+        # if not self.sim:
+        #     one_step_cost = self.lb_history.update_lookback_error(
+        #         self.current_state
+        #     )
+        # else:
+        #     one_step_cost = self.lb_history.update_lookback_error(
+        #         np.array(
+        #             [
+        #                 self.current_state[0],
+        #                 self.current_state[1],
+        #                 self.current_state[2],
+        #                 self.current_state[3],
+        #                 np.arctan2(self.current_state[4], self.current_state[3]),
+        #                 self.current_state[5], 
+        #                 self.last_control[1]
+        #             ]
+        #         )
+        #     )
 
         self.log_rollout_data(self.lb_history, one_step_cost, ok_time)
 
