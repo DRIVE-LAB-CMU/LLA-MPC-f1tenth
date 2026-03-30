@@ -159,29 +159,29 @@ class MPCNode(Node):
         params_car = F110()
         
         mean_dict = {
-            'Bf': 15.0,
-            'Br': 15.0,
-            'Cf': 1.0,
-            'Cr': 1.0,
-            'Df': 25.0,
-            'Dr': 25.0,
+            'Bf': 20.0,
+            'Br': 25.0,
+            'Cf': 1.5,
+            'Cr': 1.5,
+            'Df': 50.0,
+            'Dr': 50.0,
             'Cro': 0.0,
             'Cd': 0.0,
-            'Ce': 1.0,
-            'Cm': .0, 
+            'Ce': 0.6,
+            'Cm': .05, 
         }
 
         variation_dict = {
-                'Bf': 0 * mean_dict['Bf'],   # 15% variation
-                'Br': 0 * mean_dict['Br'],   # 15% variation
-                'Cf': 0 * mean_dict['Cf'],   # 15% variation
-                'Cr': 0 * mean_dict['Cr'],   # 15% variation
-                'Df': 0 ,   # 15% variation
-                'Dr': 0 ,   # 15% variation
+                'Bf': 10,   # 15% variation
+                'Br': 15,   # 15% variation
+                'Cf': 0.5,   # 15% variation
+                'Cr': 0.5,   # 15% variation
+                'Df': 25 ,   # 15% variation
+                'Dr': 25 ,   # 15% variation
                 'Cro': 0, # 15% variation
                 'Cd': 0,  # assume negligible drag
-                'Ce': 0.3,  # motor efficiency conversion should never be above 1
-                'Cm': 0.5* mean_dict['Cm'],  # motor speed saturation
+                'Ce': 0.4,  # motor efficiency conversion should never be above 1
+                'Cm': .05,  # motor speed saturation
             }
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
         

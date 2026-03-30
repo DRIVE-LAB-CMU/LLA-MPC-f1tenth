@@ -19,7 +19,7 @@ from llampc.params import F110
 from llampc.rollout.rk6 import rk6Factory
 import jax
 
-OL_reset_interval = 5
+OL_reset_interval = 10
 
 # Create a custom logger
 logger = logging.getLogger("BatchOptimization")
@@ -130,7 +130,7 @@ def simulate_dynamic_rollout(total, recording, optimal_params_over_time, params_
     current_state = recording["state"][0]
 
     for t in range(num_steps):
-        u_t = -recording["ctrl"][t]
+        u_t = recording["ctrl"][t]
         
         # 1. Anchor periodically just like the open-loop batch simulation
         if t %  OL_reset_interval == 0:
@@ -173,7 +173,7 @@ def grid_search_one_step(total, recording, lb_history, db_batch):
 
 def grid_search_multi_step(reset_interval, total, recording, lb_history, db_batch):
     for t in range(total):
-        u_t = -recording["ctrl"][t]
+        u_t = recording["ctrl"][t]
         
         # 1. Predict the next state
         if t % reset_interval == 0:
@@ -206,7 +206,7 @@ def grid_search_multi_step_LLA(reset_interval, total, recording, lb_history, db_
     cumulative_cost_components = np.zeros(6) 
 
     for t in range(total):
-        u_t = -recording["ctrl"][t]
+        u_t = recording["ctrl"][t]
         
         if t % reset_interval == 0:
             current_state = recording["state"][t]
@@ -274,12 +274,12 @@ def main():
         'Cr': [1.0, 2],
         'Df': [0.1, 2.0 * mass * g],
         'Dr': [0.1, 2.0 * mass * g],
-        'Ce': [0.0, 0.1],
-        'Cm': [0, 1.2/10]
+        'Ce': [0.0, 1.0],
+        'Cm': [0, 1.0/10]
     }
 
     fixed_params = {'Cro': 0.0, 'Cd': 0.0}
-    discretization = 10
+    discretization = 9
     
     param_series = {k: np.linspace(v[0], v[1], discretization + 1, dtype=np.float32) for k, v in params_range.items()}
     num_total_models = (discretization + 1) ** len(params_range)
@@ -328,7 +328,7 @@ def main():
         logger.info("="*60)
 
         # ROUTING LOGIC based on flags
-        cost_form = np.array([10.0, 10.0, 10, 0.1, 0.001, 5.0])
+        cost_form = np.array([10.0, 10.0, 10, 0.01, 0.0, 0.001])
         if lla:
             N = OL_reset_interval
             lb_history = history.LBHistory(
@@ -436,7 +436,7 @@ def main():
     all_traj_open_loop_list = [d["traj_open_loop"] for d in batch_best_trajectories]
     all_traj_one_step_list = [d["traj_one_step"] for d in batch_best_trajectories]
     
-    save_path = os.path.join("llampc", "utils", "run_visualizer", "traj_nsht2.npz")
+    save_path = os.path.join("llampc", "utils", "run_visualizer", "traj_nsht_ol.npz")
     save_data = {
         "batch": batches,
         "params": all_params,

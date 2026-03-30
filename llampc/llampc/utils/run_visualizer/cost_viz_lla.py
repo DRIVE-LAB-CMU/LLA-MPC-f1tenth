@@ -109,8 +109,8 @@ class GridSearchVisualizer:
         self.info_text = self.fig.text(0.72, 0.60, '', verticalalignment='top',
             bbox=dict(boxstyle='round', facecolor='whitesmoke', alpha=0.9), family='monospace')
 
-        plot_act_x, plot_act_y = self.filter_interval(self.actual_x, self.actual_y)
-        self.ax.plot(plot_act_x, plot_act_y, 'k--', linewidth=2, alpha=0.6, label='Actual Path', zorder=2)
+        # Plot the actual path continuously without inserting NaN gaps
+        self.ax.plot(self.actual_x, self.actual_y, 'k--', linewidth=2, alpha=0.6, label='Actual Path', zorder=2)
         
         self.actual_step_line, = self.ax.plot([], [], 'k-', linewidth=2, alpha=0.8, zorder=2)
         self.actual_point, = self.ax.plot([], [], 'k*', markersize=14, label='Current Pos', zorder=3)
@@ -311,10 +311,8 @@ class GridSearchVisualizer:
         self.actual_point.set_data([curr_x], [curr_y])
         self.next_point.set_data([next_x], [next_y])
         
-        if self.reset_interval and (frame_idx + 1) % self.reset_interval == 0:
-            self.actual_step_line.set_data([], [])
-        else:
-            self.actual_step_line.set_data([curr_x, next_x], [curr_y, next_y])
+        # Always draw the segment, regardless of the reset interval
+        self.actual_step_line.set_data([curr_x, next_x], [curr_y, next_y])
 
         for i, pt in enumerate(self.os_points):
              pt.set_data([self.traj_one_step[i, frame_idx, 0]], 
@@ -397,7 +395,7 @@ class GridSearchVisualizer:
 def main():
     dir_path = os.path.dirname(os.path.abspath(__file__))
     # Assuming 'all_batch_best_trajectories.npz' or similar is the output
-    visualizer = GridSearchVisualizer(os.path.join(dir_path, 'rec_nsh3.npz'), os.path.join(dir_path, 'traj_nsht1.npz'), 20)
+    visualizer = GridSearchVisualizer(os.path.join(dir_path, 'rec_nsh3.npz'), os.path.join(dir_path, 'traj_nsht_ol.npz'), 10)
     visualizer.show()
 
 if __name__ == "__main__":
