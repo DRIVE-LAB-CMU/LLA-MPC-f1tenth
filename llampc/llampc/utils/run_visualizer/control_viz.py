@@ -12,8 +12,8 @@ def plot_control_signals(rec_path):
     
     # Assuming 'ctrl' is a 2D array where col 0 is steer and col 1 is accel
     controls = rec["ctrl"]
-    steer = controls[:, 0]
-    accel = controls[:, 1]
+    steer = controls[:, 1]
+    accel = controls[:, 0]
     
     # Create time/frame axis
     frames = np.arange(len(steer))

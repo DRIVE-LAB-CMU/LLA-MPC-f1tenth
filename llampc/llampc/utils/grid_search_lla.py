@@ -48,10 +48,11 @@ def setup_logger(lla, multi_step):
 # Trajectory Simulation Functions
 # ---------------------------------------------------------------------------
 
-def simulate_batched_trajectories(total, recording, all_best_params, params_car, fixed_params):
+def simulate_batched_trajectories(total, recording, all_best_params, params_car, fixed_params, full_open_loop=False):
     """
     Simulates all best batch models in parallel to record trajectories.
     all_best_params should be a numpy array of shape (num_best_models, 8).
+    If full_open_loop is True, the simulation never anchors back to the true state after t=0.
     """
     num_models = len(all_best_params)
     logger.info(f"Building parallel simulation bank for {num_models} fixed models...")
@@ -89,8 +90,8 @@ def simulate_batched_trajectories(total, recording, all_best_params, params_car,
         pred_one_step = np.array(lb_batched.last_predicted_states) 
         traj_one_step.append(pred_one_step)
 
-        # OPEN LOOP (Anchor periodically)
-        if t % OL_reset_interval == 0:
+        # OPEN LOOP (Anchor periodically or never if full_open_loop is True)
+        if not full_open_loop and t % OL_reset_interval == 0:
             current_ol_state = recording["state"][t]
         
         lb_batched.predict_states(current_ol_state, u_opt)
@@ -102,10 +103,11 @@ def simulate_batched_trajectories(total, recording, all_best_params, params_car,
     return np.array(traj_open_loop), np.array(traj_one_step)
 
 
-def simulate_dynamic_rollout(total, recording, optimal_params_over_time, params_car, fixed_params):
+def simulate_dynamic_rollout(total, recording, optimal_params_over_time, params_car, fixed_params, full_open_loop=False):
     """
     Rolls out a single trajectory where the Pacejka parameters change at EVERY timestep 
     based on the globally optimal sequence found across all batches.
+    If full_open_loop is True, the simulation never anchors back to the true state after t=0.
     """
     logger.info("Simulating final global dynamic rollout (parameters changing per timestep)...")
     num_steps = len(optimal_params_over_time)
@@ -132,8 +134,8 @@ def simulate_dynamic_rollout(total, recording, optimal_params_over_time, params_
     for t in range(num_steps):
         u_t = recording["ctrl"][t]
         
-        # 1. Anchor periodically just like the open-loop batch simulation
-        if t %  OL_reset_interval == 0:
+        # 1. Anchor periodically unless full open loop
+        if not full_open_loop and t % OL_reset_interval == 0:
             current_state = recording["state"][t]
             
         batched_state = np.tile(current_state, (num_steps, 1))
@@ -252,6 +254,7 @@ def grid_search_multi_step_LLA(reset_interval, total, recording, lb_history, db_
                 logger.info("  Cost Breakdown   : 0.0 for all components\n")
             
     return np.array(batch_best_models_over_time), np.array(batch_best_costs_over_time), total_static_costs
+
 # ---------------------------------------------------------------------------
 # Main Execution Pipeline
 # ---------------------------------------------------------------------------
@@ -260,6 +263,7 @@ def main():
     # --- CONFIGURATION FLAGS ---
     lla = True          # Enable dynamic parameters over time
     multi_step = True   # Enable multi-step window if LLA is False
+    full_open_loop_sim = True  # <-- NEW FLAG: Set to True for full uninterrupted open-loop simulation
     
     setup_logger(lla, multi_step)
 
@@ -279,7 +283,7 @@ def main():
     }
 
     fixed_params = {'Cro': 0.0, 'Cd': 0.0}
-    discretization = 9
+    discretization = 4
     
     param_series = {k: np.linspace(v[0], v[1], discretization + 1, dtype=np.float32) for k, v in params_range.items()}
     num_total_models = (discretization + 1) ** len(params_range)
@@ -328,7 +332,7 @@ def main():
         logger.info("="*60)
 
         # ROUTING LOGIC based on flags
-        cost_form = np.array([10.0, 10.0, 10, 0.01, 0.0, 0.001])
+        cost_form = np.array([10.0, 10.0, 10, 10.0, 0.0, 0.0])
         if lla:
             N = OL_reset_interval
             lb_history = history.LBHistory(
@@ -412,7 +416,7 @@ def main():
             global_optimal_costs_over_time[t] = all_batches_costs_arr[best_batch_idx, t]
             
         global_dynamic_trajectory = simulate_dynamic_rollout(
-            total, recording, global_optimal_params_over_time, params_car, fixed_params
+            total, recording, global_optimal_params_over_time, params_car, fixed_params, full_open_loop=full_open_loop_sim
         )
 
     # --------------------------------------------------------------------------------
@@ -421,7 +425,7 @@ def main():
     all_best_params_stacked = np.array([item["params"] for item in batch_best_trajectories])
     
     all_traj_open_loop, all_traj_one_step = simulate_batched_trajectories(
-        total, recording, all_best_params_stacked, params_car, fixed_params
+        total, recording, all_best_params_stacked, params_car, fixed_params, full_open_loop=full_open_loop_sim
     )
 
     for i, item in enumerate(batch_best_trajectories):

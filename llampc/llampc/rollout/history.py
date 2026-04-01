@@ -16,8 +16,8 @@ from collections import deque
 import time
 
 cpu = jax.devices("cpu")[0]
-gpu = jax.devices("gpu")[1]
-#gpu = jax.devices("cpu")[0]
+# gpu = jax.devices("gpu")[1]
+gpu = jax.devices("cpu")[0]
 
 @jax.jit
 def get_lookback_error(last_predicted_states, x_t, cost_weights):

@@ -37,7 +37,6 @@ class GridSearchVisualizer:
         self.traj_one_step = sim["traj_one_step"]
         self.params = sim["params"]
         
-        # Accommodate the naming conventions from the grid search saving logic
         self.global_best_cost = sim.get("global_best_static_cost", sim.get("global_best_cost", 0.0))
         self.global_best_params = sim.get("global_best_static_params", sim.get("global_best_params", self.params[0]))
 
@@ -49,7 +48,6 @@ class GridSearchVisualizer:
             self.actual_control = None
             print("Warning: No control data found in recording file.")
 
-        # --- NEW: Load LLA dynamic rollout data ---
         self.has_lla = "lla_dynamic_trajectory" in sim
         if self.has_lla:
             self.lla_traj = sim["lla_dynamic_trajectory"]
@@ -75,7 +73,13 @@ class GridSearchVisualizer:
         print(f"Optimal static model identified at index {self.optimal_idx}.")
 
     def filter_interval(self, x, y):
+        # If interval is <= 0, return full data
         if not self.reset_interval or self.reset_interval <= 0:
+            return x, y
+            
+        # CHANGE: If interval is 1, we don't want to hide the lines anymore.
+        # We want the full continuous trajectory.
+        if self.reset_interval == 1:
             return x, y
             
         insert_indices = np.arange(self.reset_interval, len(x), self.reset_interval)
@@ -109,7 +113,6 @@ class GridSearchVisualizer:
         self.info_text = self.fig.text(0.72, 0.60, '', verticalalignment='top',
             bbox=dict(boxstyle='round', facecolor='whitesmoke', alpha=0.9), family='monospace')
 
-        # Plot the actual path continuously without inserting NaN gaps
         self.ax.plot(self.actual_x, self.actual_y, 'k--', linewidth=2, alpha=0.6, label='Actual Path', zorder=2)
         
         self.actual_step_line, = self.ax.plot([], [], 'k-', linewidth=2, alpha=0.8, zorder=2)
@@ -117,7 +120,6 @@ class GridSearchVisualizer:
         self.next_point, = self.ax.plot([], [], 'ko', markerfacecolor='none', markersize=10, 
                                         markeredgewidth=2, label='Next Pos', zorder=3)
 
-        # --- NEW: Setup LLA dynamic artists ---
         if self.has_lla:
             plot_lla_x, plot_lla_y = self.filter_interval(self.lla_traj[:, 0], self.lla_traj[:, 1])
             self.lla_line, = self.ax.plot(plot_lla_x, plot_lla_y, 'm-', linewidth=3, alpha=0.9, label='LLA Dynamic', zorder=15)
@@ -125,36 +127,30 @@ class GridSearchVisualizer:
 
         self.ol_lines = []
         self.os_points = []
+        self.os_lines = [] # NEW: Vector pointing from actual to prediction
         
         for i in range(self.num_models):
             if i == self.optimal_idx:
                 color = 'red'
-                lw = 3          
-                ms = 10         
-                alpha = 1.0     
-                z_line = 10     
-                z_dot = 11
+                lw, ms, alpha, z_line, z_dot = 3, 10, 1.0, 10, 11
                 label_str = f'Model {i} (Optimal)'
             else:
                 color = 'blue'  
-                lw = 1          
-                ms = 4          
-                alpha = 0.6     
-                z_line = 20     
-                z_dot = 21      
+                lw, ms, alpha, z_line, z_dot = 1, 4, 0.6, 20, 21      
                 label_str = f'Model {i}'
 
+            # Setup Global Open Loop Line
             plot_ol_x, plot_ol_y = self.filter_interval(self.traj_open_loop[i, :, 0], self.traj_open_loop[i, :, 1])
-            line, = self.ax.plot(
-                plot_ol_x, 
-                plot_ol_y, 
-                color=color, linewidth=lw, alpha=alpha, 
-                label=label_str, zorder=z_line
-            )
+            line, = self.ax.plot(plot_ol_x, plot_ol_y, color=color, linewidth=lw, alpha=alpha, label=label_str, zorder=z_line)
             self.ol_lines.append(line)
 
+            # Setup Dynamic One-Step Predictor Dots
             pt, = self.ax.plot([], [], 'o', color=color, markersize=ms, alpha=alpha, zorder=z_dot)
             self.os_points.append(pt)
+
+            # Setup Connection Line (Actual -> Predicted)
+            os_line, = self.ax.plot([], [], color=color, linewidth=lw, linestyle=':', alpha=alpha, zorder=z_dot-1)
+            self.os_lines.append(os_line)
 
         handles, labels = self.ax.get_legend_handles_labels()
         desired_labels = ['Actual Path', 'Current Pos', 'Next Pos', f'Model {self.optimal_idx} (Optimal)']
@@ -186,7 +182,6 @@ class GridSearchVisualizer:
         ax_check_type = plt.axes([0.28, 0.01, 0.25, 0.12])
         ax_check_type.axis('off') 
         
-        # Inject LLA toggle if data exists
         labels = ['Show Open-Loop', 'Show One-Step', 'Follow Camera']
         actives = [True, True, False]
         if self.has_lla:
@@ -216,9 +211,7 @@ class GridSearchVisualizer:
 
         self.fig.canvas.mpl_connect("motion_notify_event", self.on_hover)
 
-
     def toggle_model_visibility(self, label):
-        # Extract the model index from the label string (e.g., "Model 0" -> 0)
         try:
             model_idx = int(label.split()[1])
             self.show_model[model_idx] = not self.show_model[model_idx]
@@ -247,6 +240,7 @@ class GridSearchVisualizer:
     def on_hover(self, event):
         if event.inaxes == self.ax and self.show_os:
             for i, pt in enumerate(self.os_points):
+                if not pt.get_visible(): continue
                 cont, ind = pt.contains(event)
                 if cont:
                     x_data, y_data = pt.get_data()
@@ -269,13 +263,13 @@ class GridSearchVisualizer:
     def refresh_visibility(self):
         for i in range(self.num_models):
             self.ol_lines[i].set_visible(self.show_ol and self.show_model[i])
-            self.os_points[i].set_visible(self.show_os)
             
         if self.has_lla:
             self.lla_line.set_visible(self.show_lla)
             self.lla_point.set_visible(self.show_lla)
             
-        self.fig.canvas.draw_idle()
+        # Trigger update frame to render current step visibility changes immediately
+        self.update_frame(self.current_frame)
 
     def toggle_type_visibility(self, label):
         if label == 'Show Open-Loop':
@@ -289,8 +283,6 @@ class GridSearchVisualizer:
             if not self.follow_camera:
                 self.ax.set_xlim(self.global_xlim)
                 self.ax.set_ylim(self.global_ylim)
-            else:
-                self.update_frame(self.current_frame)
                 
         self.refresh_visibility()
 
@@ -305,20 +297,28 @@ class GridSearchVisualizer:
             next_x = self.actual_x[frame_idx + 1]
             next_y = self.actual_y[frame_idx + 1]
         else:
-            next_x = curr_x
-            next_y = curr_y
+            next_x, next_y = curr_x, curr_y
 
         self.actual_point.set_data([curr_x], [curr_y])
         self.next_point.set_data([next_x], [next_y])
-        
-        # Always draw the segment, regardless of the reset interval
         self.actual_step_line.set_data([curr_x, next_x], [curr_y, next_y])
 
-        for i, pt in enumerate(self.os_points):
-             pt.set_data([self.traj_one_step[i, frame_idx, 0]], 
-                         [self.traj_one_step[i, frame_idx, 1]])
+        # FIX: Dynamically update One-Step points and lines for the specific frame
+        for i in range(self.num_models):
+            if self.show_os and self.show_model[i]:
+                pred_x = self.traj_one_step[i, frame_idx, 0]
+                pred_y = self.traj_one_step[i, frame_idx, 1]
+                
+                self.os_points[i].set_data([pred_x], [pred_y])
+                self.os_points[i].set_visible(True)
+                
+                # Draw a dotted connection from Actual Pos to Predicted Pos
+                self.os_lines[i].set_data([curr_x, pred_x], [curr_y, pred_y])
+                self.os_lines[i].set_visible(True)
+            else:
+                self.os_points[i].set_data([], [])
+                self.os_lines[i].set_data([], [])
 
-        # Update LLA position dot
         if self.has_lla:
             lla_idx = min(frame_idx, len(self.lla_traj) - 1)
             self.lla_point.set_data([self.lla_traj[lla_idx, 0]], [self.lla_traj[lla_idx, 1]])
@@ -326,20 +326,15 @@ class GridSearchVisualizer:
         if self.follow_camera:
             xlim = self.ax.get_xlim()
             ylim = self.ax.get_ylim()
-            
             width = xlim[1] - xlim[0]
             height = ylim[1] - ylim[0]
-            
             self.ax.set_xlim(curr_x - width / 2, curr_x + width / 2)
             self.ax.set_ylim(curr_y - height / 2, curr_y + height / 2)
 
-        # --- UPDATE INFO TEXT ---
         best_p_str = np.array2string(self.global_best_params, precision=3, separator=',\n')
         
-        # --- NEW: Format control string ---
         control_str = ""
         if self.actual_control is not None:
-            # Clamp index in case control array is 1 step shorter than state array
             c_idx = min(frame_idx, len(self.actual_control) - 1) 
             u = self.actual_control[c_idx]
             control_str = (
@@ -365,7 +360,7 @@ class GridSearchVisualizer:
             f"FRAME: {frame_idx}\n"
             f"Static Cost: {self.global_best_cost:.4f}\n"
             f"-------------------\n"
-            f"{control_str}"   # <-- Inject control string here
+            f"{control_str}"
             f"{lla_str}"
             f"GLOBAL STATIC PARAMS:\n"
             f"{best_p_str}"
@@ -395,7 +390,7 @@ class GridSearchVisualizer:
 def main():
     dir_path = os.path.dirname(os.path.abspath(__file__))
     # Assuming 'all_batch_best_trajectories.npz' or similar is the output
-    visualizer = GridSearchVisualizer(os.path.join(dir_path, 'rec_nsh3.npz'), os.path.join(dir_path, 'traj_nsht_ol.npz'), 10)
+    visualizer = GridSearchVisualizer(os.path.join(dir_path, 'rec_nsh3.npz'), os.path.join(dir_path, 'traj_nsht_os.npz'), 1)
     visualizer.show()
 
 if __name__ == "__main__":
