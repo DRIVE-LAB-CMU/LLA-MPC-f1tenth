@@ -54,10 +54,41 @@ def odeintRK4_batch(bank_params, diffequation, h, known_params, x0, u):
 
     return jax.vmap(rk4)(bank_params)
 
+# def rk4Factory(bank_params, diffequation, h):
+#     """Returns a function with bank_params, diffequation, and h pre-filled."""
+#     # Return a partial function that has bank_params, diffequation, h bound
+#     return partial(odeintRK4_batch, bank_params, diffequation, h)
+
 def rk4Factory(bank_params, diffequation, h):
-    """Returns a function with bank_params, diffequation, and h pre-filled."""
-    # Return a partial function that has bank_params, diffequation, h bound
-    return partial(odeintRK4_batch, bank_params, diffequation, h)
+    """
+    Returns a function that performs one RK4 integration step with fixed bank_params.
+    Matches the logic used in rk6Factory for consistency.
+    """
+    
+    def odeintRK4_batch(known_params, x0, u):
+        def step(b_p, x_t):
+            return diffequation(b_p, known_params, x_t, u)
+
+        # 1. Move state into the arguments of the inner function
+        def rk4(b_p, x_curr):
+            k1 = h * step(b_p, x_curr)
+            k2 = h * step(b_p, x_curr + k1 / 2)
+            k3 = h * step(b_p, x_curr + k2 / 2)
+            k4 = h * step(b_p, x_curr + k3)
+            
+            result = x_curr + (k1 + 2 * k2 + 2 * k3 + k4) / 6
+            return result.astype(jnp.float32)
+
+        # 2. Use JAX vmap to handle mapping based on the input rank of x0
+        if x0.ndim == 1:
+            # Single state (Initialization): map params (0), broadcast state (None)
+            # This is likely where your (1000, 6) vs (6, 6) error was coming from
+            return jax.vmap(rk4, in_axes=(0, None))(bank_params, x0)
+        else:
+            # Batched state (Runtime): map params (0), map states (0)
+            return jax.vmap(rk4, in_axes=(0, 0))(bank_params, x0)
+
+    return jax.jit(odeintRK4_batch)
 
 def eulerFactory(bank_params, diffequation, h):
     """Returns a function that performs one Euler integration step with fixed bank_params."""    
