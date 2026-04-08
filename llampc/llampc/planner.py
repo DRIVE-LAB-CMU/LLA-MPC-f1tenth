@@ -29,7 +29,7 @@ def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., cu
 	# start ahead of the current position
 	start = track.raceline[:,:projidx+2]
 
-	xref = np.zeros([2,N+1])
+	xref = np.zeros([6,N+1])
 	xref[:2,0] = x0
 
 	# use splines to sample points based on max acceleration
@@ -38,7 +38,8 @@ def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., cu
     # when loading the raceline
 	dist0 = np.sum(np.linalg.norm(np.diff(start), 2, axis=0))
 	dist = dist0
-	v = max(v0,.3)
+	v = max(v0,.1)
+	# xref[3,0] = v
 	# vr = 0.
 	eps=1e-4
 	for idh in range(1,N+1):
@@ -57,6 +58,7 @@ def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., cu
 		xref[:2,idh] = track.spline.calc_position(dist)
 		# print(curr_mu,v)
 		v = track.spline_v.calc(dist)
+		# xref[3,idh] = v
 		# print(v)
 		# if curr_mu < track.mus[0] :
 		# 	v = track.spline_v[0].calc(dist)

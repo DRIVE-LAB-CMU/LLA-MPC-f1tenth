@@ -76,8 +76,6 @@ class MPCNode(Node):
 
         self.track = Track(track_name)
 
-        
-    
 
         self.odom_subscriber = self.create_subscription(
             Odometry,
@@ -119,9 +117,9 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'straight.npz')
-        self.declare_parameter('odom_topic', '/odometry/filtered')
-        #self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        self.declare_parameter('track_file_name', 'nsht1.npz')
+        # self.declare_parameter('odom_topic', '/odometry/filtered')
+        self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
@@ -158,34 +156,61 @@ class MPCNode(Node):
         self.get_logger().info("Regular MPC Initialized")
         params_car = F110()
         
+        # mean_dict = {
+        #     'Bf': 16.0,
+        #     'Br': 16.0,
+        #     'Cf': 1.4,
+        #     'Cr': 1.4,
+        #     'Df': 17.0,
+        #     'Dr': 17.0,
+        #     'Cro': 0.0,
+        #     'Cd': 0.0,
+        #     'Ce': 0.55,
+        #     'Cm': .05, 
+        # }
+
+        # variation_dict = {
+        #         'Bf': 8,   # 15% variation
+        #         'Br': 8,   # 15% variation
+        #         'Cf': 0.4,   # 15% variation
+        #         'Cr': 0.4,   # 15% variation
+        #         'Df': 15,   # 15% variation
+        #         'Dr': 15,   # 15% variation
+        #         'Cro': 0, # 15% variation
+        #         'Cd': 0,  # assume negligible drag
+        #         'Ce': 0.45,  # motor efficiency conversion should never be above 1
+        #         'Cm': .05,  # motor speed saturation
+        #     }
+
+
         mean_dict = {
-            'Bf': 20.0,
-            'Br': 25.0,
-            'Cf': 1.5,
-            'Cr': 1.5,
-            'Df': 50.0,
-            'Dr': 50.0,
+            'Bf': 6.5,
+            'Br': 6.5,
+            'Cf': 1.4,
+            'Cr': 1.4,
+            'Df': 17.0,
+            'Dr': 17.0,
             'Cro': 0.0,
             'Cd': 0.0,
-            'Ce': 0.6,
+            'Ce': 0.55,
             'Cm': .05, 
         }
 
         variation_dict = {
-                'Bf': 10,   # 15% variation
-                'Br': 15,   # 15% variation
-                'Cf': 0.5,   # 15% variation
-                'Cr': 0.5,   # 15% variation
-                'Df': 25 ,   # 15% variation
-                'Dr': 25 ,   # 15% variation
+                'Bf': 5.5,   # 15% variation
+                'Br': 5.5,   # 15% variation
+                'Cf': 0.3,   # 15% variation
+                'Cr': 0.3,   # 15% variation
+                'Df': 15,   # 15% variation
+                'Dr': 15,   # 15% variation
                 'Cro': 0, # 15% variation
                 'Cd': 0,  # assume negligible drag
-                'Ce': 0.4,  # motor efficiency conversion should never be above 1
+                'Ce': 0.45,  # motor efficiency conversion should never be above 1
                 'Cm': .05,  # motor speed saturation
             }
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
         
-        num_models = 10
+        num_models = 5000
         self.state_size = 6
         param_dict = get_param_dict(mean_dict, variation_dict, num_models, ground_truth=True)
         
@@ -500,8 +525,8 @@ class MPCNode(Node):
         # self.get_logger().info(f"Logging State {self.current_state}")
 
     def control_callback(self):
-        print(self.track)
-        print(self.current_state)
+        # print(self.track)
+        
         self.checkpoint[0] = time.perf_counter_ns()
 
         if self.track is None or self.current_state is None:
@@ -531,7 +556,9 @@ class MPCNode(Node):
                         self.last_control[1]
                     ]
                 )
-        self.lla_reset_counter = (self.lla_reset_counter + 1) % self.lla_reset_interval
+        if(self.lla_reset_interval != 0):
+            self.lla_reset_counter = (self.lla_reset_counter + 1) % self.lla_reset_interval
+
         one_step_cost = self.lb_history.update_lookback_error(
                 lla_init_state
         )
@@ -570,7 +597,7 @@ class MPCNode(Node):
 
         if self.publish_trajectories:
             self.publish_ref_trajectory(ref_segment)
-            # print(f"REF: {ref_segment}")
+            print(f"REF: {ref_segment}")
 
         self.checkpoint[2] = time.perf_counter_ns()
         
@@ -598,17 +625,18 @@ class MPCNode(Node):
         ########################################################
         #### SETUP AND SOLVE MPC
         filtered_state = self.current_state.copy()
-        if( np.abs(self.current_state[3]) < 0.1):
+        if( np.abs(self.current_state[3]) < 0.01):
             filtered_state[3] = 0.1
 
         aug_state = np.concatenate([filtered_state, self.last_control])
+        print(aug_state)
         self.solver.set(0, "lbx", aug_state)
         self.solver.set(0, "ubx", aug_state)
         def construct_params(N, selected_model_params, ref_segment):
             full_params = np.zeros((N+1, 20), np.float64)
             full_params[:, :12] = selected_model_params
             # self.get_logger().info(f"{full_params}")
-            full_params[:, 12:14] = ref_segment[:2, :N+1].T #reference x, y
+            full_params[:, 12:12+6] = ref_segment[:6, :N+1].T #reference x, y
             return full_params
         
         full_params = construct_params(self.N, selected_model_params, ref_segment)
@@ -616,9 +644,10 @@ class MPCNode(Node):
         for i in range(self.N+1):
             self.solver.set(i, "p", full_params[i])
 
-            if(self.first_control or i == 0):
+            if(i == 0 or self.first_control):
                 self.solver.set(i, "x", aug_state)
-            # self.solver.set(i, "yref", all_yref)
+
+            
 
         if(self.first_control):
             self.first_control = False
@@ -630,7 +659,7 @@ class MPCNode(Node):
         # print("DEBUG PARAMS NODE 0:", full_params[0])
 
         status = self.solver.solve()
-        # self.solver.print_statistics()
+        self.solver.print_statistics()
 
         # if status != 0:
         #     self.get_logger().warn(f"MPC solver failed with status: {status}. Resetting memory!")
@@ -649,15 +678,22 @@ class MPCNode(Node):
         self.checkpoint[4] = time.perf_counter_ns()
 
         u_opt = self.solver.get(1, "x")[-2:] # acceleration, delta
-        # print(f"CONTROL: {u_opt}")
+        print(f"CONTROL: {u_opt}")
 
         if(self.publish_trajectories):
             predicted_states = []
+            predicted_controls = []
             for i in range(self.N + 1):
-                x_pred = self.solver.get(i, "x")[:3]
+                x_pred = self.solver.get(i, "x")[:6]
                 predicted_states.append(x_pred)
 
-            # print(f"PREDICTED STATES: {predicted_states}")
+                c_pred = self.solver.get(i, "x")[-2:]
+                predicted_controls.append(c_pred)
+
+                # print(x_pred, c_pred)
+
+            print(f"PREDICTED STATES: {predicted_states}")
+            print(f"PREDICTED CONTROLS: {predicted_controls}")
 
             self.publish_predicted_trajectory(predicted_states) # Publish predicted trajectory
 
@@ -699,8 +735,42 @@ class MPCNode(Node):
             if(self.count == 0):
                 print(np.max(self.time_history*1e-6, axis = 1))
         else:
-            self.apply_control([0, 0]) # Brake
+            print(f"\n--- SOLVER FAILED WITH STATUS {status} ---")
+            # Status codes: 0=success, 1=failure, 2=max iter, 3=MINLP fail, 4=QP solver failed
+            
+            # 1. Print internal solver statistics
+            self.solver.print_statistics()
+            
+            # 2. Check maximum residuals (stationarity, eq constraints, ineq constraints, comp)
+            residuals = self.solver.get_residuals()
+            print(f"Max Residuals (stat, eq, ineq, comp): {residuals}")
+            
+            # 3. Trace the states node-by-node to find where the math exploded
+            N = self.solver.acados_ocp.dims.N
+            print("\n--- NODE TRAJECTORY DUMP ---")
+            for i in range(N + 1):
+                x_i = self.solver.get(i, "x")
+                print(f"Node {i} | State: {np.round(x_i, 3)}")
+                
+                if np.any(np.isnan(x_i)) or np.any(np.isinf(x_i)):
+                    print(f">>> FATAL ERROR: NaN/Inf detected at Node {i} <<<")
+                    if i > 0:
+                        u_prev = self.solver.get(i-1, "u")
+                        print(f">>> Control applied at Node {i-1}: {u_prev} <<<")
+                    break # Stop reading after first explosion
+                    
+            print("-----------------------------------\n")
+            drive_msg = AckermannDriveStamped()
+            drive_msg.drive.speed = 0.0
+            drive_msg.drive.steering_angle = 0.0
+            self.cmd_pub.publish(drive_msg)
+            
+            # Reset internal memory safely
+            self.last_drive_command = np.array([0.0, 0.0])
+            self.last_control = np.array([0.0, 0.0])
             self.get_logger().warn(f"MPC solver failed with status: {status}")
+
+            # self.first_control = True
 
 
     def publish_ref_trajectory(self, ref_trajectory):
@@ -709,7 +779,7 @@ class MPCNode(Node):
         ref_msg.header.frame_id = "map"
 
         # print(len(ref_trajectory))
-        for x, y in ref_trajectory.T:
+        for x, y in (ref_trajectory[:2].T):
             point = Pose()
             point.position.x = x
             point.position.y = y

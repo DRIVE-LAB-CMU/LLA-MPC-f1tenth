@@ -38,7 +38,7 @@ def F110():
 	Csr = 5.4562
 	hcog = 0.074
 	mu = 0.523
-	min_v = -0.1
+	min_v = -1.0
 	max_v = 20.
 	switch_v = 1.
 	max_acc = 9.51 			# max acceleration [m/s^2]
@@ -46,6 +46,9 @@ def F110():
 	max_steer = 0.34 		# max steering angle [rad]
 	min_steer = -0.34 	# min steering angle [rad]
 	max_steer_vel = 3.2 	# max steering velocity [rad/s]
+
+	max_jerk = 10
+	min_jerk = -10
 
 	max_inputs = [max_acc, max_steer]
 	min_inputs = [min_acc, min_steer]
@@ -72,6 +75,8 @@ def F110():
 		'max_steer': max_steer,
 		'min_steer': min_steer,
 		'max_steer_vel': max_steer_vel,
+		'min_jerk': min_jerk,
+		'max_jerk': max_jerk,
 		'max_inputs': max_inputs,
 		'min_inputs': min_inputs,
 		'max_rates': max_rates,
