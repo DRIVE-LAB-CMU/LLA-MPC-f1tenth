@@ -117,9 +117,9 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'nsht1.npz')
-        # self.declare_parameter('odom_topic', '/odometry/filtered')
-        self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        self.declare_parameter('track_file_name', 'straight.npz')
+        self.declare_parameter('odom_topic', '/odometry/filtered')
+        # self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
@@ -597,7 +597,7 @@ class MPCNode(Node):
 
         if self.publish_trajectories:
             self.publish_ref_trajectory(ref_segment)
-            print(f"REF: {ref_segment}")
+            # print(f"REF: {ref_segment}")
 
         self.checkpoint[2] = time.perf_counter_ns()
         
@@ -687,13 +687,13 @@ class MPCNode(Node):
                 x_pred = self.solver.get(i, "x")[:6]
                 predicted_states.append(x_pred)
 
-                c_pred = self.solver.get(i, "x")[-2:]
-                predicted_controls.append(c_pred)
+                # c_pred = self.solver.get(i, "x")[-2:]
+                # predicted_controls.append(c_pred)
 
                 # print(x_pred, c_pred)
 
-            print(f"PREDICTED STATES: {predicted_states}")
-            print(f"PREDICTED CONTROLS: {predicted_controls}")
+            # print(f"PREDICTED STATES: {predicted_states}")
+            # print(f"PREDICTED CONTROLS: {predicted_controls}")
 
             self.publish_predicted_trajectory(predicted_states) # Publish predicted trajectory
 
