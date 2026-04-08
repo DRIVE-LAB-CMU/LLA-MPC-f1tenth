@@ -272,10 +272,10 @@ def main():
     mass = params_car["mass"]
     
     params_range = {
-        'Bf': [0.1, 40],
-        'Br': [0.1, 40],
-        'Cf': [1.0, 2],
-        'Cr': [1.0, 2],
+        'Bf': [0.1, 15],
+        'Br': [0.1, 15],
+        'Cf': [1.1, 1.9],
+        'Cr': [1.1, 1.9],
         'Df': [0.1, 2.0 * mass * g],
         'Dr': [0.1, 2.0 * mass * g],
         'Ce': [0.0, 1.0],
@@ -283,7 +283,7 @@ def main():
     }
 
     fixed_params = {'Cro': 0.0, 'Cd': 0.0}
-    discretization = 4
+    discretization = 8
     
     param_series = {k: np.linspace(v[0], v[1], discretization + 1, dtype=np.float32) for k, v in params_range.items()}
     num_total_models = (discretization + 1) ** len(params_range)
