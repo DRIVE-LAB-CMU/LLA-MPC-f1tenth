@@ -62,6 +62,7 @@ install(PROGRAMS
   scripts/step_response_test.py
   scripts/lla_manual.py
   scripts/imu_zupt_prep.py      # <--- ADD THIS LINE
+  scripts/test_accel.py
   DESTINATION lib/${PROJECT_NAME}
 )
 if(BUILD_TESTING)
