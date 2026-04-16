@@ -118,8 +118,8 @@ class MPCNode(Node):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
         self.declare_parameter('track_file_name', 'nsht1.npz')
-        # self.declare_parameter('odom_topic', '/odometry/filtered')
-        self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        self.declare_parameter('odom_topic', '/odometry/filtered')
+        #self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
@@ -190,7 +190,7 @@ class MPCNode(Node):
             'Cr': 1.4,
             'Df': 17.0,
             'Dr': 17.0,
-            'Cro': 0.0,
+            'Cro': 0.2,
             'Cd': 0.0,
             'Ce': 0.55,
             'Cm': .05, 
@@ -203,7 +203,7 @@ class MPCNode(Node):
                 'Cr': 0.3,   # 15% variation
                 'Df': 15,   # 15% variation
                 'Dr': 15,   # 15% variation
-                'Cro': 0, # 15% variation
+                'Cro': 0.2, # 15% variation
                 'Cd': 0,  # assume negligible drag
                 'Ce': 0.45,  # motor efficiency conversion should never be above 1
                 'Cm': .05,  # motor speed saturation
@@ -809,12 +809,13 @@ class MPCNode(Node):
         print(f"ORIGINAL {self.last_drive_command[0] + accel * self.dt}")
         print(f"NEW {desired_v}")
         print(f"NEW_INT {self.current_state[3] + accel * self.dt}")
-
+        new_int = self.current_state[3] + accel * self.dt
+        old = self.last_drive_command[0] + accel * self.dt
         
         # Convert acceleration to speed command (simple integration)
-        desired_speed = max(0.0, self.last_drive_command[0] + accel * self.dt)
+        desired_speed = max(0.0, new_int)
 
-        drive_msg.drive.speed = self.current_state[3] + accel * self.dt
+        drive_msg.drive.speed = desired_speed
         drive_msg.drive.steering_angle = steer
 
         self.cmd_pub.publish(drive_msg) 
