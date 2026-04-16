@@ -117,9 +117,9 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'straight.npz')
-        self.declare_parameter('odom_topic', '/odometry/filtered')
-        # self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        self.declare_parameter('track_file_name', 'nsht1.npz')
+        # self.declare_parameter('odom_topic', '/odometry/filtered')
+        self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
@@ -678,6 +678,8 @@ class MPCNode(Node):
         self.checkpoint[4] = time.perf_counter_ns()
 
         u_opt = self.solver.get(1, "x")[-2:] # acceleration, delta
+        # solved_node = self.solver.get(1, "x")
+
         print(f"CONTROL: {u_opt}")
 
         if(self.publish_trajectories):
@@ -790,26 +792,36 @@ class MPCNode(Node):
 
     def apply_control(self, u_opt):
         """Apply optimal control to the vehicle"""
-        # u_opt = [steer, acceleration]
-        acceleration = float(u_opt[0])
+        # acceleration = float(u_opt[0])
+        desired_v = self.solver.get(1, 'x')[3]
+        # for i in range(20):
+        #     print(f"sol: {self.solver.get(i, 'x')}")
+        accel = float(u_opt[0])
         steer = float(u_opt[1])
+
+        sensor_velocity = np.sqrt(self.current_state[3] **2 + self.current_state[4]**2)
         
         # Create Ackermann drive message
         drive_msg = AckermannDriveStamped()
         drive_msg.header.stamp = self.get_clock().now().to_msg()
         drive_msg.header.frame_id = "base_link"
+
+        print(f"ORIGINAL {self.last_drive_command[0] + accel * self.dt}")
+        print(f"NEW {desired_v}")
+        print(f"NEW_INT {self.current_state[3] + accel * self.dt}")
+
         
         # Convert acceleration to speed command (simple integration)
-        desired_speed = max(0.0, self.last_drive_command[0] + acceleration * self.dt)
+        desired_speed = max(0.0, self.last_drive_command[0] + accel * self.dt)
 
-        drive_msg.drive.speed = desired_speed
+        drive_msg.drive.speed = self.current_state[3] + accel * self.dt
         drive_msg.drive.steering_angle = steer
 
         self.cmd_pub.publish(drive_msg) 
 
         self.last_drive_command = np.array([desired_speed, steer])
         # print( acceleration * self.dt)
-        self.last_control = np.array([acceleration, steer])
+        self.last_control = np.array([accel, steer])
         
 
     def publish_predicted_trajectory(self, predicted_states):
