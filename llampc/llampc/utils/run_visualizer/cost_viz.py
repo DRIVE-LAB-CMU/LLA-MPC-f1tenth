@@ -359,7 +359,7 @@ def main():
     
 
 
-    filepath = os.path.join(dir_path, 'nshtrack.npz')
+    filepath = os.path.join(dir_path, 'nshworks.npz')
     # filepath = os.path.join(dir_path, 'spinout.npz')
     debug_data = np.load(filepath)
     print("Keys in this NPZ file:", debug_data.files)

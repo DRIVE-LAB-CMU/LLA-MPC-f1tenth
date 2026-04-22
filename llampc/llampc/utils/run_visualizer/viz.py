@@ -344,7 +344,7 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'nshtrack.npz')
+    filepath = os.path.join(dir_path, 'nshworks.npz')
     
     # Optional: Define parameter names
     param_names = {
