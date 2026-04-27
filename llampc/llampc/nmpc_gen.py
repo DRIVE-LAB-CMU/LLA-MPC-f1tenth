@@ -306,8 +306,8 @@ def create_ocp(model, params_car, steps, horizon):
     w_xe = 0.1
     w_ye = 0.1
     w_steer = 0.01
-    w_accel = 0.001
-    w_jerk = 0.0001
+    w_accel = 0.01
+    w_jerk = 0.001
     w_steer_v = 0.1
     w_vel = 0.001
     Q_flat = [w_x, w_y, 0, 0, 0, 0, w_accel, w_steer]
@@ -411,13 +411,13 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.solver_options.sim_method_num_steps = 8
 
     ocp.solver_options.nlp_solver_type = 'SQP_RTI'
-    ocp.solver_options.qp_solver_iter_max = 100 
+    ocp.solver_options.qp_solver_iter_max = 200 
     ocp.solver_options.print_level = 0
     ocp.solver_options.qp_solver_warm_start = 1    
 
     # STABILITY FIXES
-    # ocp.solver_options.levenberg_marquardt = 1e-2  # Increased damping
-    # ocp.solver_options.regularize_hessian = 1e-6   # Prevent singular Hessian crashes
+    #ocp.solver_options.levenberg_marquardt = 1e-2  # Increased damping
+    #ocp.solver_options.regularize_hessian = 1e-6   # Prevent singular Hessian crashes
     # ocp.solver_options.qp_solver_cond_N = N        # Enable full condensing for small horizons
     ocp.solver_options.hpipm_mode = 'SPEED'       # Failsafe against stiff Pacejka matrices
 

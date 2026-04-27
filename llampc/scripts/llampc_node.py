@@ -230,7 +230,7 @@ class MPCNode(Node):
         
         self.get_logger().info("History starting")
         
-        history_length=25
+        history_length=15
         self.lb_history = history.LBHistory(
             num_models, history_length,
             self.lla_predict_horizon, cost_weights,
