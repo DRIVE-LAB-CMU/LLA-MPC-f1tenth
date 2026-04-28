@@ -117,9 +117,9 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'nshfast.npz')
-        self.declare_parameter('odom_topic', '/odometry/filtered')
-        #self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        self.declare_parameter('track_file_name', 'blevel_oval.npz')
+        # self.declare_parameter('odom_topic', '/odometry/filtered')
+        self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
@@ -621,12 +621,17 @@ class MPCNode(Node):
             selected_model_params = self.dynamics_bank.get_model_params_arr(selected_model_index)
 
             self.log_lla_data(selected_model_params, selected_model_index)
+            
+        print(f"SELECTED PARAMS {selected_model_params}")
         
         ########################################################
         #### SETUP AND SOLVE MPC
         filtered_state = self.current_state.copy()
         if( np.abs(self.current_state[3]) < 0.01):
             filtered_state[3] = 0.1
+
+        
+        # filtered_state[2] = (filtered_state[2] + np.pi) % (2 * np.pi) - np.pi
 
         aug_state = np.concatenate([filtered_state, self.last_control])
         print(aug_state)

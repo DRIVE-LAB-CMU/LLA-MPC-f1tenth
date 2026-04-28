@@ -344,12 +344,16 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.dims.np = model.p.size()[0]
     ocp.parameter_values = np.zeros((ocp.dims.np, 1))
 
-    ocp.constraints.idxbx = np.array([3, 6, 7])
-    ocp.constraints.lbx = np.array([params_car['min_v'], 
+    ocp.constraints.idxbx = np.array([3, 4,5, 6, 7])
+    ocp.constraints.lbx = np.array([-0.5, 
+                                -4,
+                                -2 * np.pi,
                                 params_car['min_acc'], 
                                 params_car['min_steer']])
 
     ocp.constraints.ubx = np.array([params_car['max_v'], 
+                                    4,
+                                    2* np.pi,
                                     params_car['max_acc'], 
                                     params_car['max_steer']])
     
@@ -408,7 +412,7 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.solver_options.sim_method_num_stages = 4
     
     # DROPPED FROM 10 to 2 (This makes the solver ~5x faster)
-    ocp.solver_options.sim_method_num_steps = 8
+    ocp.solver_options.sim_method_num_steps = 10
 
     ocp.solver_options.nlp_solver_type = 'SQP_RTI'
     ocp.solver_options.qp_solver_iter_max = 200 
@@ -416,8 +420,8 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.solver_options.qp_solver_warm_start = 1    
 
     # STABILITY FIXES
-    #ocp.solver_options.levenberg_marquardt = 1e-2  # Increased damping
-    #ocp.solver_options.regularize_hessian = 1e-6   # Prevent singular Hessian crashes
+    ocp.solver_options.levenberg_marquardt = 1e-2  # Increased damping
+    ocp.solver_options.regularize_hessian = 1e-6   # Prevent singular Hessian crashes
     # ocp.solver_options.qp_solver_cond_N = N        # Enable full condensing for small horizons
     ocp.solver_options.hpipm_mode = 'SPEED'       # Failsafe against stiff Pacejka matrices
 

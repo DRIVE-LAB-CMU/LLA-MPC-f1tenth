@@ -99,11 +99,15 @@ class Track:
         # print("n_waypoints : ", n_waypoints)
         proj = np.empty([2,n_waypoints-1])
         dist = np.empty([n_waypoints-1])
+        # print(f"raceline: {raceline}")
+        # print(f"cur xy: {x, y}")
         for idl in range(n_waypoints-1):
             line = [raceline[:,idl], raceline[:,idl+1]]
             proj[:,idl], dist[idl] = Projection(point, line)
         optidx = np.argmin(dist)
         optxy = proj[:,optidx]
+        
+        # print(f"new xy: {optxy}")
         return optxy, optidx
     
     def plot_raceline(self):

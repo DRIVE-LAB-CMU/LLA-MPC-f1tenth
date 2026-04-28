@@ -9,74 +9,126 @@ import numpy as np
 from llampc.utils import Spline2D
 
 
-def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., curr_mu = 1.):
-	"""	generate a reference trajectory of size 2x(N+1)
-		first column is x0
+# def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., wrap = True, curr_mu = 1.):
+#     """	generate a reference trajectory of size 2x(N+1)
+#         first column is x0
 
-		x0 		: current position (2x1)
-		v0 		: current velocity (scaler)
-		track	: see llampc.tracks, example Rectangular
-		N 		: no of reference points, same as horizon in MPC
-		Ts 		: sampling time in MPC
-		projidx : hack required when raceline is longer than 1 lap
+#         x0 		: current position (2x1)
+#         v0 		: current velocity (scaler)
+#         track	: see llampc.tracks, example Rectangular
+#         N 		: no of reference points, same as horizon in MPC
+#         Ts 		: sampling time in MPC
+#         projidx : hack required when raceline is longer than 1 lap
 
-	"""
-	# project x0 onto raceline
-	raceline = track.raceline
-	xy, idx = track.project_fast(x=x0[0], y=x0[1], raceline=raceline[:,projidx:projidx+10])
-	projidx = idx+projidx
+#     """
+#     # project x0 onto raceline
+#     raceline = track.raceline
+#     xy, idx = track.project_fast(x=x0[0], y=x0[1], raceline=raceline[:,projidx:projidx+10])
+#     projidx = idx+projidx
 
-	# start ahead of the current position
-	start = track.raceline[:,:projidx+2]
+#     # start ahead of the current position
+#     start = track.raceline[:,:projidx+2]
 
-	xref = np.zeros([6,N+1])
-	xref[:2,0] = x0
+#     xref = np.zeros([6,N+1])
+#     xref[:2,0] = x0
 
-	# use splines to sample points based on max acceleration
-    # note that you will need to pass in velocity profiles matching
-    # the points v to the track on creation, but not for mus (i.e. vs argument)
-    # when loading the raceline
-	dist0 = np.sum(np.linalg.norm(np.diff(start), 2, axis=0))
-	dist = dist0
-	v = max(v0,.2)
-	# xref[3,0] = v
-	# vr = 0.
-	eps=1e-4
-	for idh in range(1,N+1):
-		dist += scale*v*Ts
-
-
-		if dist >= track.spline.s[-1] - eps: # NOT WRAPPING
-			for i in range (0, N+1-idh, -1):
-				dist = track.spline.s[-1] - eps * (N+1-idh-i)
-				xref[:2, idh+i:] = track.spline.calc_position(dist)
-			break
-		dist = dist % track.spline.s[-1] #WRAPPING
+#     # use splines to sample points based on max acceleration
+#     # note that you will need to pass in velocity profiles matching
+#     # the points v to the track on creation, but not for mus (i.e. vs argument)
+#     # when loading the raceline
+#     dist0 = np.sum(np.linalg.norm(np.diff(start), 2, axis=0))
+#     dist = dist0
+#     v = max(v0,.2)
+#     # xref[3,0] = v
+#     # vr = 0.
+#     eps=1e-4
+#     for idh in range(1,N+1):
+#         dist += scale*v*Ts
 
 
-		# print(dist)
-		xref[:2,idh] = track.spline.calc_position(dist)
-		# print(curr_mu,v)
-		v = track.spline_v.calc(dist)
-		# xref[3,idh] = v
-		# print(v)
-		# if curr_mu < track.mus[0] :
-		# 	v = track.spline_v[0].calc(dist)
-		# 	i=0
-		# elif curr_mu > track.mus[-1] :
-		# 	v = track.spline_v[-1].calc(dist)
-		# 	i=len(track.mus)-1
-		# else :
-		# 	i = 0
-		# 	for i in range(len(track.mus)) :
-		# 		if track.mus[i] >= curr_mu :
-		# 			break
-		# 	# print(i)
-		# 	vb = track.spline_v[i-1].calc(dist)
-		# 	va = track.spline_v[i].calc(dist)
-		# 	v = vb*(track.mus[i]-curr_mu)/(track.mus[i]-track.mus[i-1]) + va*(curr_mu-track.mus[i-1])/(track.mus[i]-track.mus[i-1])
-		# if idh==1 :
-		# 	vr = v*scale
-		# 	# print(v,va,vb)
+#         max_s = track.spline.s[-1] - eps
+        
+#         if dist >= max_s:
+#             if wrap:
+#                 # Wrap around to the beginning of the track
+#                 dist = dist % max_s
+#             else:
+#                 # Clamp to the end and fill the rest of the horizon
+#                 final_pos = track.spline.calc_position(max_s)
+#                 xref[:2, idh:] = final_pos.reshape(2, 1)
+#                 break
+#         dist = dist % track.spline.s[-1] #WRAPPING
 
-	return xref, projidx#, vr
+
+#         # print(dist)
+#         xref[:2,idh] = track.spline.calc_position(dist)
+#         # print(curr_mu,v)
+#         v = track.spline_v.calc(dist)
+#         # xref[3,idh] = v
+#         # print(v)
+#         # if curr_mu < track.mus[0] :
+#         # 	v = track.spline_v[0].calc(dist)
+#         # 	i=0
+#         # elif curr_mu > track.mus[-1] :
+#         # 	v = track.spline_v[-1].calc(dist)
+#         # 	i=len(track.mus)-1
+#         # else :
+#         # 	i = 0
+#         # 	for i in range(len(track.mus)) :
+#         # 		if track.mus[i] >= curr_mu :
+#         # 			break
+#         # 	# print(i)
+#         # 	vb = track.spline_v[i-1].calc(dist)
+#         # 	va = track.spline_v[i].calc(dist)
+#         # 	v = vb*(track.mus[i]-curr_mu)/(track.mus[i]-track.mus[i-1]) + va*(curr_mu-track.mus[i-1])/(track.mus[i]-track.mus[i-1])
+#         # if idh==1 :
+#         # 	vr = v*scale
+#         # 	# print(v,va,vb)
+
+#     return xref, projidx#, vr
+
+def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., wrap=True):
+    raceline = track.raceline
+    num_pts = raceline.shape[1]
+    
+    # 1. Create wrapped search indices
+    search_indices = np.arange(projidx, projidx + 10) % num_pts
+    search_window = raceline[:, search_indices]
+
+    # --- SANITIZATION ---
+    # Detect if the wrap-around segment (e.g., 499 to 0) has 0 length
+    # If so, we slightly nudge the indices to skip the duplicate point
+    if np.allclose(search_window[:, 0], search_window[:, 1]):
+        # Shift window forward by 1 to skip the duplicated "Finish/Start" point
+        search_indices = (search_indices + 1) % num_pts
+        search_window = raceline[:, search_indices]
+    # --------------------
+    
+    # Project onto the cleaned window
+    xy, idx_rel = track.project_fast(x=x0[0], y=x0[1], raceline=search_window)
+    new_projidx = search_indices[idx_rel]
+
+    # Reference Generation
+    dist_start = track.spline.s[new_projidx]
+    max_s = track.spline.s[-1]
+    
+    dist = dist_start
+    xref = np.zeros([6, N+1])
+    xref[:2, 0] = x0
+    v = max(v0, 0.2)
+
+    for idh in range(1, N+1):
+        dist += scale * v * Ts
+        
+        if wrap:
+            s_sample = dist % max_s
+        else:
+            if dist >= max_s:
+                xref[:2, idh:] = track.spline.calc_position(max_s - 1e-4).reshape(2, 1)
+                break
+            s_sample = dist
+
+        xref[:2, idh] = track.spline.calc_position(s_sample)
+        v = track.spline_v.calc(s_sample)
+
+    return xref, new_projidx
