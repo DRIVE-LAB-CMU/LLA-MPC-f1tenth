@@ -6,9 +6,9 @@ from rclpy.time import Time
 
 import os
 os.environ["JAX_PLATFORM_NAME"] = "cpu"
-# os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "true"
-# os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.5"
-# os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
+#os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "true"
+#os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.5"
+#os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
 
 # from jax.experimental.compilation_cache import compilation_cache as cc
 # cc.initialize_cache("/home/kathy/jax_cache")
@@ -117,7 +117,7 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'blevel_oval.npz')
+        self.declare_parameter('track_file_name', 'blevel_circle.npz')
         self.declare_parameter('odom_topic', '/odometry/filtered')
         #self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
@@ -210,7 +210,7 @@ class MPCNode(Node):
             }
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
         
-        num_models = 5000
+        num_models = 1
         self.state_size = 6
         param_dict = get_param_dict(mean_dict, variation_dict, num_models, ground_truth=True)
         
