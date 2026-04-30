@@ -9,11 +9,14 @@ import os
 class StateVisualizer:
     """Interactive visualizer for state trajectory data."""
     
-    def __init__(self, filepath, n_params_to_show=None, params_per_column=3, param_names=None):
+    def __init__(self, filepath, ref_filepath=None, n_params_to_show=None, params_per_column=3, param_names=None):
         self.n_params_to_show = n_params_to_show
         self.params_per_column = params_per_column
         self.param_names = param_names
+        self.ref_filepath = ref_filepath
+        
         self.load_data(filepath)
+        self.load_ref_data()
         self.setup_figure()
         self.current_frame = 0
         self.playing = False
@@ -38,37 +41,51 @@ class StateVisualizer:
         # - list of arrays where each is length n_timesteps
         params_raw = data["params"]
         
-        # Check if it's a 2D array that needs transposing
         if isinstance(params_raw, np.ndarray) and params_raw.ndim == 2:
-            # If first dimension matches time, transpose to get params as rows
             if params_raw.shape[0] == len(self.time):
-                # Shape is (n_timesteps, n_params), transpose to (n_params, n_timesteps)
                 self.params = [params_raw[:, i] for i in range(params_raw.shape[1])]
             else:
-                # Shape is already (n_params, n_timesteps)
                 self.params = [params_raw[i, :] for i in range(params_raw.shape[0])]
         else:
-            # It's already a list or 1D structure
             self.params = list(params_raw)
         
         self.model_idx = data["model_index"]
         ctrl = data["ctrl"]
         self.accel = ctrl[:, 0]
         self.steer = ctrl[:, 1]
+
+        # --- NEW: Load MPC Rollout ---
+        self.mpc_rollout = None
+        if "mpc_rollout" in data:
+            rollout_data = data["mpc_rollout"]
+            # Check if it actually contains populated arrays
+            if len(rollout_data) > 0 and len(rollout_data[0]) > 0:
+                self.mpc_rollout = rollout_data
         
         # Determine how many parameters to show
         if self.n_params_to_show is None:
             self.n_params_to_show = [x for x in range(len(self.params))]
+
+    def load_ref_data(self):
+        """Load reference raceline data if provided."""
+        self.ref_x = None
+        self.ref_y = None
+        
+        if self.ref_filepath and os.path.exists(self.ref_filepath):
+            try:
+                ref_data = np.load(self.ref_filepath, allow_pickle=True)
+                self.ref_x = ref_data['x']
+                self.ref_y = ref_data['y']
+            except Exception as e:
+                print(f"Warning: Failed to load reference trajectory from {self.ref_filepath}: {e}")
         
     def setup_figure(self):
         """Create figure with appropriate layout."""
-        # Calculate grid layout for parameters
         n_param_cols = int(np.ceil(len(self.n_params_to_show)/ self.params_per_column))
         n_param_rows = min(self.params_per_column, len(self.n_params_to_show))
         
         self.fig = plt.figure(figsize=(8 + n_param_cols * 4, max(8, 3 + n_param_rows * 1.8)))
         
-        # Create grid: left side for trajectory + info, right side for parameters
         gs = self.fig.add_gridspec(
             n_param_rows, 1 + n_param_cols, 
             left=0.08, right=0.96, bottom=0.15, top=0.95,
@@ -76,20 +93,26 @@ class StateVisualizer:
             width_ratios=[1.8] + [1] * n_param_cols
         )
         
-        # Trajectory plot (left side, spans all rows)
         self.ax = self.fig.add_subplot(gs[:, 0])
         
-        # Set axis properties for trajectory
-        margin = max(1.0, 0.1 * max(np.ptp(self.x), np.ptp(self.y)))
-        self.ax.set_xlim(self.x.min() - margin, self.x.max() + margin)
-        self.ax.set_ylim(self.y.min() - margin, self.y.max() + margin)
+        min_x, max_x = self.x.min(), self.x.max()
+        min_y, max_y = self.y.min(), self.y.max()
+        
+        if self.ref_x is not None and self.ref_y is not None:
+            min_x = min(min_x, self.ref_x.min())
+            max_x = max(max_x, self.ref_x.max())
+            min_y = min(min_y, self.ref_y.min())
+            max_y = max(max_y, self.ref_y.max())
+
+        margin = max(1.0, 0.1 * max(max_x - min_x, max_y - min_y))
+        self.ax.set_xlim(min_x - margin, max_x + margin)
+        self.ax.set_ylim(min_y - margin, max_y + margin)
         self.ax.set_xlabel('X Position', fontsize=10)
         self.ax.set_ylabel('Y Position', fontsize=10)
         self.ax.set_aspect('equal', adjustable='box')
         self.ax.grid(True, alpha=0.3)
         self.ax.set_title('Trajectory', fontsize=12, fontweight='bold')
         
-        # Parameter plots (right side, arranged in columns)
         self.ax_params = []
         for count in range(len(self.n_params_to_show)):
             col = count // self.params_per_column
@@ -98,7 +121,6 @@ class StateVisualizer:
             self.ax_params.append(ax_p)
             
             idx = self.n_params_to_show[count]
-            # Get parameter name
             if self.param_names and idx in self.param_names:
                 param_label = self.param_names[idx]
             else:
@@ -109,12 +131,10 @@ class StateVisualizer:
             ax_p.grid(True, alpha=0.3)
             ax_p.tick_params(labelsize=8)
             
-            # Plot this parameter time series
             param_data = self.params[idx]
             ax_p.plot(self.time, param_data, 'b-', linewidth=1.5, alpha=0.8)
             ax_p.set_xlim(self.time[0], self.time[-1])
             
-            # Add some margin to y-axis
             param_range = np.ptp(param_data)
             if param_range > 0:
                 margin = 0.1 * param_range
@@ -124,36 +144,46 @@ class StateVisualizer:
         
     def setup_artists(self):
         """Initialize plot elements."""
-        # Trajectory trail
-        self.trail, = self.ax.plot([], [], 'b-', alpha=0.3, linewidth=1, label='Trajectory')
+        if self.ref_x is not None and self.ref_y is not None:
+            self.ax.plot(self.ref_x, self.ref_y, 'k--', alpha=0.4, linewidth=1.5, label='Raceline', zorder=1)
+
+        self.trail, = self.ax.plot([], [], 'b-', alpha=0.3, linewidth=1, label='Trajectory', zorder=2)
         
-        # Current position
+        # --- NEW: MPC Rollout Line ---
+        self.rollout_line, = self.ax.plot([], [], 'm--', alpha=0.8, linewidth=2, zorder=3)
+        
         self.point, = self.ax.plot([], [], 'ko', markersize=10, label='Position', zorder=5)
         self.heading_line, = self.ax.plot([], [], 'k-', linewidth=2, zorder=4)
 
-        # Direction/velocity arrows
         self.x_vel_arrow = None
         self.y_vel_arrow = None
         self.accel_arrow = None
         
-        # Create legend
         from matplotlib.patches import Patch
-        legend_elements = [
-            Line2D([0], [0], color='black', lw=2, label='Heading (Yaw)'), # <-- Add this line
+        legend_elements = []
+        
+        if self.ref_x is not None:
+            legend_elements.append(Line2D([0], [0], color='black', linestyle='--', lw=1.5, alpha=0.4, label='Reference'))
+            
+        legend_elements.extend([
+            Line2D([0], [0], color='black', lw=2, label='Heading (Yaw)'),
             Patch(facecolor='blue', alpha=0.7, label='X Velocity'),
             Patch(facecolor='green', alpha=0.7, label='Y Velocity'),
             Patch(facecolor='red', alpha=0.7, label='Acceleration')
-        ]
+        ])
+
+        # Add MPC Rollout to legend if data exists
+        if self.mpc_rollout is not None:
+            legend_elements.insert(0, Line2D([0], [0], color='m', linestyle='--', lw=2, label='MPC Rollout'))
+            
         self.ax.legend(handles=legend_elements, loc='upper right', fontsize=8)
         
-        # Info text will be added to figure, not axes
         self.info_text = self.fig.text(
             0.01, 0.99, '', verticalalignment='top',
             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.9),
             fontsize=9, family='monospace'
         )
         
-        # Vertical lines on parameter plots to show current time
         self.param_vlines = []
         self.param_points = []
         for idx, ax_p in enumerate(self.ax_params):
@@ -163,13 +193,11 @@ class StateVisualizer:
             
             point, = ax_p.plot([], [], 'ro', markersize=6, zorder=4)
             self.param_points.append(point)
-        
+            
     def setup_controls(self):
         """Create interactive controls."""
-        # Adjust button positions based on figure height
         bottom_margin = 0.08
         
-        # Frame slider
         ax_slider = plt.axes([0.2, bottom_margin + 0.02, 0.6, 0.02])
         self.slider = Slider(
             ax_slider, 'Frame', 0, self.n_frames - 1,
@@ -177,17 +205,14 @@ class StateVisualizer:
         )
         self.slider.on_changed(self.on_slider_change)
         
-        # Play/Pause button
         ax_play = plt.axes([0.25, bottom_margin - 0.03, 0.08, 0.03])
         self.btn_play = Button(ax_play, 'Play')
         self.btn_play.on_clicked(self.toggle_play)
         
-        # Reset button
         ax_reset = plt.axes([0.35, bottom_margin - 0.03, 0.08, 0.03])
         self.btn_reset = Button(ax_reset, 'Reset')
         self.btn_reset.on_clicked(self.reset)
         
-        # Speed slider
         ax_speed = plt.axes([0.46, bottom_margin - 0.03, 0.2, 0.02])
         self.speed_slider = Slider(
             ax_speed, 'Speed', 50, 1000,
@@ -196,38 +221,44 @@ class StateVisualizer:
 
         self.speed_slider.on_changed(self.on_speed_change)
         
-        # Animation timer
         self.timer = self.fig.canvas.new_timer(interval=50)
         self.timer.add_callback(self.animate_step)
 
     def on_speed_change(self, val):
         """Update playback speed dynamically."""
         if self.playing:
-            # Stop and restart timer with new interval
             interval = int(1000 / val)
             self.timer.stop()
             self.timer = self.fig.canvas.new_timer(interval=interval)
             self.timer.add_callback(self.animate_step)
             self.timer.start()
 
-        
     def update_frame(self, frame_idx):
         """Update visualization for given frame."""
         frame_idx = int(frame_idx)
         self.current_frame = frame_idx
         
-        # Update trail (show trajectory up to current point)
         self.trail.set_data(self.x[:frame_idx+1], self.y[:frame_idx+1])
         
-        # Update position marker
         self.point.set_data([self.x[frame_idx]], [self.y[frame_idx]])
 
-        line_length = 0.5  # Adjust this length (in meters) to look good on your specific map
+        # --- NEW: Update MPC Rollout ---
+        if self.mpc_rollout is not None and frame_idx < len(self.mpc_rollout):
+            current_rollout = self.mpc_rollout[frame_idx]
+            if len(current_rollout) > 0:
+                # Assuming state format [x, y, theta, dx, dy, omega]
+                current_rollout = np.array(current_rollout)
+                self.rollout_line.set_data(current_rollout[:, 0], current_rollout[:, 1])
+            else:
+                self.rollout_line.set_data([], [])
+        else:
+            self.rollout_line.set_data([], [])
+
+        line_length = 0.5 
         end_x = self.x[frame_idx] + line_length * np.cos(self.theta[frame_idx])
         end_y = self.y[frame_idx] + line_length * np.sin(self.theta[frame_idx])
         self.heading_line.set_data([self.x[frame_idx], end_x], [self.y[frame_idx], end_y])
         
-        # Remove old arrows
         if self.x_vel_arrow and self.x_vel_arrow in self.ax.patches:
             self.x_vel_arrow.remove()
         if self.y_vel_arrow and self.y_vel_arrow in self.ax.patches:
@@ -235,7 +266,6 @@ class StateVisualizer:
         if self.accel_arrow and self.accel_arrow in self.ax.patches:
             self.accel_arrow.remove()
             
-        # Draw x velocity arrow (longitudinal)
         dx_arrow = self.dx[frame_idx] * np.cos(self.theta[frame_idx])
         dy_arrow = self.dx[frame_idx] * np.sin(self.theta[frame_idx])
         if abs(self.dx[frame_idx]) > 0.01:
@@ -247,7 +277,6 @@ class StateVisualizer:
             )
             self.ax.add_patch(self.x_vel_arrow)
         
-        # Draw y velocity arrow (lateral)
         if abs(self.dy[frame_idx]) > 0.01:
             self.y_vel_arrow = FancyArrow(
                 self.x[frame_idx], self.y[frame_idx],
@@ -258,7 +287,6 @@ class StateVisualizer:
             )
             self.ax.add_patch(self.y_vel_arrow)
 
-        # Draw acceleration arrow
         if abs(self.accel[frame_idx]) > 0.01:
             self.accel_arrow = FancyArrow(
                 self.x[frame_idx], self.y[frame_idx],
@@ -269,7 +297,6 @@ class StateVisualizer:
             )
             self.ax.add_patch(self.accel_arrow)
         
-        # Update info text
         time_str = f"Time: {self.time[frame_idx]:.3f}s"
         info = (f"Frame: {frame_idx}/{self.n_frames-1}\n{time_str}\n"
                 f"θ: {self.theta[frame_idx]:.3f} rad\n"
@@ -281,33 +308,27 @@ class StateVisualizer:
                 f"Model: {self.model_idx[frame_idx]}")
         self.info_text.set_text(info)
         
-        # Update parameter plots
         current_time = self.time[frame_idx]
         
-        # Remove old vertical lines safely
         for vline in self.param_vlines:
             if vline in vline.axes.lines:
                 vline.remove()
         self.param_vlines = []
         
         for idx, (ax_p, point) in enumerate(zip(self.ax_params, self.param_points)):
-            # Create new vertical line
             vline = ax_p.axvline(x=current_time, color='red', linestyle='--', 
                                 linewidth=1.5, alpha=0.7, zorder=3)
             self.param_vlines.append(vline)
             
-            # Update point
             param_val = self.params[idx][frame_idx]
             point.set_data([current_time], [param_val])
         
         self.fig.canvas.draw_idle()
         
     def on_slider_change(self, val):
-        """Handle slider value change."""
         self.update_frame(val)
         
     def toggle_play(self, event):
-        """Toggle animation playback."""
         self.playing = not self.playing
         if self.playing:
             self.btn_play.label.set_text('Pause')
@@ -317,35 +338,37 @@ class StateVisualizer:
             self.timer.stop()
             
     def animate_step(self):
-        """Advance one frame in animation."""
         if self.playing:
             next_frame = self.current_frame + 1
             if next_frame >= self.n_frames:
-                next_frame = 0  # Loop back to start
+                next_frame = 0 
             self.slider.set_val(next_frame)
             
-            # Adjust timer interval based on speed slider
             interval = int(1000 / self.speed_slider.val)
             self.timer.interval = interval
             
     def reset(self, event):
-        """Reset to first frame."""
         self.playing = False
         self.btn_play.label.set_text('Play')
         self.timer.stop()
         self.slider.set_val(0)
         
     def show(self):
-        """Display the visualization."""
         self.update_frame(0)
         plt.show()
-
-
+        
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'blevel_circle_mllampcgood.npz')
+    # filepath = os.path.join(dir_path, 'sim_os.npz')
+    # filepath = os.path.join(dir_path, 'sim_multi.npz')
+    filepath = os.path.join(dir_path, 'sim_multi.npz')
+    # filepath = os.path.join(dir_path, 'sim_noterm.npz')
+    # filepath = os.path.join(dir_path, 'blevel_circle_sim.npz')
+    # filepath = os.path.join(dir_path, 'blevel_circle_mllampcgood.npz')
     # filepath = os.path.join(dir_path, 'blevel_circle_mnollampcbad.npz')
+
+    ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'blevel_circle.npz') 
     
     # Optional: Define parameter names
     param_names = {
@@ -364,17 +387,14 @@ def main():
     }
     
     # Create visualizer
-    # n_params_to_show: number of parameters to display (None = all)
-    # params_per_column: how many parameter plots per column
-    # param_names: optional dict mapping parameter index to name
     visualizer = StateVisualizer(
         filepath, 
+        ref_filepath=ref_filepath, # Pass the raceline file path here
         n_params_to_show=range(12), 
         params_per_column=6,
-        param_names=param_names  # Set to None to use default "Param 0", "Param 1", etc.
+        param_names=param_names
     )
     visualizer.show()
-
 
 if __name__ == "__main__":
     main()

@@ -118,8 +118,8 @@ class MPCNode(Node):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
         self.declare_parameter('track_file_name', 'blevel_circle.npz')
-        self.declare_parameter('odom_topic', '/odometry/filtered')
-        #self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        # self.declare_parameter('odom_topic', '/odometry/filtered')
+        self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
@@ -145,6 +145,7 @@ class MPCNode(Node):
                 "model_idx": [],
                 "ctrl": [],
                 "cmd":[],
+                "mpc_rollout":[],
                 "ok_time":[],
                 "predicted_state": [],
                 "one_step_cost": [],
@@ -210,7 +211,7 @@ class MPCNode(Node):
             }
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
         
-        num_models = 1
+        num_models = 5000
         self.state_size = 6
         param_dict = get_param_dict(mean_dict, variation_dict, num_models, ground_truth=True)
         
@@ -537,15 +538,14 @@ class MPCNode(Node):
         one_step_cost = None
         # ok_time = self.time_history[-1, self.count] * 1e-6 < 2 * self.dt * 1000
         ok_time = True
-        if(not ok_time):
-            self.lla_reset_counter = 0
 
-        lla_init_state = self.lb_history.last_predicted_states
-        if(self.lla_reset_interval == 0 or self.lla_reset_counter == 0):
-            if not self.sim:
-                lla_init_state = self.current_state
-            else:
-                lla_init_state = np.array(
+        if not self.sim:
+            one_step_cost = self.lb_history.update_lookback_error(
+                self.current_state
+            )
+        else:
+            one_step_cost = self.lb_history.update_lookback_error(
+                np.array(
                     [
                         self.current_state[0],
                         self.current_state[1],
@@ -556,30 +556,7 @@ class MPCNode(Node):
                         self.last_control[1]
                     ]
                 )
-        if(self.lla_reset_interval != 0):
-            self.lla_reset_counter = (self.lla_reset_counter + 1) % self.lla_reset_interval
-
-        one_step_cost = self.lb_history.update_lookback_error(
-                lla_init_state
-        )
-        # if not self.sim:
-        #     one_step_cost = self.lb_history.update_lookback_error(
-        #         self.current_state
-        #     )
-        # else:
-        #     one_step_cost = self.lb_history.update_lookback_error(
-        #         np.array(
-        #             [
-        #                 self.current_state[0],
-        #                 self.current_state[1],
-        #                 self.current_state[2],
-        #                 self.current_state[3],
-        #                 np.arctan2(self.current_state[4], self.current_state[3]),
-        #                 self.current_state[5], 
-        #                 self.last_control[1]
-        #             ]
-        #         )
-        #     )
+            )
 
         self.log_rollout_data(self.lb_history, one_step_cost, ok_time)
 
@@ -620,7 +597,7 @@ class MPCNode(Node):
             selected_model_index = self.lb_history.get_best_model()
             selected_model_params = self.dynamics_bank.get_model_params_arr(selected_model_index)
 
-            self.log_lla_data(selected_model_params, selected_model_index)
+        
             
         print(f"SELECTED PARAMS {selected_model_params}")
         
@@ -687,22 +664,33 @@ class MPCNode(Node):
 
         print(f"CONTROL: {u_opt}")
 
+        mpc_states = []
+        mpc_controls = []
+        
         if(self.publish_trajectories):
-            predicted_states = []
-            predicted_controls = []
+            
+            
             for i in range(self.N + 1):
                 x_pred = self.solver.get(i, "x")[:6]
-                predicted_states.append(x_pred)
-
+                mpc_states.append(x_pred)
+                
                 # c_pred = self.solver.get(i, "x")[-2:]
-                # predicted_controls.append(c_pred)
+                # mpc_controls.append(c_pred)
 
                 # print(x_pred, c_pred)
 
-            # print(f"PREDICTED STATES: {predicted_states}")
-            # print(f"PREDICTED CONTROLS: {predicted_controls}")
+                # print(f"PREDICTED STATES: {predicted_states}")
+                # print(f"PREDICTED CONTROLS: {predicted_controls}")
+            self.publish_predicted_trajectory(mpc_states) # Publish predicted trajectory
+            
+        self.log_lla_data(selected_model_params, selected_model_index, mpc_states)
 
-            self.publish_predicted_trajectory(predicted_states) # Publish predicted trajectory
+        
+        if(not ok_time):
+            self.lla_reset_counter = 0
+
+        if(self.lla_reset_interval != 0):
+            self.lla_reset_counter = (self.lla_reset_counter + 1) % self.lla_reset_interval
 
         #########################################
         ### PUBLISH MPC DATA
@@ -714,7 +702,7 @@ class MPCNode(Node):
                 #version for our dynamics
                 self.checkpoint[5] = time.perf_counter_ns()
                 self.lb_history.predict_states(
-                    self.current_state, u_opt
+                    self.current_state, u_opt, self.lla_reset_counter == 0
                 )
                 self.checkpoint[6] = time.perf_counter_ns()
                 
@@ -865,7 +853,7 @@ class MPCNode(Node):
         ]
         self.mpc_info_pub.publish(info_msg)
 
-    def log_lla_data(self, params, model_index):
+    def log_lla_data(self, params, model_index, mpc_rollout = []):
         if(self.log_data):
             now_ns = time.perf_counter_ns()
             self.log_buffer["time"].append(now_ns)
@@ -874,6 +862,7 @@ class MPCNode(Node):
             self.log_buffer["model_idx"].append(model_index)
             self.log_buffer["ctrl"].append(self.last_control.copy())
             self.log_buffer["cmd"].append(self.last_drive_command.copy())
+            self.log_buffer["mpc_rollout"].append(np.array(mpc_rollout))
 
     def log_rollout_data(self, lb_history, one_step_cost, ok_time):
         if(self.log_data):
@@ -893,6 +882,7 @@ class MPCNode(Node):
                 model_index=np.array(self.log_buffer["model_idx"]),
                 ctrl=np.array(self.log_buffer["ctrl"]), 
                 states=np.array(self.log_buffer["predicted_state"]),
+                mpc_rollout=np.array(self.log_buffer["mpc_rollout"]),
                 one_step_cost=np.array(self.log_buffer["one_step_cost"]),
                 running_cost=np.array(self.log_buffer["running_cost"]),
                 ok_time = np.array(self.log_buffer["ok_time"]),
