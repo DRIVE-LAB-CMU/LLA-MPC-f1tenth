@@ -360,18 +360,29 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
+    # filepath = os.path.join(dir_path, 'simlhnoterm.npz')
+    # filepath = os.path.join(dir_path, 'simlhmultimm.npz')
+    # filepath = os.path.join(dir_path, 'sim8oz.npz')
+    # filepath = os.path.join(dir_path, 'sim8term.npz')
+    # filepath = os.path.join(dir_path, 'blevel_oval_noadapt.npz')
+    # filepath = os.path.join(dir_path, 'blevel_oval_os.npz')
+    # filepath = os.path.join(dir_path, 'blevel_fig8_noadapt.npz')
+    # filepath = os.path.join(dir_path, 'blevel_fig8_multi.npz')
     # filepath = os.path.join(dir_path, 'sim_os.npz')
     # filepath = os.path.join(dir_path, 'sim_multi.npz')
     # filepath = os.path.join(dir_path, 'nsimos.npz')
-    filepath = os.path.join(dir_path, 'nsimmulti.npz')
+    # filepath = os.path.join(dir_path, 'nsimmulti.npz')
     # filepath = os.path.join(dir_path, 'sim_multi.npz')
     # filepath = os.path.join(dir_path, 'sim_multi.npz')
     # filepath = os.path.join(dir_path, 'sim_noterm.npz')
     # filepath = os.path.join(dir_path, 'blevel_circle_sim.npz')
     # filepath = os.path.join(dir_path, 'blevel_circle_mllampcgood.npz')
     # filepath = os.path.join(dir_path, 'blevel_circle_mnollampcbad.npz')
+    # filepath = os.path.join(dir_path, 'sim_8c.npz')
+    filepath = os.path.join(dir_path, 'sim_oval.npz')
+    # filepath = os.path.join(dir_path, 'sim_ovala.npz')
 
-    ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'blevel_circle.npz') 
+    ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'blevel_oval.npz') 
     
     # Optional: Define parameter names
     param_names = {

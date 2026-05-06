@@ -117,9 +117,9 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'blevel_figure8.npz')
-        self.declare_parameter('odom_topic', '/odometry/filtered')
-        # self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        self.declare_parameter('track_file_name', 'blevel_oval.npz')
+        # self.declare_parameter('odom_topic', '/odometry/filtered')
+        self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
@@ -127,7 +127,7 @@ class MPCNode(Node):
         self.dt = self.Tf / self.N
         self.control_callback_speed = 0.04
         self.lla_predict_horizon = 0.04
-        self.lla_reset_interval = 5
+        self.lla_reset_interval = 10
         self.lla_reset_counter = 0
 
         if(self.log_data):
@@ -211,7 +211,7 @@ class MPCNode(Node):
             }
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
         
-        num_models = 5000
+        num_models = 1
         self.state_size = 6
         param_dict = get_param_dict(mean_dict, variation_dict, num_models, ground_truth=True)
         
@@ -231,7 +231,7 @@ class MPCNode(Node):
         
         self.get_logger().info("History starting")
         
-        history_length=15
+        history_length=40
         self.lb_history = history.LBHistory(
             num_models, history_length,
             self.lla_predict_horizon, cost_weights,

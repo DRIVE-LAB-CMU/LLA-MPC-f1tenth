@@ -301,8 +301,8 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.cost.cost_type = 'NONLINEAR_LS'
     ocp.cost.cost_type_e = 'NONLINEAR_LS'
 
-    w_x = 2.0
-    w_y = 2.0
+    w_x = 4.0
+    w_y = 4.0
     w_xe = 0.0
     w_ye = 0.0
     w_steer = 0.01
@@ -357,6 +357,20 @@ def create_ocp(model, params_car, steps, horizon):
                                     params_car['max_acc'], 
                                     params_car['max_steer']])
     
+    # slack on constraints
+    w_slack = 100.0       # L2 slack penalty (quadratic)
+    w_slack_l1 = 10.0    # L1 slack penalty (linear)
+    
+    nsbx = 5
+    ocp.dims.nsbx = nsbx
+    ocp.constraints.idxsbx = np.arange(nsbx)   # slack all idxbx entries
+
+    ocp.cost.zl  = w_slack_l1 * np.ones(nsbx)  # lower L1 weight
+    ocp.cost.zu  = w_slack_l1 * np.ones(nsbx)  # upper L1 weight
+    ocp.cost.Zl  = w_slack    * np.ones(nsbx)  # lower L2 weight
+    ocp.cost.Zu  = w_slack    * np.ones(nsbx)  # upper L2 weight
+    #####################################
+    
     ocp.constraints.idxbx_0 = np.arange(8) # IMPORTANT FOR RUNTIME
     ocp.constraints.lbx_0 = np.zeros(8)           # placeholder
     ocp.constraints.ubx_0 = np.zeros(8)           # placeholder
@@ -364,37 +378,20 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.constraints.lbx_e = ocp.constraints.lbx
     ocp.constraints.ubx_e = ocp.constraints.ubx
     ocp.constraints.idxbx_e = ocp.constraints.idxbx
-
-    # ==========================================
-    # NEW: ADD SOFT CONSTRAINTS (SLACK VARIABLES)
-    # ==========================================
-    # We soften all 3 state bounds (vx, accel, steer) so the solver 
-    # doesn't crash if it mathematically overshoots by 0.001 to recover.
     
-    # idxsbx references the indices of idxbx. 
-    # idxbx has 3 elements, so we soften elements 0, 1, and 2.
-    # nsbx = 3
-    # ocp.constraints.idxsbx = np.array([0, 1, 2])
+    # slack on terminal constraints
+    nsbx_e = 5
+    ocp.dims.nsbx_e = nsbx_e
+    ocp.constraints.idxsbx_e = np.arange(nsbx_e)
+
+    ocp.cost.zl_e  = w_slack_l1 * np.ones(nsbx_e)
+    ocp.cost.zu_e  = w_slack_l1 * np.ones(nsbx_e)
+    ocp.cost.Zl_e  = w_slack    * np.ones(nsbx_e)
+    ocp.cost.Zu_e  = w_slack    * np.ones(nsbx_e)
+    ###############################################3
+
     
-    # # Define heavy penalties for violating the bounds.
-    # # L1 (zl, zu) pushes the violation to exactly 0.
-    # # L2 (Zl, Zu) heavily penalizes large violations.
-    # L1_pen = np.array([10, 10, 10]) 
-    # L2_pen = np.array([10, 10, 10]) 
-
-    # # Running horizon soft constraint costs
-    # ocp.cost.zl = L1_pen
-    # ocp.cost.zu = L1_pen
-    # ocp.cost.Zl = L2_pen
-    # ocp.cost.Zu = L2_pen
-
-    # # Terminal horizon soft constraints
-    # ocp.constraints.idxsbx_e = np.array([0, 1, 2])
-    # ocp.cost.zl_e = L1_pen
-    # ocp.cost.zu_e = L1_pen
-    # ocp.cost.Zl_e = L2_pen
-    # ocp.cost.Zu_e = L2_pen
-    # ==========================================
+    
 
 
     ocp.constraints.lbu = np.array([-params_car['max_steer_vel']])
