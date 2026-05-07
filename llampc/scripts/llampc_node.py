@@ -117,7 +117,7 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'blevel_oval.npz')
+        self.declare_parameter('track_file_name', 'blevel_circle.npz')
         # self.declare_parameter('odom_topic', '/odometry/filtered')
         self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
@@ -193,8 +193,8 @@ class MPCNode(Node):
             'Dr': 17.0,
             'Cro': 0.2,
             'Cd': 0.0,
-            'Ce': 0.55,
-            'Cm': .05, 
+            'Ce': 5,
+            'Cm': 0.0, 
         }
 
         variation_dict = {
@@ -206,12 +206,12 @@ class MPCNode(Node):
                 'Dr': 15,   # 15% variation
                 'Cro': 0.2, # 15% variation
                 'Cd': 0,  # assume negligible drag
-                'Ce': 0.45,  # motor efficiency conversion should never be above 1
-                'Cm': .05,  # motor speed saturation
+                'Ce': 5,  # motor efficiency conversion should never be above 1
+                'Cm': 0.0,  # motor speed saturation
             }
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
         
-        num_models = 1
+        num_models = 5000
         self.state_size = 6
         param_dict = get_param_dict(mean_dict, variation_dict, num_models, ground_truth=True)
         
@@ -629,12 +629,9 @@ class MPCNode(Node):
             if(i == 0 or self.first_control):
                 self.solver.set(i, "x", aug_state)
 
-            
-
         if(self.first_control):
             self.first_control = False
-
-
+            
         self.checkpoint[3]= time.perf_counter_ns()
 
         # print("DEBUG STATE:", aug_state)
@@ -789,33 +786,36 @@ class MPCNode(Node):
         desired_v = self.solver.get(1, 'x')[3]
         # for i in range(20):
         #     print(f"sol: {self.solver.get(i, 'x')}")
-        accel = float(u_opt[0])
+        # accel = float(u_opt[0])
+        pwm = float(u_opt[0])
         steer = float(u_opt[1])
 
-        sensor_velocity = np.sqrt(self.current_state[3] **2 + self.current_state[4]**2)
+        # sensor_velocity = np.sqrt(self.current_state[3] **2 + self.current_state[4]**2)
         
         # Create Ackermann drive message
         drive_msg = AckermannDriveStamped()
         drive_msg.header.stamp = self.get_clock().now().to_msg()
         drive_msg.header.frame_id = "base_link"
 
-        print(f"ORIGINAL {self.last_drive_command[0] + accel * self.dt}")
-        print(f"NEW {desired_v}")
-        print(f"NEW_INT {self.current_state[3] + accel * self.dt}")
-        new_int = self.current_state[3] + accel * self.dt
-        old = self.last_drive_command[0] + accel * self.dt
+        # print(f"ORIGINAL {self.last_drive_command[0] + accel * self.dt}")
+        # print(f"NEW {desired_v}")
+        # print(f"NEW_INT {self.current_state[3] + accel * self.dt}")
+        # new_int = self.current_state[3] + accel * self.dt
+        # old = self.last_drive_command[0] + accel * self.dt
         
         # Convert acceleration to speed command (simple integration)
-        desired_speed = max(0.0, new_int)
+        # desired_speed = max(0.0, new_int)
 
-        drive_msg.drive.speed = desired_speed
+        drive_msg.drive.speed = 0.0
+        drive_msg.drive.jerk = 1.0
+        drive_msg.drive.acceleration = pwm
         drive_msg.drive.steering_angle = steer
 
         self.cmd_pub.publish(drive_msg) 
 
-        self.last_drive_command = np.array([desired_speed, steer])
+        self.last_drive_command = np.array([pwm, steer])
         # print( acceleration * self.dt)
-        self.last_control = np.array([accel, steer])
+        self.last_control = np.array([pwm, steer])
         
 
     def publish_predicted_trajectory(self, predicted_states):

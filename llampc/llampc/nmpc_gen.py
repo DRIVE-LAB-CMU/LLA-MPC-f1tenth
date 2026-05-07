@@ -348,14 +348,14 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.constraints.lbx = np.array([-0.5, 
                                 -4,
                                 -2 * np.pi,
-                                params_car['min_acc'], 
-                                params_car['min_steer']])
+                                -1, 
+                               -10])
 
     ocp.constraints.ubx = np.array([params_car['max_v'], 
                                     4,
                                     2* np.pi,
-                                    params_car['max_acc'], 
-                                    params_car['max_steer']])
+                                    1, 
+                                    10])
     
     # slack on constraints
     w_slack = 100.0       # L2 slack penalty (quadratic)

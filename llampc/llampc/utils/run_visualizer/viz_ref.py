@@ -379,10 +379,11 @@ def main():
     # filepath = os.path.join(dir_path, 'blevel_circle_mllampcgood.npz')
     # filepath = os.path.join(dir_path, 'blevel_circle_mnollampcbad.npz')
     # filepath = os.path.join(dir_path, 'sim_8c.npz')
-    filepath = os.path.join(dir_path, 'sim_oval.npz')
+    # filepath = os.path.join(dir_path, 'sim_oval.npz')
     # filepath = os.path.join(dir_path, 'sim_ovala.npz')
+    filepath = os.path.join(dir_path, 'sim_circleb.npz')
 
-    ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'blevel_oval.npz') 
+    ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'blevel_circle.npz') 
     
     # Optional: Define parameter names
     param_names = {
