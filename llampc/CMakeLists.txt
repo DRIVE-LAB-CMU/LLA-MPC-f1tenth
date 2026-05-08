@@ -61,8 +61,10 @@ install(PROGRAMS
   scripts/particle_filter_init.py
   scripts/step_response_test.py
   scripts/lla_manual.py
-  scripts/imu_zupt_prep.py      # <--- ADD THIS LINE
+  scripts/imu_zupt_prep.py
   scripts/test_accel.py
+  scripts/vesc_safety_bridge.py
+  scripts/optitrack_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 if(BUILD_TESTING)
