@@ -65,6 +65,7 @@ install(PROGRAMS
   scripts/test_accel.py
   scripts/vesc_safety_bridge.py
   scripts/optitrack_node.py
+  scripts/lla_original.py
   DESTINATION lib/${PROJECT_NAME}
 )
 if(BUILD_TESTING)
