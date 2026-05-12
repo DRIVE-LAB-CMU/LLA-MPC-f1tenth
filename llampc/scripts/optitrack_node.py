@@ -151,7 +151,13 @@ class OptitrackSubscriber(Node):
         ekf_msg = PoseWithCovarianceStamped()
         ekf_msg.header = msg.header
         ekf_msg.header.frame_id = 'map' # Standard frame for absolute pose
-        ekf_msg.pose.pose = msg.pose
+        ekf_msg.pose.pose.position.x = position[0]
+        ekf_msg.pose.pose.position.y = position[1]
+        ekf_msg.pose.pose.position.z = position[2]
+        ekf_msg.pose.pose.orientation.x = quaternion[0]
+        ekf_msg.pose.pose.orientation.y = quaternion[1]
+        ekf_msg.pose.pose.orientation.z = quaternion[2]
+        ekf_msg.pose.pose.orientation.w = quaternion[3]
         
         # Create a 6x6 covariance matrix (x, y, z, roll, pitch, yaw)
         # We give it a very small variance (1e-4) because Optitrack is highly accurate
