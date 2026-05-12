@@ -26,7 +26,7 @@ def generate_launch_description():
     # Argument for Optitrack topic, defaulting to what was in your python script
     mocap_topic_la = DeclareLaunchArgument(
         'mocap_topic',
-        default_value='/vrpn_mocap/go2_icl/pose',
+        default_value='/vrpn_mocap/f1tenth/pose',
         description='Optitrack pose topic name'
     )
 
