@@ -67,7 +67,7 @@ def generate_launch_description():
     # Action to run your new Optitrack Subscriber script
     optitrack_node = Node(
         package='llampc',             # <-- UPDATE THIS if the script is in a different package
-        executable='optitrack_node',  # <-- UPDATE THIS to your exact Python script name (e.g., 'optitrack_node.py')
+        executable='optitrack_node.py',  # <-- UPDATE THIS to your exact Python script name (e.g., 'optitrack_node.py')
         name='optitrack_subscriber',
         output='screen',
         parameters=[{'topic': LaunchConfiguration('mocap_topic')}]
