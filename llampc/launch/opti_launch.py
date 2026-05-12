@@ -3,7 +3,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
-from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.launch_description_sources import PythonLaunchDescriptionSource, FrontendLaunchDescriptionSource
 from launch_ros.actions import Node
 
 def generate_launch_description():
@@ -14,14 +14,23 @@ def generate_launch_description():
     # # Path to particle_filter launch file 
     # pf_launch_dir = os.path.join(get_package_share_directory('particle_filter'), 'launch')
     # pf_launch_file = os.path.join(pf_launch_dir, 'localize_launch.py')
-
+    vrpn_launch_file = os.path.join(get_package_share_directory('vrpn_mocap'), 'launch', 'client.launch.yaml')
+    
     # Path to your ekf.yaml config file in the llampc package
     llampc_config_dir = os.path.join(get_package_share_directory('llampc'), 'config')
     ekf_config_path = os.path.join(llampc_config_dir, 'mocap.yaml')
 
     # =================================================================
-    # 2. Create Launch Arguments
     # =================================================================
+    
+    vrpn_mocap_action = IncludeLaunchDescription(
+        FrontendLaunchDescriptionSource(vrpn_launch_file),
+        launch_arguments={
+            'server': '172.26.119.139',
+            'port': '3883',
+            'frame_id': 'world'
+        }.items()
+    )
     
     # Argument for Optitrack topic, defaulting to what was in your python script
     mocap_topic_la = DeclareLaunchArgument(
@@ -29,6 +38,7 @@ def generate_launch_description():
         default_value='/vrpn_mocap/f1tenth/pose',
         description='Optitrack pose topic name'
     )
+    
 
     # =================================================================
     # 3. Create Launch Actions
@@ -78,6 +88,7 @@ def generate_launch_description():
     # =================================================================
     
     return LaunchDescription([
+        vrpn_mocap_action, 
         mocap_topic_la,
         f1tenth_stack_action,
         # particle_filter_action,
