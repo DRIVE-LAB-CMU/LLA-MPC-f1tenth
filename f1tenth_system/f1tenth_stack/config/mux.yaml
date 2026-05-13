@@ -3,9 +3,9 @@ ackermann_mux:
     topics:
       joystick:
         topic   : "teleop"
-        timeout : 0.2
-        priority: 100   # JOYSTICK WINS (Blocks MPC with 0.0)
+        timeout : 0.5
+        priority: 100
       navigation:
-        topic   : "nav_drive"   # MPC Topic
-        timeout : 0.2
-        priority: 10    # MPC LOSES (Unless Joystick is silent)
+        topic   : "drive"
+        timeout : 0.5
+        priority: 10
