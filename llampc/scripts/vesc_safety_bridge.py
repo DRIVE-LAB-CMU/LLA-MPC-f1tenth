@@ -28,13 +28,17 @@ class VescSafetyBridge(Node):
         # 1. ALWAYS handle steering safely using your YAML math
         servo_cmd = (drive.steering_angle * self.steer_gain) + self.steer_offset
         servo_cmd = max(0.15, min(0.85, servo_cmd)) # Clamp to your YAML limits
+        print(f"Servo: {servo_cmd}")
         self.servo_pub.publish(Float64(data=servo_cmd))
+        
+        
         
         # 2. Safety Intercept Logic (Using the Magic Flag)
         if drive.jerk == 1.0:
             # The 'jerk' flag is present! This is the MPC.
             # Safe to publish the smuggled PWM, even if it is 0.0.
             self.duty_cycle_pub.publish(Float64(data=drive.acceleration))
+            print(f"Accel: {drive.acceleration}")
         else:
             # No flag. This is Joystick, AEB, or standard Nav fallback.
             # Convert m/s to ERPM using your YAML gain
