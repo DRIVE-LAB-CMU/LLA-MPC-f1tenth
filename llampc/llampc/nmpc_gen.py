@@ -361,7 +361,7 @@ def create_ocp(model, params_car, steps, horizon):
     w_slack = 100.0       # L2 slack penalty (quadratic)
     w_slack_l1 = 10.0    # L1 slack penalty (linear)
     
-    nsbx = 5
+    nsbx = 3
     ocp.dims.nsbx = nsbx
     ocp.constraints.idxsbx = np.arange(nsbx)   # slack all idxbx entries
 
