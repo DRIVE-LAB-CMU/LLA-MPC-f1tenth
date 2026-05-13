@@ -57,7 +57,7 @@ ament_python_install_package(${PROJECT_NAME})
 
 # Install Python executables
 install(PROGRAMS
-  scripts/llampc_node.py
+  scripts/llampc_pwm.py
   scripts/particle_filter_init.py
   scripts/step_response_test.py
   scripts/lla_manual.py
@@ -65,7 +65,7 @@ install(PROGRAMS
   scripts/test_accel.py
   scripts/vesc_safety_bridge.py
   scripts/optitrack_node.py
-  scripts/llampc_original.py
+  scripts/llampc_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 if(BUILD_TESTING)
