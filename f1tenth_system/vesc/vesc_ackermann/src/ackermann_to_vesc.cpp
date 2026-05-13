@@ -27,7 +27,7 @@ AckermannToVesc::AckermannToVesc(const rclcpp::NodeOptions & options)
 
   // Subscribe to the MUX output (changed from ackermann_cmd to /drive)
   ackermann_sub_ = create_subscription<AckermannDriveStamped>(
-    "/drive", 10, std::bind(&AckermannToVesc::ackermannCmdCallback, this, _1));
+    "ackermann_cmd", 10, std::bind(&AckermannToVesc::ackermannCmdCallback, this, _1));
 }
 
 void AckermannToVesc::ackermannCmdCallback(const AckermannDriveStamped::SharedPtr cmd)
