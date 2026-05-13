@@ -789,6 +789,9 @@ class MPCNode(Node):
         # accel = float(u_opt[0])
         pwm = float(u_opt[0])
         steer = float(u_opt[1])
+        
+        print("PWM")
+        print(pwm)
 
         # sensor_velocity = np.sqrt(self.current_state[3] **2 + self.current_state[4]**2)
         
