@@ -39,11 +39,17 @@ class VescSafetyBridge(Node):
             # Safe to publish the smuggled PWM, even if it is 0.0.
             self.duty_cycle_pub.publish(Float64(data=drive.acceleration))
             print(f"Accel: {drive.acceleration}")
-        else:
-            # No flag. This is Joystick, AEB, or standard Nav fallback.
-            # Convert m/s to ERPM using your YAML gain
+        elif abs(drive.speed) > 0.0:
+            # ONLY publish speed if there is an actual manual command
             erpm_cmd = drive.speed * self.speed_to_erpm_gain
             self.speed_pub.publish(Float64(data=erpm_cmd))
+            print(f"Manual Active - Speed: {drive.speed}")
+            
+        else:
+            # 0 STATE: All buttons released. 
+            # We publish NOTHING to the VESC motor topics.
+            # This prevents the VESC from jittering between modes.
+            pass
 
 def main(args=None):
     rclpy.init(args=args)
