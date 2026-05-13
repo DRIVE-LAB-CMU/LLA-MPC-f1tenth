@@ -119,7 +119,7 @@ class MPCNode(Node):
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
         self.declare_parameter('track_file_name', 'blevel_circle.npz')
         # self.declare_parameter('odom_topic', '/odometry/filtered')
-        self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        self.declare_parameter('odom_topic', '/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
