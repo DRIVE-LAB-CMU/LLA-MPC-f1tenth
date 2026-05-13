@@ -307,7 +307,7 @@ def create_ocp(model, params_car, steps, horizon):
     w_ye = 0.0
     w_steer = 0.01
     w_accel = 0.1
-    w_jerk = 0.01
+    w_jerk = 0.1
     w_steer_v = 0.1
     # w_vel = 0.001
     Q_flat = [w_x, w_y, 0, 0, 0, 0, w_accel, w_steer]
@@ -357,9 +357,9 @@ def create_ocp(model, params_car, steps, horizon):
                                     0.1, 
                                     params_car['max_steer']])
     
-    ocp.constraints.lbu = np.array([-params_car['max_steer_vel']])
-    ocp.constraints.ubu = np.array([params_car['max_steer_vel']])
-    ocp.constraints.idxbu = np.array([1]) # 0 is jerk, 1 is steer_vel
+    ocp.constraints.lbu = np.array([-0.2, -params_car['max_steer_vel']])
+    ocp.constraints.ubu = np.array([0.2, params_car['max_steer_vel']])
+    ocp.constraints.idxbu = np.array([0, 1]) # 0 is slew rate, 1 is steer_vel
 
     
     # slack on constraints
