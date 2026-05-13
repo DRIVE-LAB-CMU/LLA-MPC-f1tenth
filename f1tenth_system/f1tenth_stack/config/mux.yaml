@@ -1,11 +1,11 @@
 ackermann_mux:
   ros__parameters:
     topics:
-      navigation:
-        topic   : drive
-        timeout : 0.2
-        priority: 10
       joystick:
-        topic   : teleop
+        topic   : "teleop"
         timeout : 0.2
-        priority: 100
+        priority: 100   # JOYSTICK WINS (Blocks MPC with 0.0)
+      navigation:
+        topic   : "nav_drive"   # MPC Topic
+        timeout : 0.2
+        priority: 10    # MPC LOSES (Unless Joystick is silent)

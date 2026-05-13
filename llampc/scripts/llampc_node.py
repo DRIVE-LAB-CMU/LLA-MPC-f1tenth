@@ -499,7 +499,8 @@ class MPCNode(Node):
         self.lb_history.reset()
         self.get_logger().info("LLA BANK COMPILED")
 
-    def odom_callback(self, msg):        
+    def odom_callback(self, msg):    
+        print("hello")    
         x = msg.pose.pose.position.x
         y = msg.pose.pose.position.y
         
@@ -529,6 +530,8 @@ class MPCNode(Node):
         # print(self.track)
         
         self.checkpoint[0] = time.perf_counter_ns()
+
+        print(self.current_state)
 
         if self.track is None or self.current_state is None:
             return

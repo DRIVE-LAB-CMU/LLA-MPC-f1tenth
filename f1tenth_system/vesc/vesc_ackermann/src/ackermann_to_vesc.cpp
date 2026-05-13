@@ -1,41 +1,8 @@
-// Copyright 2020 F1TENTH Foundation
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are met:
-//
-//   * Redistributions of source code must retain the above copyright
-//     notice, this list of conditions and the following disclaimer.
-//
-//   * Redistributions in binary form must reproduce the above copyright
-//     notice, this list of conditions and the following disclaimer in the
-//     documentation and/or other materials provided with the distribution.
-//
-//   * Neither the name of the {copyright_holder} nor the names of its
-//     contributors may be used to endorse or promote products derived from
-//     this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-// POSSIBILITY OF SUCH DAMAGE.
-
-// -*- mode:c++; fill-column: 100; -*-
-
 #include "vesc_ackermann/ackermann_to_vesc.hpp"
-
 #include <ackermann_msgs/msg/ackermann_drive_stamped.hpp>
 #include <std_msgs/msg/float64.hpp>
-
 #include <cmath>
-#include <sstream>
-#include <string>
+#include <algorithm>
 
 namespace vesc_ackermann
 {
@@ -47,40 +14,59 @@ using std_msgs::msg::Float64;
 AckermannToVesc::AckermannToVesc(const rclcpp::NodeOptions & options)
 : Node("ackermann_to_vesc_node", options)
 {
-  // get conversion parameters
+  // Get conversion parameters
   speed_to_erpm_gain_ = declare_parameter("speed_to_erpm_gain").get<double>();
   speed_to_erpm_offset_ = declare_parameter("speed_to_erpm_offset").get<double>();
   steering_to_servo_gain_ = declare_parameter("steering_angle_to_servo_gain").get<double>();
   steering_to_servo_offset_ = declare_parameter("steering_angle_to_servo_offset").get<double>();
 
-  // create publishers to vesc electric-RPM (speed) and servo commands
+  // Publishers: Speed (ERPM), Servo (Position), and Duty Cycle (PWM)
   erpm_pub_ = create_publisher<Float64>("commands/motor/speed", 10);
   servo_pub_ = create_publisher<Float64>("commands/servo/position", 10);
+  duty_cycle_pub_ = create_publisher<Float64>("commands/motor/duty_cycle", 10);
 
-  // subscribe to ackermann topic
+  // Subscribe to the MUX output (changed from ackermann_cmd to /drive)
   ackermann_sub_ = create_subscription<AckermannDriveStamped>(
-    "ackermann_cmd", 10, std::bind(&AckermannToVesc::ackermannCmdCallback, this, _1));
+    "/drive", 10, std::bind(&AckermannToVesc::ackermannCmdCallback, this, _1));
 }
 
 void AckermannToVesc::ackermannCmdCallback(const AckermannDriveStamped::SharedPtr cmd)
 {
-  // calc vesc electric RPM (speed)
-  Float64 erpm_msg;
-  erpm_msg.data = speed_to_erpm_gain_ * cmd->drive.speed + speed_to_erpm_offset_;
+  if (!rclcpp::ok()) return;
 
-  // calc steering angle (servo)
+  // 1. Handle Steering (Servo) - Always calculated and published
   Float64 servo_msg;
-  servo_msg.data = steering_to_servo_gain_ * cmd->drive.steering_angle + steering_to_servo_offset_;
+  double servo_cmd = (cmd->drive.steering_angle * steering_to_servo_gain_) + steering_to_servo_offset_;
+  
+  // Optional: Safety clamp for servo (0.0 to 1.0)
+  servo_msg.data = std::max(0.1, std::min(0.9, servo_cmd));
+  servo_pub_->publish(servo_msg);
 
-  // publish
-  if (rclcpp::ok()) {
+  // 2. Motor Control Logic (The Jerk Flag)
+  if (cmd->drive.jerk == 1.0) {
+    // --- MPC MODE ---
+    // Extract acceleration field as Duty Cycle
+    Float64 duty_msg;
+    duty_msg.data = cmd->drive.acceleration; 
+    duty_cycle_pub_->publish(duty_msg);
+  } 
+  else if (std::abs(cmd->drive.speed) > 0.01) {
+    // --- MANUAL MODE ---
+    // Convert speed to ERPM
+    Float64 erpm_msg;
+    erpm_msg.data = (speed_to_erpm_gain_ * cmd->drive.speed) + speed_to_erpm_offset_;
     erpm_pub_->publish(erpm_msg);
-    servo_pub_->publish(servo_msg);
+  }
+  else {
+    // --- STOP STATE ---
+    // Explicitly send 0 to stop the motor (Prevents coasting)
+    Float64 stop_msg;
+    stop_msg.data = 0.0;
+    erpm_pub_->publish(stop_msg);
   }
 }
 
 }  // namespace vesc_ackermann
 
-#include "rclcpp_components/register_node_macro.hpp"  // NOLINT
-
+#include "rclcpp_components/register_node_macro.hpp"
 RCLCPP_COMPONENTS_REGISTER_NODE(vesc_ackermann::AckermannToVesc)
