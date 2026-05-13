@@ -348,13 +348,13 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.constraints.lbx = np.array([-0.5, 
                                 -4,
                                 -2 * np.pi,
-                                -0.1, 
+                                -0.5, 
                                params_car['min_steer']])
 
     ocp.constraints.ubx = np.array([params_car['max_v'], 
                                     4,
                                     2* np.pi,
-                                    0.1, 
+                                    0.5, 
                                     params_car['max_steer']])
     
     ocp.constraints.lbu = np.array([-0.2, -params_car['max_steer_vel']])
