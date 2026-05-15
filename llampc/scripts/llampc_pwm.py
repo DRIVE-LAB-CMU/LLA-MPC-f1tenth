@@ -117,7 +117,7 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'mocap_square1.npz')
+        self.declare_parameter('track_file_name', 'mocap_square3.npz')
         self.declare_parameter('odom_topic', '/odometry/filtered')
         #self.declare_parameter('odom_topic', '/odom')
         self.declare_parameter('out_file', 'out')
@@ -206,7 +206,7 @@ class MPCNode(Node):
                 'Dr': 15,   # 15% variation
                 'Cro': 0, # 15% variation
                 'Cd': 0,  # assume negligible drag
-                'Ce': 5,  # motor efficiency conversion should never be above 1
+                'Ce': 4,  # motor efficiency conversion should never be above 1
                 'Cm': 0.0,  # motor speed saturation
             }
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
