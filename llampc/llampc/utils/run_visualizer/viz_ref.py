@@ -381,9 +381,9 @@ def main():
     # filepath = os.path.join(dir_path, 'sim_8c.npz')
     # filepath = os.path.join(dir_path, 'sim_oval.npz')
     # filepath = os.path.join(dir_path, 'sim_ovala.npz')
-    filepath = os.path.join(dir_path, 'mocap4.npz')
+    filepath = os.path.join(dir_path, 'mocap5.npz')
 
-    ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square.npz') 
+    ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square1.npz') 
     
     # Optional: Define parameter names
     param_names = {
