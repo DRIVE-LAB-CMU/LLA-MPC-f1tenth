@@ -117,13 +117,13 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'blevel_circle.npz')
-        # self.declare_parameter('odom_topic', '/odometry/filtered')
-        self.declare_parameter('odom_topic', '/odom')
+        self.declare_parameter('track_file_name', 'mocap_square1.npz')
+        self.declare_parameter('odom_topic', '/odometry/filtered')
+        #self.declare_parameter('odom_topic', '/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
-        self.Tf = 1.0 # total time horizon (for nmpc)
+        self.Tf = 0.8 # total time horizon (for nmpc)
         self.dt = self.Tf / self.N
         self.control_callback_speed = 0.04
         self.lla_predict_horizon = 0.04
@@ -198,13 +198,13 @@ class MPCNode(Node):
         }
 
         variation_dict = {
-                'Bf': 5.5,   # 15% variation
-                'Br': 5.5,   # 15% variation
-                'Cf': 0.3,   # 15% variation
-                'Cr': 0.3,   # 15% variation
+                'Bf': 0,   # 15% variation
+                'Br': 0,   # 15% variation
+                'Cf': 0,   # 15% variation
+                'Cr': 0,   # 15% variation
                 'Df': 15,   # 15% variation
                 'Dr': 15,   # 15% variation
-                'Cro': 0.2, # 15% variation
+                'Cro': 0, # 15% variation
                 'Cd': 0,  # assume negligible drag
                 'Ce': 5,  # motor efficiency conversion should never be above 1
                 'Cm': 0.0,  # motor speed saturation
