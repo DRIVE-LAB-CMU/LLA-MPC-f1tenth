@@ -146,6 +146,7 @@ class MPCNode(Node):
                 "ctrl": [],
                 "cmd":[],
                 "mpc_rollout":[],
+                "ref_trajectory":[],
                 "ok_time":[],
                 "predicted_state": [],
                 "one_step_cost": [],
@@ -575,7 +576,9 @@ class MPCNode(Node):
         ref_segment, idx = get_reference_trajectory_segment(x0, v0, self.track, self.N+1, self.dt, self.projidx)
         self.projidx = idx
 
+        record_ref_trajectory = []
         if self.publish_trajectories:
+            record_ref_trajectory = ref_segment
             self.publish_ref_trajectory(ref_segment)
             # print(f"REF: {ref_segment}")
 
@@ -683,7 +686,7 @@ class MPCNode(Node):
                 # print(f"PREDICTED CONTROLS: {predicted_controls}")
             self.publish_predicted_trajectory(mpc_states) # Publish predicted trajectory
             
-        self.log_lla_data(selected_model_params, selected_model_index, mpc_states)
+        self.log_lla_data(selected_model_params, selected_model_index, mpc_states, record_ref_trajectory)
 
         
         if(not ok_time):
@@ -859,7 +862,7 @@ class MPCNode(Node):
         ]
         self.mpc_info_pub.publish(info_msg)
 
-    def log_lla_data(self, params, model_index, mpc_rollout = []):
+    def log_lla_data(self, params, model_index, mpc_rollout = [], ref_trajectory = []):
         if(self.log_data):
             now_ns = time.perf_counter_ns()
             self.log_buffer["time"].append(now_ns)
@@ -869,6 +872,7 @@ class MPCNode(Node):
             self.log_buffer["ctrl"].append(self.last_control.copy())
             self.log_buffer["cmd"].append(self.last_drive_command.copy())
             self.log_buffer["mpc_rollout"].append(np.array(mpc_rollout))
+            self.log_buffer["ref_trajectory"].append(np.array(ref_trajectory))
 
     def log_rollout_data(self, lb_history, one_step_cost, ok_time):
         if(self.log_data):
@@ -889,6 +893,7 @@ class MPCNode(Node):
                 ctrl=np.array(self.log_buffer["ctrl"]), 
                 states=np.array(self.log_buffer["predicted_state"]),
                 mpc_rollout=np.array(self.log_buffer["mpc_rollout"]),
+                ref_trajetory=np.array(self.log_buffer["ref_trajectory"]),
                 one_step_cost=np.array(self.log_buffer["one_step_cost"]),
                 running_cost=np.array(self.log_buffer["running_cost"]),
                 ok_time = np.array(self.log_buffer["ok_time"]),
