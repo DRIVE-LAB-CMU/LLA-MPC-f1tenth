@@ -283,7 +283,7 @@ def main():
     }
 
     fixed_params = {'Cro': 0.0, 'Cd': 0.0, 'Cm': 0}
-    discretization = 10
+    discretization = 5
     
     param_series = {k: np.linspace(v[0], v[1], discretization + 1, dtype=np.float32) for k, v in params_range.items()}
     num_total_models = (discretization + 1) ** len(params_range)
