@@ -65,7 +65,7 @@ def simulate_batched_trajectories(total, recording, all_best_params, params_car,
         all_best_params[:, 4], all_best_params[:, 5], # Df, Dr
         np.full(num_models, fixed_params['Cro']), 
         np.full(num_models, fixed_params['Cd']),
-        all_best_params[:, 6], all_best_params[:, 7], # Ce, Cm
+        all_best_params[:, 6], np.full(num_models, fixed_params['Cm']), # Ce, Cm
         0, 0, num_models 
     )
 
@@ -120,7 +120,7 @@ def simulate_dynamic_rollout(total, recording, optimal_params_over_time, params_
         optimal_params_over_time[:, 4], optimal_params_over_time[:, 5],
         np.full(num_steps, fixed_params['Cro']), 
         np.full(num_steps, fixed_params['Cd']),
-        optimal_params_over_time[:, 6], optimal_params_over_time[:, 7],
+        optimal_params_over_time[:, 6], np.full(num_steps, fixed_params['Cm']),
         0, 0, num_steps 
     )
     
@@ -279,10 +279,10 @@ def main():
         'Df': [0.1, 2.0 * mass * g],
         'Dr': [0.1, 2.0 * mass * g],
         'Ce': [0.0, 20.0],
-        'Cm': [0, 0]
+        
     }
 
-    fixed_params = {'Cro': 0.0, 'Cd': 0.0}
+    fixed_params = {'Cro': 0.0, 'Cd': 0.0, 'Cm': 0}
     discretization = 5
     
     param_series = {k: np.linspace(v[0], v[1], discretization + 1, dtype=np.float32) for k, v in params_range.items()}
@@ -323,7 +323,7 @@ def main():
             batch_params[:, 0], batch_params[:, 1], batch_params[:, 2], batch_params[:, 3],
             batch_params[:, 4], batch_params[:, 5], 
             np.full(current_batch_count, fixed_params['Cro']), np.full(current_batch_count, fixed_params['Cd']),
-            batch_params[:, 6], batch_params[:, 7], 
+            batch_params[:, 6], np.full(current_batch_count, fixed_params['Cm']), 
             0, 0, current_batch_count
         )
 
