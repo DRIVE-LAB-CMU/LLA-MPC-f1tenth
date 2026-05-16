@@ -19,7 +19,7 @@ from llampc.params import F110
 from llampc.rollout.rk6 import rk6Factory
 import jax
 
-OL_reset_interval = 10
+OL_reset_interval = 40
 
 # Create a custom logger
 logger = logging.getLogger("BatchOptimization")
@@ -334,7 +334,7 @@ def main():
         # ROUTING LOGIC based on flags
         cost_form = np.array([10.0, 10.0, 10, 10.0, 0.0, 0.0])
         if lla:
-            N = OL_reset_interval
+            N = 10
             lb_history = history.LBHistory(
                 current_batch_count, 80, 1/40, cost_form,
                 6, rk6Factory, db_batch, dynamics.diffequation, buffer_size=[0, 0]
