@@ -403,7 +403,7 @@ def main():
     if lla:
         logger.info("Comparing costs across all batches to build global optimal parameter sequence...")
         
-        global_optimal_params_over_time = np.zeros((total, 8))
+        global_optimal_params_over_time = np.zeros((total, 7))
         global_optimal_costs_over_time = np.zeros(total)
         all_batches_costs_arr = np.array(all_batches_costs) 
         
