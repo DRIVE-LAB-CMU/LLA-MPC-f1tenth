@@ -278,8 +278,8 @@ def main():
         'Cr': [1.1, 1.9],
         'Df': [0.1, 2.0 * mass * g],
         'Dr': [0.1, 2.0 * mass * g],
-        'Ce': [0.0, 1.0],
-        'Cm': [0, 1.0/10]
+        'Ce': [0.0, 20.0],
+        'Cm': [0, 0]
     }
 
     fixed_params = {'Cro': 0.0, 'Cd': 0.0}
@@ -294,7 +294,7 @@ def main():
     grid_iterator = itertools.product(*param_series.values())
 
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'run_visualizer', 'rec_nsh3.npz')
+    filepath = os.path.join(dir_path, 'run_visualizer', 'sysid_trimmed.npz')
 
     recording = np.load(filepath, allow_pickle=True)
     total = len(recording["time"]) - 1  # -1 to protect ok_time[t+1]
@@ -440,7 +440,7 @@ def main():
     all_traj_open_loop_list = [d["traj_open_loop"] for d in batch_best_trajectories]
     all_traj_one_step_list = [d["traj_one_step"] for d in batch_best_trajectories]
     
-    save_path = os.path.join("llampc", "utils", "run_visualizer", "traj_nsht_ol.npz")
+    save_path = os.path.join("llampc", "utils", "run_visualizer", "sysid_ol.npz")
     save_data = {
         "batch": batches,
         "params": all_params,

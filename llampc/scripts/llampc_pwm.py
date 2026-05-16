@@ -684,6 +684,7 @@ class MPCNode(Node):
 
                 # print(f"PREDICTED STATES: {predicted_states}")
                 # print(f"PREDICTED CONTROLS: {predicted_controls}")
+                
             self.publish_predicted_trajectory(mpc_states) # Publish predicted trajectory
             
         self.log_lla_data(selected_model_params, selected_model_index, mpc_states, record_ref_trajectory)
