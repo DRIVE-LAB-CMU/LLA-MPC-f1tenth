@@ -263,7 +263,7 @@ def main():
     # --- CONFIGURATION FLAGS ---
     lla = True          # Enable dynamic parameters over time
     multi_step = True   # Enable multi-step window if LLA is False
-    full_open_loop_sim = True  # <-- NEW FLAG: Set to True for full uninterrupted open-loop simulation
+    full_open_loop_sim = False # <-- NEW FLAG: Set to True for full uninterrupted open-loop simulation
     
     setup_logger(lla, multi_step)
 
