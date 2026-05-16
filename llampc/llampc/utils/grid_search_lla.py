@@ -336,7 +336,7 @@ def main():
         if lla:
             N = OL_reset_interval
             lb_history = history.LBHistory(
-                current_batch_count, 20, 1/40, cost_form,
+                current_batch_count, 80, 1/40, cost_form,
                 6, rk6Factory, db_batch, dynamics.diffequation, buffer_size=[0, 0]
             )
             
@@ -440,7 +440,7 @@ def main():
     all_traj_open_loop_list = [d["traj_open_loop"] for d in batch_best_trajectories]
     all_traj_one_step_list = [d["traj_one_step"] for d in batch_best_trajectories]
     
-    save_path = os.path.join("llampc", "utils", "run_visualizer", "sysid_ol.npz")
+    save_path = os.path.join("llampc", "utils", "run_visualizer", "sysid_ol2.npz")
     save_data = {
         "batch": batches,
         "params": all_params,
