@@ -191,7 +191,7 @@ class MPCNode(Node):
             'Cr': 1.4,
             'Df': 17.0,
             'Dr': 17.0,
-            'Cro': 0.2,
+            'Cro': 0.0,
             'Cd': 0.0,
             'Ce': 5,
             'Cm': 0.0, 
