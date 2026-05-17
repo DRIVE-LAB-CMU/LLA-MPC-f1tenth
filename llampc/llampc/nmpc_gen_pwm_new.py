@@ -245,37 +245,38 @@ def export_model(params_car, linear = False):
 
 
     model.f_expl_expr = f_expl
+    model.custom_Frx_expr =  Frx
     model.x = x
     model.u = u
     model.p = ca.vertcat(p, x_ref)
 
-    print("\n--- CASADI PRE-SOLVE DIAGNOSTIC ---")
+    # print("\n--- CASADI PRE-SOLVE DIAGNOSTIC ---")
     # Create a temporary CasADi function to evaluate your dynamics
-    try:
-        test_dyn_func = ca.Function('test_dyn', [model.x, model.u, model.p], [model.f_expl_expr])
+    # try:
+    #     test_dyn_func = ca.Function('test_dyn', [model.x, model.u, model.p], [model.f_expl_expr])
         
-        # Setup a realistic initial condition (e.g., vx = 5.0 m/s to avoid division by zero)
-        x_test = np.array([0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0]) # x, y, yaw, vx, vy, omega, a, steer
-        u_test = np.array([0.0, 0.0]) # jerk, steer_rate
+    #     # Setup a realistic initial condition (e.g., vx = 5.0 m/s to avoid division by zero)
+    #     x_test = np.array([0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0]) # x, y, yaw, vx, vy, omega, a, steer
+    #     u_test = np.array([0.0, 0.0]) # jerk, steer_rate
         
-        # Generate dummy parameters (Make sure this perfectly matches the length of model.p!)
-        # Assuming p has your params + 8 x_ref values
-        p_len = model.p.shape[0]
-        p_test = np.ones(p_len) * 0.1 
-        p_test[-8:] = x_test # Set x_ref to match x_test
+    #     # Generate dummy parameters (Make sure this perfectly matches the length of model.p!)
+    #     # Assuming p has your params + 8 x_ref values
+    #     p_len = model.p.shape[0]
+    #     p_test = np.ones(p_len) * 0.1 
+    #     p_test[-8:] = x_test # Set x_ref to match x_test
         
-        # Evaluate
-        dx_eval = test_dyn_func(x_test, u_test, p_test)
-        print("Dynamics evaluated at v_x = 5.0:")
-        print(dx_eval)
+    #     # Evaluate
+    #     dx_eval = test_dyn_func(x_test, u_test, p_test)
+    #     print("Dynamics evaluated at v_x = 5.0:")
+    #     print(dx_eval)
         
-        if np.any(np.isnan(dx_eval)) or np.any(np.isinf(dx_eval)):
-            print("CRITICAL: Your CasADi dynamics evaluate to NaN/Inf. The solver is dead on arrival.")
-        else:
-            print("CasADi math is sound. The issue is in the Acados QP/Constraints.")
-    except Exception as e:
-        print(f"CasADi Function creation failed: {e}")
-    print("-----------------------------------\n")
+    #     if np.any(np.isnan(dx_eval)) or np.any(np.isinf(dx_eval)):
+    #         print("CRITICAL: Your CasADi dynamics evaluate to NaN/Inf. The solver is dead on arrival.")
+    #     else:
+    #         print("CasADi math is sound. The issue is in the Acados QP/Constraints.")
+    # except Exception as e:
+    #     print(f"CasADi Function creation failed: {e}")
+    # print("-----------------------------------\n")
 
     return model
 
@@ -297,6 +298,10 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.dims.nx = nx
     ocp.dims.nu = nu
     ocp.solver_options.tf = Tf #set solver settings
+    
+    # 1. Define the actual force expression
+    Frx_expr = model.custom_Frx_expr  
+    
 
     ocp.cost.cost_type = 'NONLINEAR_LS'
     ocp.cost.cost_type_e = 'NONLINEAR_LS'
@@ -310,8 +315,11 @@ def create_ocp(model, params_car, steps, horizon):
     w_jerk = 1
     w_steer_v = 0.1
     # w_vel = 0.001
+    w_force = .0001
+    
+    
     Q_flat = [w_x, w_y, 0, 0, 0, 0, w_accel, w_steer]
-    R_flat = [w_jerk, w_steer_v]
+    R_flat = [w_jerk, w_steer_v, w_force]
 
     Q = np.diag(Q_flat) # nx, for trajectory deviation 6x6
     R = np.diag(R_flat)  # nu, for control smoothness 2x2
@@ -324,7 +332,7 @@ def create_ocp(model, params_car, steps, horizon):
     x = model.x
     u = model.u
 
-    ny = nx + nu # running dimensions
+    ny = nx + nu + 1 # running dimensions
     ny_e = nx #terminal dimension
 
     ocp.dims.ny = ny
@@ -333,11 +341,12 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.cost.yref = np.zeros(ny) # running objective function reference
     ocp.cost.yref_e = np.zeros(ny_e) # terminal objective function reference
 
-    ocp.model.cost_y_expr =  ca.vertcat(
-        x - x_ref, # of size nx + nu
-        #trajectory deviation and control magnitude (make sure last 2 values of xref are 0s)
-        u #control smoothness of size nu
-    ) # running objective function value 10 long vector
+    ocp.model.cost_y_expr = ca.vertcat(
+        x - x_ref,  # size 8
+        u,          # size 2
+        Frx_expr    # size 1 (Physical effort)
+    )
+
     ocp.model.cost_y_expr_e = x - x_ref # terminal objective funciton value 8 long
     
     ocp.model.p = model.p  # Combine with existing parameters

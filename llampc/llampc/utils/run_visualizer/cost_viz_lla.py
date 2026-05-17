@@ -390,7 +390,7 @@ class GridSearchVisualizer:
 def main():
     dir_path = os.path.dirname(os.path.abspath(__file__))
     # Assuming 'all_batch_best_trajectories.npz' or similar is the output
-    visualizer = GridSearchVisualizer(os.path.join(dir_path, 'sysid_trimmed.npz'), os.path.join(dir_path, 'sysid_ol.npz'), 20)
+    visualizer = GridSearchVisualizer(os.path.join(dir_path, 'sysid_trimmed.npz'), os.path.join(dir_path, 'sysid_ol2.npz'), 20)
     visualizer.show()
 
 if __name__ == "__main__":
