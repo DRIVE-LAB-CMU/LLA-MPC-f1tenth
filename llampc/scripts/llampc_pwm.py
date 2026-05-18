@@ -19,7 +19,7 @@ import jax.numpy as jnp
 
 
 
-from llampc.nmpc_gen_pwm import setup_mpc
+from llampc.nmpc_gen_pwm_new import setup_mpc
 from llampc.params import F110, F110_sim, get_param_dict
 from llampc.planner import get_reference_trajectory_segment
 from llampc.utils import Track
