@@ -194,7 +194,7 @@ class MPCNode(Node):
             'Dr': 17.0,
             'Cro': 0.0,
             'Cd': 0.0,
-            'Ce': 8,
+            'Ce': 10,
             'Cm': 0.0, 
         }
 
@@ -207,7 +207,7 @@ class MPCNode(Node):
                 'Dr': 15,   # 15% variation
                 'Cro': 0, # 15% variation
                 'Cd': 0,  # assume negligible drag
-                'Ce': 6,  # motor efficiency conversion should never be above 1
+                'Ce': 0,  # motor efficiency conversion should never be above 1
                 'Cm': 0.0,  # motor speed saturation
             }
         
