@@ -301,8 +301,9 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.cost.cost_type = 'NONLINEAR_LS'
     ocp.cost.cost_type_e = 'NONLINEAR_LS'
 
-    w_x = 8.0
-    w_y = 8.0
+    w_x = 4.0
+    w_y = 4.0
+    w_theta = 1.0
     w_xe = 0
     w_ye = 0
     w_steer = 0.01
@@ -310,7 +311,7 @@ def create_ocp(model, params_car, steps, horizon):
     w_jerk = 0
     w_steer_v = 0.1
     # w_vel = 0.001
-    Q_flat = [w_x, w_y, 0, 0, 0, 0, w_accel, w_steer]
+    Q_flat = [w_x, w_y, w_theta, 0, 0, 0, w_accel, w_steer]
     R_flat = [w_jerk, w_steer_v]
 
     Q = np.diag(Q_flat) # nx, for trajectory deviation 6x6
