@@ -194,20 +194,20 @@ class MPCNode(Node):
             'Dr': 17.0,
             'Cro': 0.0,
             'Cd': 0.0,
-            'Ce': 10,
+            'Ce': 5,
             'Cm': 0.0, 
         }
 
         variation_dict = {
-                'Bf': 0,   # 15% variation
-                'Br': 0,   # 15% variation
-                'Cf': 0,   # 15% variation
-                'Cr': 0,   # 15% variation
-                'Df': 0,   # 15% variation
-                'Dr': 0,   # 15% variation
+                'Bf': 5.5,   # 15% variation
+                'Br': 5.5,   # 15% variation
+                'Cf': 0.3,   # 15% variation
+                'Cr': 0.3,   # 15% variation
+                'Df': 15,   # 15% variation
+                'Dr': 15,   # 15% variation
                 'Cro': 0, # 15% variation
                 'Cd': 0,  # assume negligible drag
-                'Ce': 0,  # motor efficiency conversion should never be above 1
+                'Ce': 4,  # motor efficiency conversion should never be above 1
                 'Cm': 0.0,  # motor speed saturation
             }
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
