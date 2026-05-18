@@ -19,7 +19,7 @@ import jax.numpy as jnp
 
 
 
-from llampc.nmpc_gen_pwm_new import setup_mpc
+from llampc.nmpc_gen_pwm import setup_mpc
 from llampc.params import F110, F110_sim, get_param_dict
 from llampc.planner import get_reference_trajectory_segment
 from llampc.utils import Track
@@ -194,20 +194,33 @@ class MPCNode(Node):
             'Dr': 17.0,
             'Cro': 0.0,
             'Cd': 0.0,
-            'Ce': 5,
+            'Ce': 10,
             'Cm': 0.0, 
         }
 
+        # variation_dict = {
+        #         'Bf': 5.5,   # 15% variation
+        #         'Br': 5.5,   # 15% variation
+        #         'Cf': 0.3,   # 15% variation
+        #         'Cr': 0.3,   # 15% variation
+        #         'Df': 15,   # 15% variation
+        #         'Dr': 15,   # 15% variation
+        #         'Cro': 0, # 15% variation
+        #         'Cd': 0,  # assume negligible drag
+        #         'Ce': 4,  # motor efficiency conversion should never be above 1
+        #         'Cm': 0.0,  # motor speed saturation
+        #     }
+        
         variation_dict = {
-                'Bf': 5.5,   # 15% variation
-                'Br': 5.5,   # 15% variation
-                'Cf': 0.3,   # 15% variation
-                'Cr': 0.3,   # 15% variation
-                'Df': 15,   # 15% variation
-                'Dr': 15,   # 15% variation
+                'Bf': 0,   # 15% variation
+                'Br': 0,   # 15% variation
+                'Cf': 0,   # 15% variation
+                'Cr': 0,   # 15% variation
+                'Df': 0,   # 15% variation
+                'Dr': 0,   # 15% variation
                 'Cro': 0, # 15% variation
                 'Cd': 0,  # assume negligible drag
-                'Ce': 4,  # motor efficiency conversion should never be above 1
+                'Ce': 0,  # motor efficiency conversion should never be above 1
                 'Cm': 0.0,  # motor speed saturation
             }
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega

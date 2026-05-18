@@ -61,13 +61,11 @@ class StateVisualizer:
         # Load ref_trajectory (time-local, per-timestep, same structure as mpc_rollout)
         self.ref_trajectory = None
         if "ref_trajectory" in data:
-            
             ref_traj_data = data["ref_trajectory"]
             print(ref_traj_data.shape)
             if len(ref_traj_data) > 0 and len(ref_traj_data[0]) > 0:
                 self.ref_trajectory = ref_traj_data
         
-        # Determine how many parameters to show
         if self.n_params_to_show is None:
             self.n_params_to_show = [x for x in range(len(self.params))]
 
@@ -154,12 +152,14 @@ class StateVisualizer:
 
         self.trail, = self.ax.plot([], [], 'b-', alpha=0.3, linewidth=1, label='Trajectory', zorder=2)
         
-        # MPC Rollout line
-        self.rollout_line, = self.ax.plot([], [], 'm--', alpha=0.8, linewidth=2, zorder=3)
+        # MPC Rollout: dashed line + circle markers at each node
+        self.rollout_line,   = self.ax.plot([], [], 'm--', alpha=0.5, linewidth=1.5, zorder=3)
+        self.rollout_points, = self.ax.plot([], [], 'mo',  markersize=5, alpha=0.9,  zorder=4)
 
-        # Reference trajectory line (time-local, per-timestep)
-        self.ref_traj_line, = self.ax.plot([], [], 'g--', alpha=0.8, linewidth=2, zorder=3)
-        
+        # Ref trajectory: dashed line + triangle markers at each node
+        self.ref_traj_line,   = self.ax.plot([], [], 'g--', alpha=0.5, linewidth=1.5, zorder=3)
+        self.ref_traj_points, = self.ax.plot([], [], 'g^',  markersize=5, alpha=0.9,  zorder=4)
+
         self.point, = self.ax.plot([], [], 'ko', markersize=10, label='Position', zorder=5)
         self.heading_line, = self.ax.plot([], [], 'k-', linewidth=2, zorder=4)
 
@@ -174,10 +174,12 @@ class StateVisualizer:
             legend_elements.append(Line2D([0], [0], color='black', linestyle='--', lw=1.5, alpha=0.4, label='Reference'))
 
         if self.ref_trajectory is not None:
-            legend_elements.append(Line2D([0], [0], color='g', linestyle='--', lw=2, label='Ref Trajectory'))
+            legend_elements.append(Line2D([0], [0], color='g', linestyle='--', marker='^',
+                                          markersize=5, lw=1.5, label='Ref Trajectory'))
 
         if self.mpc_rollout is not None:
-            legend_elements.append(Line2D([0], [0], color='m', linestyle='--', lw=2, label='MPC Rollout'))
+            legend_elements.append(Line2D([0], [0], color='m', linestyle='--', marker='o',
+                                          markersize=5, lw=1.5, label='MPC Rollout'))
             
         legend_elements.extend([
             Line2D([0], [0], color='black', lw=2, label='Heading (Yaw)'),
@@ -243,36 +245,48 @@ class StateVisualizer:
             self.timer.add_callback(self.animate_step)
             self.timer.start()
 
+    def _extract_xy(self, arr):
+        """Extract x, y from either (N, state) or (state, N) shaped array."""
+        arr = np.array(arr)
+        if arr.ndim == 2 and arr.shape[0] < arr.shape[1]:
+            return arr[0, :], arr[1, :]
+        return arr[:, 0], arr[:, 1]
+
     def update_frame(self, frame_idx):
         """Update visualization for given frame."""
         frame_idx = int(frame_idx)
         self.current_frame = frame_idx
         
         self.trail.set_data(self.x[:frame_idx+1], self.y[:frame_idx+1])
-        
         self.point.set_data([self.x[frame_idx]], [self.y[frame_idx]])
 
-        # Update MPC Rollout
+        # Update MPC Rollout: line + individual node markers
         if self.mpc_rollout is not None and frame_idx < len(self.mpc_rollout):
             current_rollout = self.mpc_rollout[frame_idx]
             if len(current_rollout) > 0:
-                current_rollout = np.array(current_rollout)
-                self.rollout_line.set_data(current_rollout[:, 0], current_rollout[:, 1])
+                xs, ys = self._extract_xy(current_rollout)
+                self.rollout_line.set_data(xs, ys)
+                self.rollout_points.set_data(xs, ys)
             else:
                 self.rollout_line.set_data([], [])
+                self.rollout_points.set_data([], [])
         else:
             self.rollout_line.set_data([], [])
+            self.rollout_points.set_data([], [])
 
-        # Update ref_trajectory (time-local reference segment)
+        # Update ref_trajectory: line + individual node markers
         if self.ref_trajectory is not None and frame_idx < len(self.ref_trajectory):
             current_ref_traj = self.ref_trajectory[frame_idx]
             if len(current_ref_traj) > 0:
-                current_ref_traj = np.array(current_ref_traj)
-                self.ref_traj_line.set_data(current_ref_traj[:, 0], current_ref_traj[:, 1])
+                xs, ys = self._extract_xy(current_ref_traj)
+                self.ref_traj_line.set_data(xs, ys)
+                self.ref_traj_points.set_data(xs, ys)
             else:
                 self.ref_traj_line.set_data([], [])
+                self.ref_traj_points.set_data([], [])
         else:
             self.ref_traj_line.set_data([], [])
+            self.ref_traj_points.set_data([], [])
 
         line_length = 0.5 
         end_x = self.x[frame_idx] + line_length * np.cos(self.theta[frame_idx])
