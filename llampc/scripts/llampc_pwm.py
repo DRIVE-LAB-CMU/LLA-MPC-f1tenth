@@ -579,7 +579,7 @@ class MPCNode(Node):
         record_ref_trajectory = []
         if self.publish_trajectories:
             record_ref_trajectory = ref_segment
-            self.publish_ref_trajectory(ref_segment)
+            self.publish_ref_trajectory(ref_segment.T)
             # print(f"REF: {ref_segment}")
 
         self.checkpoint[2] = time.perf_counter_ns()
@@ -894,7 +894,7 @@ class MPCNode(Node):
                 ctrl=np.array(self.log_buffer["ctrl"]), 
                 states=np.array(self.log_buffer["predicted_state"]),
                 mpc_rollout=np.array(self.log_buffer["mpc_rollout"]),
-                ref_trajetory=np.array(self.log_buffer["ref_trajectory"]),
+                ref_trajectory=np.array(self.log_buffer["ref_trajectory"]),
                 one_step_cost=np.array(self.log_buffer["one_step_cost"]),
                 running_cost=np.array(self.log_buffer["running_cost"]),
                 ok_time = np.array(self.log_buffer["ok_time"]),

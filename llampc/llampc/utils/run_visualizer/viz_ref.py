@@ -36,9 +36,6 @@ class StateVisualizer:
         self.omega = state[:, 5]
         self.n_frames = len(self.x)
 
-        # params could be either:
-        # - shape (n_timesteps, n_params) - need to transpose
-        # - list of arrays where each is length n_timesteps
         params_raw = data["params"]
         
         if isinstance(params_raw, np.ndarray) and params_raw.ndim == 2:
@@ -54,13 +51,21 @@ class StateVisualizer:
         self.accel = ctrl[:, 0]
         self.steer = ctrl[:, 1]
 
-        # --- NEW: Load MPC Rollout ---
+        # Load MPC Rollout
         self.mpc_rollout = None
         if "mpc_rollout" in data:
             rollout_data = data["mpc_rollout"]
-            # Check if it actually contains populated arrays
             if len(rollout_data) > 0 and len(rollout_data[0]) > 0:
                 self.mpc_rollout = rollout_data
+
+        # Load ref_trajectory (time-local, per-timestep, same structure as mpc_rollout)
+        self.ref_trajectory = None
+        if "ref_trajetory" in data:
+            
+            ref_traj_data = data["ref_trajetory"]
+            print(ref_traj_data.shape)
+            if len(ref_traj_data) > 0 and len(ref_traj_data[0]) > 0:
+                self.ref_trajectory = ref_traj_data
         
         # Determine how many parameters to show
         if self.n_params_to_show is None:
@@ -149,8 +154,11 @@ class StateVisualizer:
 
         self.trail, = self.ax.plot([], [], 'b-', alpha=0.3, linewidth=1, label='Trajectory', zorder=2)
         
-        # --- NEW: MPC Rollout Line ---
+        # MPC Rollout line
         self.rollout_line, = self.ax.plot([], [], 'm--', alpha=0.8, linewidth=2, zorder=3)
+
+        # Reference trajectory line (time-local, per-timestep)
+        self.ref_traj_line, = self.ax.plot([], [], 'g--', alpha=0.8, linewidth=2, zorder=3)
         
         self.point, = self.ax.plot([], [], 'ko', markersize=10, label='Position', zorder=5)
         self.heading_line, = self.ax.plot([], [], 'k-', linewidth=2, zorder=4)
@@ -164,6 +172,12 @@ class StateVisualizer:
         
         if self.ref_x is not None:
             legend_elements.append(Line2D([0], [0], color='black', linestyle='--', lw=1.5, alpha=0.4, label='Reference'))
+
+        if self.ref_trajectory is not None:
+            legend_elements.append(Line2D([0], [0], color='g', linestyle='--', lw=2, label='Ref Trajectory'))
+
+        if self.mpc_rollout is not None:
+            legend_elements.append(Line2D([0], [0], color='m', linestyle='--', lw=2, label='MPC Rollout'))
             
         legend_elements.extend([
             Line2D([0], [0], color='black', lw=2, label='Heading (Yaw)'),
@@ -171,10 +185,6 @@ class StateVisualizer:
             Patch(facecolor='green', alpha=0.7, label='Y Velocity'),
             Patch(facecolor='red', alpha=0.7, label='Acceleration')
         ])
-
-        # Add MPC Rollout to legend if data exists
-        if self.mpc_rollout is not None:
-            legend_elements.insert(0, Line2D([0], [0], color='m', linestyle='--', lw=2, label='MPC Rollout'))
             
         self.ax.legend(handles=legend_elements, loc='upper right', fontsize=8)
         
@@ -242,17 +252,27 @@ class StateVisualizer:
         
         self.point.set_data([self.x[frame_idx]], [self.y[frame_idx]])
 
-        # --- NEW: Update MPC Rollout ---
+        # Update MPC Rollout
         if self.mpc_rollout is not None and frame_idx < len(self.mpc_rollout):
             current_rollout = self.mpc_rollout[frame_idx]
             if len(current_rollout) > 0:
-                # Assuming state format [x, y, theta, dx, dy, omega]
                 current_rollout = np.array(current_rollout)
                 self.rollout_line.set_data(current_rollout[:, 0], current_rollout[:, 1])
             else:
                 self.rollout_line.set_data([], [])
         else:
             self.rollout_line.set_data([], [])
+
+        # Update ref_trajectory (time-local reference segment)
+        if self.ref_trajectory is not None and frame_idx < len(self.ref_trajectory):
+            current_ref_traj = self.ref_trajectory[frame_idx]
+            if len(current_ref_traj) > 0:
+                current_ref_traj = np.array(current_ref_traj)
+                self.ref_traj_line.set_data(current_ref_traj[:, 0], current_ref_traj[:, 1])
+            else:
+                self.ref_traj_line.set_data([], [])
+        else:
+            self.ref_traj_line.set_data([], [])
 
         line_length = 0.5 
         end_x = self.x[frame_idx] + line_length * np.cos(self.theta[frame_idx])
@@ -360,32 +380,10 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    # filepath = os.path.join(dir_path, 'simlhnoterm.npz')
-    # filepath = os.path.join(dir_path, 'simlhmultimm.npz')
-    # filepath = os.path.join(dir_path, 'sim8oz.npz')
-    # filepath = os.path.join(dir_path, 'sim8term.npz')
-    # filepath = os.path.join(dir_path, 'blevel_oval_noadapt.npz')
-    # filepath = os.path.join(dir_path, 'blevel_oval_os.npz')
-    # filepath = os.path.join(dir_path, 'blevel_fig8_noadapt.npz')
-    # filepath = os.path.join(dir_path, 'blevel_fig8_multi.npz')
-    # filepath = os.path.join(dir_path, 'sim_os.npz')
-    # filepath = os.path.join(dir_path, 'sim_multi.npz')
-    # filepath = os.path.join(dir_path, 'nsimos.npz')
-    # filepath = os.path.join(dir_path, 'nsimmulti.npz')
-    # filepath = os.path.join(dir_path, 'sim_multi.npz')
-    # filepath = os.path.join(dir_path, 'sim_multi.npz')
-    # filepath = os.path.join(dir_path, 'sim_noterm.npz')
-    # filepath = os.path.join(dir_path, 'blevel_circle_sim.npz')
-    # filepath = os.path.join(dir_path, 'blevel_circle_mllampcgood.npz')
-    # filepath = os.path.join(dir_path, 'blevel_circle_mnollampcbad.npz')
-    # filepath = os.path.join(dir_path, 'sim_8c.npz')
-    # filepath = os.path.join(dir_path, 'sim_oval.npz')
-    # filepath = os.path.join(dir_path, 'sim_ovala.npz')
-    filepath = os.path.join(dir_path, 'sysid_trimmed.npz')
+    filepath = os.path.join(dir_path, 'mocapfail4.npz')
 
     ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square1.npz') 
     
-    # Optional: Define parameter names
     param_names = {
         0: 'Bf',
         1: 'Br',
@@ -401,10 +399,9 @@ def main():
         11: 'Pitch'
     }
     
-    # Create visualizer
     visualizer = StateVisualizer(
         filepath, 
-        ref_filepath=ref_filepath, # Pass the raceline file path here
+        ref_filepath=ref_filepath,
         n_params_to_show=range(12), 
         params_per_column=6,
         param_names=param_names
