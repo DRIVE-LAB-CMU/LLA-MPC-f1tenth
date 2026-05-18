@@ -637,7 +637,7 @@ class MPCNode(Node):
             full_params = np.zeros((N+1, 20), np.float64)
             full_params[:, :12] = selected_model_params
             # self.get_logger().info(f"{full_params}")
-            full_params[:, 12:12+6] = ref_segment[:6, :N+1].T #reference x, y
+            full_params[:, 12:12+6] = ref_segment[:6, :N+1].T #reference x, y, theta
             return full_params
         
         full_params = construct_params(self.N, selected_model_params, ref_segment)

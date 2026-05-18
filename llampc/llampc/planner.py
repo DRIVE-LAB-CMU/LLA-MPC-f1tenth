@@ -119,10 +119,12 @@ def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., wr
         else:
             if dist >= max_s:
                 xref_full[:2, idh:] = track.spline.calc_position(max_s - 1e-4).reshape(2, 1)
+                xref_full[2, idh:] = track.spline.calc_yaw(max_s - 1e-4).reshape(2, 1)
                 break
             s_sample = dist
 
         xref_full[:2, idh] = track.spline.calc_position(s_sample)
+        xref_full[2, idh] = track.spline.calc_yaw(s_sample)
         v = track.spline_v.calc(s_sample)
 
     xref = xref_full[:, skip:skip + N + 1]
