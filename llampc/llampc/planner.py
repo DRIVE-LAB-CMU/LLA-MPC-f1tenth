@@ -90,7 +90,7 @@ def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., wr
     raceline = track.raceline
     num_pts = raceline.shape[1]
     
-    search_indices = np.arange(projidx, projidx + 10) % num_pts
+    search_indices = np.arange(projidx, projidx + 50) % num_pts
     search_window = raceline[:, search_indices]
 
     if np.allclose(search_window[:, 0], search_window[:, 1]):
