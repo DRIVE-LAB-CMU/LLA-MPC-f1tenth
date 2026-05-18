@@ -60,9 +60,9 @@ class StateVisualizer:
 
         # Load ref_trajectory (time-local, per-timestep, same structure as mpc_rollout)
         self.ref_trajectory = None
-        if "ref_trajetory" in data:
+        if "ref_trajectory" in data:
             
-            ref_traj_data = data["ref_trajetory"]
+            ref_traj_data = data["ref_trajectory"]
             print(ref_traj_data.shape)
             if len(ref_traj_data) > 0 and len(ref_traj_data[0]) > 0:
                 self.ref_trajectory = ref_traj_data
@@ -380,7 +380,7 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'mocapfail4.npz')
+    filepath = os.path.join(dir_path, 'mocapfail5.npz')
 
     ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square1.npz') 
     

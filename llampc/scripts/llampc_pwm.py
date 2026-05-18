@@ -578,8 +578,8 @@ class MPCNode(Node):
 
         record_ref_trajectory = []
         if self.publish_trajectories:
-            record_ref_trajectory = ref_segment
-            self.publish_ref_trajectory(ref_segment.T)
+            record_ref_trajectory = ref_segment.T
+            self.publish_ref_trajectory(ref_segment)
             # print(f"REF: {ref_segment}")
 
         self.checkpoint[2] = time.perf_counter_ns()
