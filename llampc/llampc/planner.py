@@ -86,49 +86,45 @@ from llampc.utils import Spline2D
 #         # 	# print(v,va,vb)
 
 #     return xref, projidx#, vr
-
-def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., wrap=True):
+def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., wrap=True, skip=3):
     raceline = track.raceline
     num_pts = raceline.shape[1]
     
-    # 1. Create wrapped search indices
     search_indices = np.arange(projidx, projidx + 10) % num_pts
     search_window = raceline[:, search_indices]
 
-    # --- SANITIZATION ---
-    # Detect if the wrap-around segment (e.g., 499 to 0) has 0 length
-    # If so, we slightly nudge the indices to skip the duplicate point
     if np.allclose(search_window[:, 0], search_window[:, 1]):
-        # Shift window forward by 1 to skip the duplicated "Finish/Start" point
         search_indices = (search_indices + 1) % num_pts
         search_window = raceline[:, search_indices]
-    # --------------------
     
-    # Project onto the cleaned window
     xy, idx_rel = track.project_fast(x=x0[0], y=x0[1], raceline=search_window)
     new_projidx = search_indices[idx_rel]
 
-    # Reference Generation
     dist_start = track.spline.s[new_projidx]
     max_s = track.spline.s[-1]
     
     dist = dist_start
-    xref = np.zeros([6, N+1])
-    xref[:2, 0] = x0
     v = max(v0, 0.2)
 
-    for idh in range(1, N+1):
+    # Generate N+1+skip points, then slice off the first `skip`
+    total = N + 1 + skip
+    xref_full = np.zeros([6, total])
+    xref_full[:2, 0] = x0
+
+    for idh in range(1, total):
         dist += scale * v * Ts
         
         if wrap:
             s_sample = dist % max_s
         else:
             if dist >= max_s:
-                xref[:2, idh:] = track.spline.calc_position(max_s - 1e-4).reshape(2, 1)
+                xref_full[:2, idh:] = track.spline.calc_position(max_s - 1e-4).reshape(2, 1)
                 break
             s_sample = dist
 
-        xref[:2, idh] = track.spline.calc_position(s_sample)
+        xref_full[:2, idh] = track.spline.calc_position(s_sample)
         v = track.spline_v.calc(s_sample)
+
+    xref = xref_full[:, skip:skip + N + 1]
 
     return xref, new_projidx
