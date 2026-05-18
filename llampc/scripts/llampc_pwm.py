@@ -122,8 +122,8 @@ class MPCNode(Node):
         #self.declare_parameter('odom_topic', '/odom')
         self.declare_parameter('out_file', 'out')
 
-        self.N = 25 #steps (for nmpc)
-        self.Tf = 1.0 # total time horizon (for nmpc)
+        self.N = 20 #steps (for nmpc)
+        self.Tf = 0.8 # total time horizon (for nmpc)
         self.dt = self.Tf / self.N
         self.control_callback_speed = 0.04
         self.lla_predict_horizon = 0.04
