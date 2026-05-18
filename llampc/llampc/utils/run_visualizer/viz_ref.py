@@ -395,7 +395,7 @@ def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
     # filepath = os.path.join(dir_path, 'shifthorizon.npz')
-    filepath = os.path.join(dir_path, 'skip5.npz')
+    filepath = os.path.join(dir_path, 'fastplan.npz')
 
     ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square1.npz') 
     
