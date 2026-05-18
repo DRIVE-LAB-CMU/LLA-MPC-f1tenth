@@ -15,7 +15,7 @@ class Track:
 
     def __init__(self, file_name):
         file_path = os.path.join(os.path.dirname(__file__), 'tracks', file_name)
-        raceline = np.load(file_path)
+        raceline = np.load(file_path, allow_pickle=True)
         n_samples = raceline['x'].size
         self._load_raceline(
                 wx=raceline['x'],
