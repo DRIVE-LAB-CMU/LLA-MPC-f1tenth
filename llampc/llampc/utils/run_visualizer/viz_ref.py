@@ -397,7 +397,7 @@ def main():
     # filepath = os.path.join(dir_path, 'shifthorizon.npz')
     filepath = os.path.join(dir_path, 'better.npz')
 
-    ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square2.npz') 
+    ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'circle.npz') 
     
     param_names = {
         0: 'Bf',
