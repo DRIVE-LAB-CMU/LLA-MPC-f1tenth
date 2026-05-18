@@ -51,14 +51,12 @@ class StateVisualizer:
         self.accel = ctrl[:, 0]
         self.steer = ctrl[:, 1]
 
-        # Load MPC Rollout
         self.mpc_rollout = None
         if "mpc_rollout" in data:
             rollout_data = data["mpc_rollout"]
             if len(rollout_data) > 0 and len(rollout_data[0]) > 0:
                 self.mpc_rollout = rollout_data
 
-        # Load ref_trajectory (time-local, per-timestep, same structure as mpc_rollout)
         self.ref_trajectory = None
         if "ref_trajectory" in data:
             ref_traj_data = data["ref_trajectory"]
@@ -152,11 +150,9 @@ class StateVisualizer:
 
         self.trail, = self.ax.plot([], [], 'b-', alpha=0.3, linewidth=1, label='Trajectory', zorder=2)
         
-        # MPC Rollout: dashed line + circle markers at each node
         self.rollout_line,   = self.ax.plot([], [], 'm--', alpha=0.5, linewidth=1.5, zorder=3)
         self.rollout_points, = self.ax.plot([], [], 'mo',  markersize=5, alpha=0.9,  zorder=4)
 
-        # Ref trajectory: dashed line + triangle markers at each node
         self.ref_traj_line,   = self.ax.plot([], [], 'g--', alpha=0.5, linewidth=1.5, zorder=3)
         self.ref_traj_points, = self.ax.plot([], [], 'g^',  markersize=5, alpha=0.9,  zorder=4)
 
@@ -166,6 +162,10 @@ class StateVisualizer:
         self.x_vel_arrow = None
         self.y_vel_arrow = None
         self.accel_arrow = None
+
+        # Yaw arrow collections for rollout and ref trajectory nodes
+        self.rollout_yaw_arrows = []
+        self.ref_traj_yaw_arrows = []
         
         from matplotlib.patches import Patch
         legend_elements = []
@@ -205,45 +205,37 @@ class StateVisualizer:
             
             point, = ax_p.plot([], [], 'ro', markersize=6, zorder=4)
             self.param_points.append(point)
-            
-    def setup_controls(self):
-        """Create interactive controls."""
-        bottom_margin = 0.08
-        
-        ax_slider = plt.axes([0.2, bottom_margin + 0.02, 0.6, 0.02])
-        self.slider = Slider(
-            ax_slider, 'Frame', 0, self.n_frames - 1,
-            valinit=0, valstep=1, valfmt='%d'
-        )
-        self.slider.on_changed(self.on_slider_change)
-        
-        ax_play = plt.axes([0.25, bottom_margin - 0.03, 0.08, 0.03])
-        self.btn_play = Button(ax_play, 'Play')
-        self.btn_play.on_clicked(self.toggle_play)
-        
-        ax_reset = plt.axes([0.35, bottom_margin - 0.03, 0.08, 0.03])
-        self.btn_reset = Button(ax_reset, 'Reset')
-        self.btn_reset.on_clicked(self.reset)
-        
-        ax_speed = plt.axes([0.46, bottom_margin - 0.03, 0.2, 0.02])
-        self.speed_slider = Slider(
-            ax_speed, 'Speed', 50, 1000,
-            valinit=200, valstep=50
-        )
 
-        self.speed_slider.on_changed(self.on_speed_change)
-        
-        self.timer = self.fig.canvas.new_timer(interval=50)
-        self.timer.add_callback(self.animate_step)
+    def _clear_yaw_arrows(self, arrow_list):
+        """Remove all arrows in a list from the axes."""
+        for arrow in arrow_list:
+            if arrow in self.ax.patches:
+                arrow.remove()
+        arrow_list.clear()
 
-    def on_speed_change(self, val):
-        """Update playback speed dynamically."""
-        if self.playing:
-            interval = int(1000 / val)
-            self.timer.stop()
-            self.timer = self.fig.canvas.new_timer(interval=interval)
-            self.timer.add_callback(self.animate_step)
-            self.timer.start()
+    def _draw_yaw_arrows(self, arr, color, arrow_list, yaw_len=0.15):
+        """Draw yaw arrows at each node of a trajectory array."""
+        # arr shape: (N, state) or (state, N) — extract x, y, yaw
+        arr = np.array(arr)
+        if arr.ndim == 2 and arr.shape[0] < arr.shape[1]:
+            # (state, N) — rows are dims
+            xs, ys, yaws = arr[0, :], arr[1, :], arr[2, :]
+        else:
+            # (N, state) — rows are points
+            xs, ys, yaws = arr[:, 0], arr[:, 1], arr[:, 2]
+
+        for x, y, yaw in zip(xs, ys, yaws):
+            if yaw == 0.0:
+                continue  # skip unfilled nodes
+            arrow = FancyArrow(
+                x, y,
+                yaw_len * np.cos(yaw),
+                yaw_len * np.sin(yaw),
+                head_width=0.06, head_length=0.05,
+                fc=color, ec=color, alpha=0.8, zorder=5
+            )
+            self.ax.add_patch(arrow)
+            arrow_list.append(arrow)
 
     def _extract_xy(self, arr):
         """Extract x, y from either (N, state) or (state, N) shaped array."""
@@ -260,13 +252,15 @@ class StateVisualizer:
         self.trail.set_data(self.x[:frame_idx+1], self.y[:frame_idx+1])
         self.point.set_data([self.x[frame_idx]], [self.y[frame_idx]])
 
-        # Update MPC Rollout: line + individual node markers
+        # Update MPC Rollout: line + points + yaw arrows
+        self._clear_yaw_arrows(self.rollout_yaw_arrows)
         if self.mpc_rollout is not None and frame_idx < len(self.mpc_rollout):
             current_rollout = self.mpc_rollout[frame_idx]
             if len(current_rollout) > 0:
                 xs, ys = self._extract_xy(current_rollout)
                 self.rollout_line.set_data(xs, ys)
                 self.rollout_points.set_data(xs, ys)
+                self._draw_yaw_arrows(current_rollout, 'magenta', self.rollout_yaw_arrows)
             else:
                 self.rollout_line.set_data([], [])
                 self.rollout_points.set_data([], [])
@@ -274,13 +268,15 @@ class StateVisualizer:
             self.rollout_line.set_data([], [])
             self.rollout_points.set_data([], [])
 
-        # Update ref_trajectory: line + individual node markers
+        # Update ref_trajectory: line + points + yaw arrows
+        self._clear_yaw_arrows(self.ref_traj_yaw_arrows)
         if self.ref_trajectory is not None and frame_idx < len(self.ref_trajectory):
             current_ref_traj = self.ref_trajectory[frame_idx]
             if len(current_ref_traj) > 0:
                 xs, ys = self._extract_xy(current_ref_traj)
                 self.ref_traj_line.set_data(xs, ys)
                 self.ref_traj_points.set_data(xs, ys)
+                self._draw_yaw_arrows(current_ref_traj, 'lime', self.ref_traj_yaw_arrows)
             else:
                 self.ref_traj_line.set_data([], [])
                 self.ref_traj_points.set_data([], [])
@@ -359,6 +355,44 @@ class StateVisualizer:
         
         self.fig.canvas.draw_idle()
         
+    def setup_controls(self):
+        """Create interactive controls."""
+        bottom_margin = 0.08
+        
+        ax_slider = plt.axes([0.2, bottom_margin + 0.02, 0.6, 0.02])
+        self.slider = Slider(
+            ax_slider, 'Frame', 0, self.n_frames - 1,
+            valinit=0, valstep=1, valfmt='%d'
+        )
+        self.slider.on_changed(self.on_slider_change)
+        
+        ax_play = plt.axes([0.25, bottom_margin - 0.03, 0.08, 0.03])
+        self.btn_play = Button(ax_play, 'Play')
+        self.btn_play.on_clicked(self.toggle_play)
+        
+        ax_reset = plt.axes([0.35, bottom_margin - 0.03, 0.08, 0.03])
+        self.btn_reset = Button(ax_reset, 'Reset')
+        self.btn_reset.on_clicked(self.reset)
+        
+        ax_speed = plt.axes([0.46, bottom_margin - 0.03, 0.2, 0.02])
+        self.speed_slider = Slider(
+            ax_speed, 'Speed', 50, 1000,
+            valinit=200, valstep=50
+        )
+        self.speed_slider.on_changed(self.on_speed_change)
+        
+        self.timer = self.fig.canvas.new_timer(interval=50)
+        self.timer.add_callback(self.animate_step)
+
+    def on_speed_change(self, val):
+        """Update playback speed dynamically."""
+        if self.playing:
+            interval = int(1000 / val)
+            self.timer.stop()
+            self.timer = self.fig.canvas.new_timer(interval=interval)
+            self.timer.add_callback(self.animate_step)
+            self.timer.start()
+
     def on_slider_change(self, val):
         self.update_frame(val)
         
@@ -394,8 +428,7 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    # filepath = os.path.join(dir_path, 'shifthorizon.npz')
-    filepath = os.path.join(dir_path, 'trackgood.npz')
+    filepath = os.path.join(dir_path, 'yaw.npz')
 
     ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square2.npz') 
     

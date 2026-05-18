@@ -334,12 +334,30 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.cost.yref = np.zeros(ny) # running objective function reference
     ocp.cost.yref_e = np.zeros(ny_e) # terminal objective function reference
 
-    ocp.model.cost_y_expr =  ca.vertcat(
-        x - x_ref, # of size nx + nu
-        #trajectory deviation and control magnitude (make sure last 2 values of xref are 0s)
-        u #control smoothness of size nu
-    ) # running objective function value 10 long vector
-    ocp.model.cost_y_expr_e = x - x_ref # terminal objective funciton value 8 long
+    yaw_err = x[2] - x_ref[2]
+    yaw_err_wrapped = ca.atan2(ca.sin(yaw_err), ca.cos(yaw_err))
+
+    ocp.model.cost_y_expr = ca.vertcat(
+        x[0] - x_ref[0],   # x
+        x[1] - x_ref[1],   # y
+        yaw_err_wrapped,    # yaw (wrapped)
+        x[3] - x_ref[3],   # vx
+        x[4] - x_ref[4],   # vy
+        x[5] - x_ref[5],   # omega
+        x[6] - x_ref[6],   # accel
+        x[7] - x_ref[7],   # steer
+        u
+    )
+    ocp.model.cost_y_expr_e = ca.vertcat(
+        x[0] - x_ref[0],   # x
+        x[1] - x_ref[1],   # y
+        yaw_err_wrapped,    # yaw (wrapped)
+        x[3] - x_ref[3],   # vx
+        x[4] - x_ref[4],   # vy
+        x[5] - x_ref[5],   # omega
+        x[6] - x_ref[6],   # accel
+        x[7] - x_ref[7],   # steer
+    )
     
     ocp.model.p = model.p  # Combine with existing parameters
     ocp.dims.np = model.p.size()[0]
