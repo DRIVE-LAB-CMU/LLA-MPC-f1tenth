@@ -87,7 +87,7 @@ from llampc.utils import Spline2D
 
 #     return xref, projidx#, vr
 
-def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., wrap=True, skip=1, max_accel = 9.51):
+def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., wrap=True, skip=2, max_accel = 9.51):
     raceline = track.raceline
     num_pts = raceline.shape[1]
     
