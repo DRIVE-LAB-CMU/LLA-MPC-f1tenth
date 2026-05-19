@@ -86,7 +86,8 @@ from llampc.utils import Spline2D
 #         # 	# print(v,va,vb)
 
 #     return xref, projidx#, vr
-def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., wrap=True, skip=1):
+
+def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., wrap=True, skip=1, max_accel = 9.51):
     raceline = track.raceline
     num_pts = raceline.shape[1]
     
@@ -125,7 +126,9 @@ def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., wr
 
         xref_full[:2, idh] = track.spline.calc_position(s_sample)
         xref_full[2, idh] = track.spline.calc_yaw(s_sample)
-        v = track.spline_v.calc(s_sample)
+        v_next = track.spline_v.calc(s_sample)
+        
+        v = min(v_next, max_accel * Ts + v) # velocity aware planner
 
     xref = xref_full[:, skip:skip + N + 1]
 
