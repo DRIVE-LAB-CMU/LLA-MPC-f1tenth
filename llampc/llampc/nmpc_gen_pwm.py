@@ -301,13 +301,13 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.cost.cost_type = 'NONLINEAR_LS'
     ocp.cost.cost_type_e = 'NONLINEAR_LS'
 
-    w_x = 8.0
-    w_y = 8.0
+    w_x = 4.0
+    w_y = 4.0
     w_theta = 0.0
     w_xe = 0
     w_ye = 0
     w_steer = 0.1
-    w_accel = 4.0
+    w_accel = 10.0
     w_jerk = 0
     w_steer_v = 0.01
     # w_vel = 0.001
