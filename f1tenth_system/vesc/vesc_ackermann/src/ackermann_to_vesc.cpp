@@ -33,6 +33,7 @@ AckermannToVesc::AckermannToVesc(const rclcpp::NodeOptions & options)
 void AckermannToVesc::ackermannCmdCallback(const AckermannDriveStamped::SharedPtr cmd)
 {
   if (!rclcpp::ok()) return;
+  
 
   // 1. Handle Steering (Servo) - Always calculated and published
   Float64 servo_msg;
