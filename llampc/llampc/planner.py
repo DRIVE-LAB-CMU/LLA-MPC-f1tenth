@@ -121,6 +121,7 @@ def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., wr
             if dist >= max_s:
                 xref_full[:2, idh:] = track.spline.calc_position(max_s - 1e-4).reshape(2, 1)
                 xref_full[2, idh:] = track.spline.calc_yaw(max_s - 1e-4)
+                xref_full[3, idh:] = 0 
                 break
             s_sample = dist
 
@@ -129,6 +130,8 @@ def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., wr
         v_next = track.spline_v.calc(s_sample)
         
         v = min(v_next, max_accel * Ts + v) # velocity aware planner
+        
+        xref_full[3, idh] = v 
 
     xref = xref_full[:, skip:skip + N + 1]
 
