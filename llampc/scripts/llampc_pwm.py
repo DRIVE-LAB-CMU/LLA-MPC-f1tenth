@@ -197,6 +197,7 @@ class MPCNode(Node):
             'Ce': 10,
             'Cm': 0.0, 
         }
+        
 
         variation_dict = {
                 'Bf': 5.5,   # 15% variation
