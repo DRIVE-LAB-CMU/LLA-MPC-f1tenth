@@ -136,3 +136,32 @@ def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., wr
     xref = xref_full[:, skip:skip + N + 1]
 
     return xref, new_projidx
+
+def get_lookahead_point(x0, track, projidx, lookahead_dist):
+    """
+    Walk forward along the raceline from projidx until a point is
+    found at euclidean distance >= lookahead_dist from x0.
+    """
+    raceline = track.raceline
+    num_pts  = raceline.shape[1]
+
+    search_indices = np.arange(projidx, projidx + 50) % num_pts
+    search_window  = raceline[:, search_indices]
+    _, idx_rel     = track.project_fast(x=x0[0], y=x0[1], raceline=search_window)
+    new_projidx    = search_indices[idx_rel]
+
+    for i in range(num_pts):
+        idx = (new_projidx + i) % num_pts
+        dp  = raceline[:2, idx] - x0
+        if np.linalg.norm(dp) >= lookahead_dist:
+            s     = track.spline.s[idx]
+            xy    = track.spline.calc_position(s)
+            yaw   = track.spline.calc_yaw(s)
+            speed = track.spline_v.calc(s)
+            return np.array([xy[0], xy[1], yaw, speed, 0.0, 0.0]), new_projidx
+
+    s     = track.spline.s[new_projidx]
+    xy    = track.spline.calc_position(s)
+    yaw   = track.spline.calc_yaw(s)
+    speed = track.spline_v.calc(s)
+    return np.array([xy[0], xy[1], yaw, speed, 0.0, 0.0]), new_projidx

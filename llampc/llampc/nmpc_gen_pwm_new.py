@@ -8,6 +8,34 @@ from scipy.linalg import block_diag
 
 from llampc.params import F110
 
+def pure_pursuit_control(self, state, ref_point):
+    x, y, psi = state[0], state[1], state[2]
+
+
+    dx = ref_point[0] - x
+    dy = ref_point[1] - y
+    local_x =  np.cos(psi) * dx + np.sin(psi) * dy
+    local_y = -np.sin(psi) * dx + np.cos(psi) * dy
+
+    goal_dist = np.sqrt(local_x**2 + local_y**2)
+
+    if goal_dist < 1e-3:
+        steer = 0.0
+    else:
+        numerator   = 2.0 * local_y
+        denominator = goal_dist**2
+        steer = float(np.clip(
+            np.arctan2(numerator, denominator),
+            self.params_car['min_steer'], self.params_car['max_steer']
+        ))
+
+    # velocity-scaled pwm: slow down on sharp turns
+    scale = self.max_pwm - self.min_pwm
+    pwm   = float(self.min_pwm + scale * np.sqrt(1.0 - abs(steer / self.params_car['max_steer'])))
+
+    return np.array([pwm, steer])
+
+
 def export_model(params_car, linear = False):
     model = AcadosModel()
 

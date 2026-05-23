@@ -114,7 +114,7 @@ def diffequation(bank_params, known_params, x, u):
     """Pure dynamic Pacejka model - no blending needed (no autodiff)"""
     g = 9.81
 
-    acc = u[0]
+    pwm = u[0]
     steer = u[1]
     psi = x[2]
     vx = x[3]
@@ -132,7 +132,7 @@ def diffequation(bank_params, known_params, x, u):
     Ffy = Df * jnp.sin(Cf * jnp.arctan(Bf * alphaf))
     Fry = Dr * jnp.sin(Cr * jnp.arctan(Br * alphar))
 
-    Frx = mass * acc * (Ce - Cm * vx) - Cro - Cd * (vx * vx)
+    Frx = mass * pwm * Ce - Cro - Cd * (vx * vx)
 
     dx0 = (vx * jnp.cos(psi)) - (vy * jnp.sin(psi))
     dx1 = (vx * jnp.sin(psi)) + (vy * jnp.cos(psi))
@@ -148,7 +148,7 @@ def diffequation_nojit(bank_params, known_params, x, u):
     """Pure dynamic Pacejka model - no blending needed (no autodiff)"""
     g = 9.81
 
-    acc = u[0]
+    pwm = u[0]
     steer = u[1]
     psi = x[2]
     vx = x[3]
@@ -166,7 +166,7 @@ def diffequation_nojit(bank_params, known_params, x, u):
     Ffy = Df * jnp.sin(Cf * jnp.arctan(Bf * alphaf))
     Fry = Dr * jnp.sin(Cr * jnp.arctan(Br * alphar))
 
-    Frx = mass * acc * (Ce - Cm * vx) - Cro - Cd * (vx * vx)
+    Frx = mass * pwm * Ce - Cro - Cd * (vx * vx)
 
     dx0 = (vx * jnp.cos(psi)) - (vy * jnp.sin(psi))
     dx1 = (vx * jnp.sin(psi)) + (vy * jnp.cos(psi))

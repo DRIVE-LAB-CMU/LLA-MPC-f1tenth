@@ -18,11 +18,11 @@ jax.config.update('jax_persistent_cache_min_compile_time_secs', 0)
 jax.config.update("jax_log_compiles", True)
 import jax.numpy as jnp
 
-from llampc.cbf_pacejka_qp import  _f_xdot
+from llampc.cbf_gen import cbf_qp_pacejka
 
 from llampc.nmpc_gen_pwm import setup_mpc
 from llampc.params import F110, F110_sim, get_param_dict
-from llampc.planner import get_reference_trajectory_segment
+from llampc.planner import get_reference_trajectory_segment, get_lookahead_point
 from llampc.utils import Track
 
 import llampc.rollout.history as history
@@ -130,6 +130,9 @@ class MPCNode(Node):
         self.lla_predict_horizon = 0.04
         self.lla_reset_interval = 0
         self.lla_reset_counter = 0
+        
+        self.min_pwm = 0.05
+        self.max_pwm = 0.5
         
         self.obstacles = [
             (np.array([1.5, 1.3]), 0.08),
@@ -507,7 +510,7 @@ class MPCNode(Node):
 
         # start solver
         self.current_state = None
-        self.solver = setup_mpc(self.N, self.Tf, build=True)
+        # self.solver = setup_mpc(self.N, self.Tf, build=True)
         self.get_logger().info("SOLVER COMPILED, WARM STARTING")
         
         self.lb_history.predict_states(
@@ -547,7 +550,34 @@ class MPCNode(Node):
         self.current_state = np.array([x, y, phi, vx, vy, omega])
 
         # self.get_logger().info(f"Logging State {self.current_state}")
+        
+    def pure_pursuit_control(self, state, ref_point):
+        x, y, psi = state[0], state[1], state[2]
 
+
+        dx = ref_point[0] - x
+        dy = ref_point[1] - y
+        local_x =  np.cos(psi) * dx + np.sin(psi) * dy
+        local_y = -np.sin(psi) * dx + np.cos(psi) * dy
+
+        goal_dist = np.sqrt(local_x**2 + local_y**2)
+
+        if goal_dist < 0.1:
+            steer = 0.0
+        else:
+            numerator   = 2.0 * local_y
+            denominator = goal_dist**2
+            steer = float(np.clip(
+                np.arctan2(numerator, denominator),
+                self.params_car['min_steer'], self.params_car['max_steer']
+            ))
+
+        # velocity-scaled pwm: slow down on sharp turns
+        scale = self.max_pwm - self.min_pwm
+        pwm   = float(self.min_pwm + scale * np.sqrt(1.0 - abs(steer / self.params_car['max_steer'])))
+
+        return np.array([pwm, steer])
+    
     def control_callback(self):
         # print(self.track)
         
@@ -594,13 +624,14 @@ class MPCNode(Node):
         ### GET REF TRAJECTORY AND MODEL FOR ROLLOUT
 
         # no need to copy states and trajectory in case of update b/c node is single thread
-        ref_segment, idx = get_reference_trajectory_segment(x0, v0, self.track, self.N+1, self.dt, self.projidx)
+        # ref_segment, idx = get_reference_trajectory_segment(x0, v0, self.track, self.N+1, self.dt, self.projidx)
+        ref_point, idx = get_lookahead_point(self.current_state, self.track, self.projidx, lookahead_dist = 0.5)
         self.projidx = idx
 
-        record_ref_trajectory = []
-        if self.publish_trajectories:
-            record_ref_trajectory = ref_segment.T
-            self.publish_ref_trajectory(ref_segment)
+        # record_ref_trajectory = []
+        # if self.publish_trajectories:
+        #     record_ref_trajectory = ref_segment.T
+        #     self.publish_ref_trajectory(ref_segment)
             # print(f"REF: {ref_segment}")
 
         self.checkpoint[2] = time.perf_counter_ns()
@@ -630,42 +661,42 @@ class MPCNode(Node):
         
         ########################################################
         #### SETUP AND SOLVE MPC
-        filtered_state = self.current_state.copy()
-        if( np.abs(self.current_state[3]) < 0.01):
-            filtered_state[3] = 0.1
+        # filtered_state = self.current_state.copy()
+        # if( np.abs(self.current_state[3]) < 0.01):
+        #     filtered_state[3] = 0.1
 
         
-        # filtered_state[2] = (filtered_state[2] + np.pi) % (2 * np.pi) - np.pi
+        # # filtered_state[2] = (filtered_state[2] + np.pi) % (2 * np.pi) - np.pi
 
-        aug_state = np.concatenate([filtered_state, self.last_control])
-        print(aug_state)
-        self.solver.set(0, "lbx", aug_state)
-        self.solver.set(0, "ubx", aug_state)
-        def construct_params(N, selected_model_params, ref_segment):
-            full_params = np.zeros((N+1, 20), np.float64)
-            full_params[:, :12] = selected_model_params
-            # self.get_logger().info(f"{full_params}")
-            full_params[:, 12:12+6] = ref_segment[:6, :N+1].T #reference x, y, theta
-            return full_params
+        # aug_state = np.concatenate([filtered_state, self.last_control])
+        # print(aug_state)
+        # self.solver.set(0, "lbx", aug_state)
+        # self.solver.set(0, "ubx", aug_state)
+        # def construct_params(N, selected_model_params, ref_segment):
+        #     full_params = np.zeros((N+1, 20), np.float64)
+        #     full_params[:, :12] = selected_model_params
+        #     # self.get_logger().info(f"{full_params}")
+        #     full_params[:, 12:12+6] = ref_segment[:6, :N+1].T #reference x, y, theta
+        #     return full_params
         
-        full_params = construct_params(self.N, selected_model_params, ref_segment)
+        # full_params = construct_params(self.N, selected_model_params, ref_segment)
 
-        for i in range(self.N+1):
-            self.solver.set(i, "p", full_params[i])
+        # for i in range(self.N+1):
+        #     self.solver.set(i, "p", full_params[i])
 
-            if(i == 0 or self.first_control):
-                self.solver.set(i, "x", aug_state)
+        #     if(i == 0 or self.first_control):
+        #         self.solver.set(i, "x", aug_state)
 
-        if(self.first_control):
-            self.first_control = False
+        # if(self.first_control):
+        #     self.first_control = False
             
         self.checkpoint[3]= time.perf_counter_ns()
 
         # print("DEBUG STATE:", aug_state)
         # print("DEBUG PARAMS NODE 0:", full_params[0])
 
-        status = self.solver.solve()
-        self.solver.print_statistics()
+        # status = self.solver.solve()
+        # self.solver.print_statistics()
 
         # if status != 0:
         #     self.get_logger().warn(f"MPC solver failed with status: {status}. Resetting memory!")
@@ -679,11 +710,13 @@ class MPCNode(Node):
         #         self.solver.set(i, "u", np.zeros(2))
 
         # status = self.solver.solve()
+        
+        u_opt = self.pure_pursuit_control(self.current_state, ref_point)
 
 
         self.checkpoint[4] = time.perf_counter_ns()
 
-        u_opt = self.solver.get(1, "x")[-2:] # acceleration, delta
+        # u_opt = self.solver.get(1, "x")[-2:] # pwm, delta
         # solved_node = self.solver.get(1, "x")
         
         u_nom_cbf = np.array([u_opt[1], u_opt[0]])  # [steer, pwm]
