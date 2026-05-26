@@ -84,7 +84,7 @@ def F110():
 		}
 	return params
 
-def get_param_dict(mean_dict, variation_dict, num_models, ground_truth = False):
+def get_param_dict_random(mean_dict, variation_dict, num_models, ground_truth = False):
 	param_dict = {}
 	for key in variation_dict.keys():
 		param_dict[key] = mean_dict[key] + (np.random.uniform(-variation_dict[key], variation_dict[key], num_models))
@@ -95,3 +95,46 @@ def get_param_dict(mean_dict, variation_dict, num_models, ground_truth = False):
 			param_array[0] = mean_dict[key]
 			
 	return param_dict
+
+
+def get_param_dict_grid(mean_dict, variation_dict, discretization, ground_truth = False):
+	param_dict = {}
+ 
+	key_list = list(mean_dict.keys())
+	
+	if(ground_truth):
+		for key in key_list:
+			param_dict[key] = [mean_dict[key]]
+	else:
+		for key in key_list:
+			param_dict[key] = []
+     
+	param_grid_recurse({}, param_dict, mean_dict, variation_dict, discretization, key_list, 0)
+			
+	for key in key_list:
+		param_dict[key] = np.array(param_dict[key])
+  
+	return param_dict
+
+def param_grid_recurse(model, param_dict, mean_dict, variation_dict, discretization, key_list, index):
+    if(index >= len(key_list)):
+        for key in model.keys():
+            param_dict[key].append(model[key])
+        return
+    
+    key = key_list[index]
+    if(discretization[key] <= 1):
+        model[key] = mean_dict[key]
+        param_grid_recurse(model, param_dict, mean_dict, variation_dict, discretization, key_list, index+1)
+    else:
+        interval = (2 * variation_dict[key]) / (discretization[key] -1)
+        for i in range(discretization[key]):
+            model[key] = (mean_dict[key] - variation_dict[key]) + interval * i
+            param_grid_recurse(model, param_dict, mean_dict, variation_dict, discretization, key_list, index+1)
+            
+            
+            
+        
+    
+    
+    

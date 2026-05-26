@@ -18,7 +18,7 @@ jax.config.update("jax_log_compiles", True)
 import jax.numpy as jnp
 
 from llampc.nmpc_gen import setup_mpc
-from llampc.params import F110, F110_sim, get_param_dict
+from llampc.params import F110, F110_sim, get_param_dict_random
 from llampc.planner import get_reference_trajectory_segment
 from llampc.utils import Track
 
@@ -181,7 +181,7 @@ class MPCNode(Node):
         
         num_models = 2000
         self.state_size = 6
-        param_dict = get_param_dict(mean_dict, variation_dict, num_models, ground_truth=True)
+        param_dict = get_param_dict_random(mean_dict, variation_dict, num_models, ground_truth=True)
         
         self.get_logger().info("Dynamics bank starting")
 
@@ -245,7 +245,7 @@ class MPCNode(Node):
         
         num_models = 1
         self.state_size = 6
-        param_dict = get_param_dict(mean_dict, variation_dict, num_models, ground_truth=True)
+        param_dict = get_param_dict_random(mean_dict, variation_dict, num_models, ground_truth=True)
 
         self.dynamics_bank = dynamics.DBMPacejkaBank(
             params_car['lf'], params_car['lr'], 
@@ -300,7 +300,7 @@ class MPCNode(Node):
         
         num_models = 6000
         self.state_size = 6
-        param_dict = get_param_dict(mean_dict, variation_dict, num_models)
+        param_dict = get_param_dict_random(mean_dict, variation_dict, num_models)
 
         self.dynamics_bank = dynamics_rp.DBMPacejkaBankRP(
             params_car['lf'], params_car['lr'], 
@@ -341,7 +341,7 @@ class MPCNode(Node):
         num_models = 10
         self.state_size = 7
 
-        param_dict = get_param_dict(mean_dict, variation_dict, num_models)
+        param_dict = get_param_dict_random(mean_dict, variation_dict, num_models)
         self.dynamics_bank = dynamics_sim.DynamicSimBank(
             params_car['lf'], params_car['lr'],
             params_car['m'], params_car['I'],
@@ -396,7 +396,7 @@ class MPCNode(Node):
         
         num_models = 7000
         self.state_size = 6
-        param_dict = get_param_dict(mean_dict, variation_dict, num_models)
+        param_dict = get_param_dict_random(mean_dict, variation_dict, num_models)
 
         self.dynamics_bank = dynamics_full.DBMPacejkaBank(
             params_car['lf'], params_car['lr'], 
