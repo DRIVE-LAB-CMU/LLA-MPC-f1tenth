@@ -248,34 +248,35 @@ def export_model(params_car, linear = False):
     model.x = x
     model.u = u
     model.p = ca.vertcat(p, x_ref)
+    model.a_long_expr = dx3
 
-    print("\n--- CASADI PRE-SOLVE DIAGNOSTIC ---")
-    # Create a temporary CasADi function to evaluate your dynamics
-    try:
-        test_dyn_func = ca.Function('test_dyn', [model.x, model.u, model.p], [model.f_expl_expr])
+    # print("\n--- CASADI PRE-SOLVE DIAGNOSTIC ---")
+    # # Create a temporary CasADi function to evaluate your dynamics
+    # try:
+    #     test_dyn_func = ca.Function('test_dyn', [model.x, model.u, model.p], [model.f_expl_expr])
         
-        # Setup a realistic initial condition (e.g., vx = 5.0 m/s to avoid division by zero)
-        x_test = np.array([0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0]) # x, y, yaw, vx, vy, omega, a, steer
-        u_test = np.array([0.0, 0.0]) # jerk, steer_rate
+    #     # Setup a realistic initial condition (e.g., vx = 5.0 m/s to avoid division by zero)
+    #     x_test = np.array([0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0]) # x, y, yaw, vx, vy, omega, a, steer
+    #     u_test = np.array([0.0, 0.0]) # jerk, steer_rate
         
-        # Generate dummy parameters (Make sure this perfectly matches the length of model.p!)
-        # Assuming p has your params + 8 x_ref values
-        p_len = model.p.shape[0]
-        p_test = np.ones(p_len) * 0.1 
-        p_test[-8:] = x_test # Set x_ref to match x_test
+    #     # Generate dummy parameters (Make sure this perfectly matches the length of model.p!)
+    #     # Assuming p has your params + 8 x_ref values
+    #     p_len = model.p.shape[0]
+    #     p_test = np.ones(p_len) * 0.1 
+    #     p_test[-8:] = x_test # Set x_ref to match x_test
         
-        # Evaluate
-        dx_eval = test_dyn_func(x_test, u_test, p_test)
-        print("Dynamics evaluated at v_x = 5.0:")
-        print(dx_eval)
+    #     # Evaluate
+    #     dx_eval = test_dyn_func(x_test, u_test, p_test)
+    #     print("Dynamics evaluated at v_x = 5.0:")
+    #     print(dx_eval)
         
-        if np.any(np.isnan(dx_eval)) or np.any(np.isinf(dx_eval)):
-            print("CRITICAL: Your CasADi dynamics evaluate to NaN/Inf. The solver is dead on arrival.")
-        else:
-            print("CasADi math is sound. The issue is in the Acados QP/Constraints.")
-    except Exception as e:
-        print(f"CasADi Function creation failed: {e}")
-    print("-----------------------------------\n")
+    #     if np.any(np.isnan(dx_eval)) or np.any(np.isinf(dx_eval)):
+    #         print("CRITICAL: Your CasADi dynamics evaluate to NaN/Inf. The solver is dead on arrival.")
+    #     else:
+    #         print("CasADi math is sound. The issue is in the Acados QP/Constraints.")
+    # except Exception as e:
+    #     print(f"CasADi Function creation failed: {e}")
+    # print("-----------------------------------\n")
 
     return model
 
@@ -314,13 +315,14 @@ def create_ocp(model, params_car, steps, horizon):
     
     w_slew = 0    
     w_steer_v = 0.01
-    
-    Q_flat = [w_x, w_y, w_theta, w_vel, 0, 0, w_pwm, w_steer]
+    w_a_long = 0.0
+      
+    Q_flat = [w_x, w_y, w_theta, w_vel, 0, 0, w_pwm, w_steer, w_a_long]
     R_flat = [w_slew, w_steer_v]
 
     Q = np.diag(Q_flat) # nx, for trajectory deviation 6x6
     R = np.diag(R_flat)  # nu, for control smoothness 2x2
-    Qf = np.diag([w_xe, w_ye, 0, 0, 0, 0, 0,0])  # Now size 8x8
+    Qf = np.diag([w_xe, w_ye, 0, 0, 0, 0, 0,0, 0])  # Now size 8x8
 
     ocp.cost.W = np.diag(np.concatenate((Q_flat, R_flat))) #nx, nu, nu, 10x10
     ocp.cost.W_e = Qf
@@ -329,8 +331,8 @@ def create_ocp(model, params_car, steps, horizon):
     x = model.x
     u = model.u
 
-    ny = nx + nu # running dimensions
-    ny_e = nx #terminal dimension
+    ny = nx + nu + 1# running dimensions
+    ny_e = nx + 1 #terminal dimension
 
     ocp.dims.ny = ny
     ocp.dims.ny_e = ny_e
@@ -340,6 +342,8 @@ def create_ocp(model, params_car, steps, horizon):
 
     yaw_err = x[2] - x_ref[2]
     yaw_err_wrapped = ca.atan2(ca.sin(yaw_err), ca.cos(yaw_err))
+    
+    a_long = model.a_long_expr
 
     ocp.model.cost_y_expr = ca.vertcat(
         x[0] - x_ref[0],   # x
@@ -348,8 +352,9 @@ def create_ocp(model, params_car, steps, horizon):
         x[3] - x_ref[3],   # vx
         x[4] - x_ref[4],   # vy
         x[5] - x_ref[5],   # omega
-        x[6] - x_ref[6],   # accel
+        x[6] - x_ref[6],   # pwm
         x[7] - x_ref[7],   # steer
+        a_long,
         u
     )
     ocp.model.cost_y_expr_e = ca.vertcat(
@@ -359,8 +364,9 @@ def create_ocp(model, params_car, steps, horizon):
         x[3] - x_ref[3],   # vx
         x[4] - x_ref[4],   # vy
         x[5] - x_ref[5],   # omega
-        x[6] - x_ref[6],   # accel
+        x[6] - x_ref[6],   # pwm
         x[7] - x_ref[7],   # steer
+        a_long
     )
     
     ocp.model.p = model.p  # Combine with existing parameters

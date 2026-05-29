@@ -20,7 +20,7 @@ import jax.numpy as jnp
 
 
 from llampc.nmpc_gen_pwm import setup_mpc
-from llampc.params import F110, F110_sim, get_param_dict_random
+from llampc.params import F110, F110_sim, get_param_dict_random, get_param_dict_grid
 from llampc.planner import get_reference_trajectory_segment
 from llampc.utils import Track
 
@@ -117,9 +117,9 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'mocap_square2.npz')
-        self.declare_parameter('odom_topic', '/odometry/filtered')
-        #self.declare_parameter('odom_topic', '/odom')
+        self.declare_parameter('track_file_name', 'blevel_circle.npz')
+        # self.declare_parameter('odom_topic', '/odometry/filtered')
+        self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 15 #steps (for nmpc)
@@ -212,6 +212,8 @@ class MPCNode(Node):
                 'Cm': 0.0,  # motor speed saturation
             }
         
+        
+        
         # variation_dict = {
         #         'Bf': 0,   # 15% variation
         #         'Br': 0,   # 15% variation
@@ -226,11 +228,30 @@ class MPCNode(Node):
         #     }
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
         
-        num_models = 1
-        self.state_size = 6
-        param_dict = get_param_dict_random(mean_dict, variation_dict, num_models, ground_truth=True)
+        # random selection
+        # num_models = 1
+        # param_dict = get_param_dict_random(mean_dict, variation_dict, num_models, ground_truth=True)
+        
+        # grid discretization
+        discretization_dict = {
+            'Bf': 4,   # 15% variation
+            'Br': 4,   # 15% variation
+            'Cf': 3,   # 15% variation
+            'Cr': 3,   # 15% variation
+            'Df': 4,   # 15% variation
+            'Dr': 4,   # 15% variation
+            'Cro':1, # 15% variation
+            'Cd': 1,  # assume negligible drag
+            'Ce': 1,  # motor efficiency conversion should never be above 1
+            'Cm': 1,  # motor speed saturation
+        }
+        param_dict = get_param_dict_grid(mean_dict, variation_dict, discretization=discretization_dict, ground_truth=True)
+        num_models = len(param_dict['Bf'])
         
         self.get_logger().info("Dynamics bank starting")
+        
+        
+        self.state_size = 6
 
         self.dynamics_bank = dynamics.DBMPacejkaBank(
             params_car['lf'], params_car['lr'], 
@@ -312,7 +333,6 @@ class MPCNode(Node):
             self.state_size, rk4Factory,
             self.dynamics_bank, dynamics.diffequation
         )
-
 
     def rp_setup(self):
         self.get_logger().info("Roll Pitch MPC Initialized")
@@ -464,7 +484,6 @@ class MPCNode(Node):
             self.state_size, rk4Factory,
             self.dynamics_bank, dynamics_full.diffequation
         )
-
 
     def initialize_mpc(self):
         variation_dict = None
@@ -685,8 +704,6 @@ class MPCNode(Node):
         mpc_controls = []
         
         if(self.publish_trajectories):
-            
-            
             for i in range(self.N + 1):
                 x_pred = self.solver.get(i, "x")[:6]
                 mpc_states.append(x_pred)
@@ -749,16 +766,11 @@ class MPCNode(Node):
                 print(np.max(self.time_history*1e-6, axis = 1))
         else:
             print(f"\n--- SOLVER FAILED WITH STATUS {status} ---")
-            # Status codes: 0=success, 1=failure, 2=max iter, 3=MINLP fail, 4=QP solver failed
-            
-            # 1. Print internal solver statistics
+
             self.solver.print_statistics()
-            
-            # 2. Check maximum residuals (stationarity, eq constraints, ineq constraints, comp)
             residuals = self.solver.get_residuals()
             print(f"Max Residuals (stat, eq, ineq, comp): {residuals}")
             
-            # 3. Trace the states node-by-node to find where the math exploded
             N = self.solver.acados_ocp.dims.N
             print("\n--- NODE TRAJECTORY DUMP ---")
             for i in range(N + 1):
@@ -770,7 +782,7 @@ class MPCNode(Node):
                     if i > 0:
                         u_prev = self.solver.get(i-1, "u")
                         print(f">>> Control applied at Node {i-1}: {u_prev} <<<")
-                    break # Stop reading after first explosion
+                    break
                     
             print("-----------------------------------\n")
             drive_msg = AckermannDriveStamped()
@@ -778,12 +790,10 @@ class MPCNode(Node):
             drive_msg.drive.steering_angle = 0.0
             self.cmd_pub.publish(drive_msg)
             
-            # Reset internal memory safely
             self.last_drive_command = np.array([0.0, 0.0])
             self.last_control = np.array([0.0, 0.0])
             self.get_logger().warn(f"MPC solver failed with status: {status}")
 
-            # self.first_control = True
 
 
     def publish_ref_trajectory(self, ref_trajectory):
@@ -805,9 +815,7 @@ class MPCNode(Node):
         """Apply optimal control to the vehicle"""
         # acceleration = float(u_opt[0])
         desired_v = self.solver.get(1, 'x')[3]
-        # for i in range(20):
-        #     print(f"sol: {self.solver.get(i, 'x')}")
-        # accel = float(u_opt[0])
+
         pwm = float(u_opt[0])
         steer = float(u_opt[1])
         
