@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import numpy as np
-from llampc.llampc.cbf_gen import cbf_qp_pacejka
 import rclpy
 from rclpy.node import Node
 from rclpy.time import Time
@@ -130,9 +129,11 @@ class MPCNode(Node):
         self.lla_predict_horizon = 0.04
         self.lla_reset_interval = 0
         self.lla_reset_counter = 0
+        self.r_car = 0.04
         
         self.min_pwm = 0.05
         self.max_pwm = 0.5
+        self.params_car = F110()
         
         self.obstacles = [
             (np.array([1.5, 1.3]), 0.08),
@@ -628,7 +629,7 @@ class MPCNode(Node):
         ref_point, idx = get_lookahead_point(self.current_state, self.track, self.projidx, lookahead_dist = 0.5)
         self.projidx = idx
 
-        # record_ref_trajectory = []
+        record_ref_trajectory = []
         # if self.publish_trajectories:
         #     record_ref_trajectory = ref_segment.T
         #     self.publish_ref_trajectory(ref_segment)
@@ -638,6 +639,7 @@ class MPCNode(Node):
         
         selected_model_params = None
         if self.sim:
+            selected_model_index = -1
             selected_model_params = np.array([
                 15.0,
                 15.0,
@@ -749,12 +751,12 @@ class MPCNode(Node):
         mpc_states = []
         mpc_controls = []
         
-        if(self.publish_trajectories):
+        # if(self.publish_trajectories):
             
             
-            for i in range(self.N + 1):
-                x_pred = self.solver.get(i, "x")[:6]
-                mpc_states.append(x_pred)
+        #     for i in range(self.N + 1):
+        #         x_pred = self.solver.get(i, "x")[:6]
+        #         mpc_states.append(x_pred)
                 
                 # c_pred = self.solver.get(i, "x")[-2:]
                 # mpc_controls.append(c_pred)
@@ -764,7 +766,7 @@ class MPCNode(Node):
                 # print(f"PREDICTED STATES: {predicted_states}")
                 # print(f"PREDICTED CONTROLS: {predicted_controls}")
                 
-            self.publish_predicted_trajectory(mpc_states) # Publish predicted trajectory
+            # self.publish_predicted_trajectory(mpc_states) # Publish predicted trajectory
             
         self.log_lla_data(selected_model_params, selected_model_index, mpc_states, record_ref_trajectory)
 
@@ -777,76 +779,76 @@ class MPCNode(Node):
 
         #########################################
         ### PUBLISH MPC DATA
-        if status == 0:  # Success
-            # Get optimal control
-            self.apply_control(u_opt) # Apply control
-            # self.get_logger().info(f"Logging control {u_opt}")
-            if not self.sim:
-                #version for our dynamics
-                self.checkpoint[5] = time.perf_counter_ns()
-                self.lb_history.predict_states(
-                    self.current_state, u_opt, self.lla_reset_counter == 0
-                )
-                self.checkpoint[6] = time.perf_counter_ns()
-                
-            else:
-                steer_v = self.solver.get(0, "u")[1]
-                self.lb_history.predict_states(
-                    np.array(
-                        [
-                            self.current_state[0],
-                            self.current_state[1],
-                            self.current_state[2],
-                            self.current_state[3],
-                            np.arctan2(self.current_state[4], self.current_state[3]),
-                            self.current_state[5], 
-                            self.last_control[1]
-                        ]
-                    ),
-                    np.array([u_opt[0], steer_v]) 
-                )
-
-            self.count = (self.count + 1) % self.time_window
-            self.time_history[:self.checkpoints-1, self.count] = np.array(self.checkpoint[1:]-self.checkpoint[:-1])
-            self.time_history[-1, self.count] = (self.checkpoint[-1] - self.checkpoint[0])
-        
-            if(self.count == 0):
-                print(np.max(self.time_history*1e-6, axis = 1))
+        # if status == 0:  # Success
+        # Get optimal control
+        self.apply_control(u_opt) # Apply control
+        # self.get_logger().info(f"Logging control {u_opt}")
+        if not self.sim:
+            #version for our dynamics
+            self.checkpoint[5] = time.perf_counter_ns()
+            self.lb_history.predict_states(
+                self.current_state, u_opt, self.lla_reset_counter == 0
+            )
+            self.checkpoint[6] = time.perf_counter_ns()
+            
         else:
-            print(f"\n--- SOLVER FAILED WITH STATUS {status} ---")
-            # Status codes: 0=success, 1=failure, 2=max iter, 3=MINLP fail, 4=QP solver failed
+            # steer_v = self.solver.get(0, "u")[1]
+            self.lb_history.predict_states(
+                np.array(
+                    [
+                        self.current_state[0],
+                        self.current_state[1],
+                        self.current_state[2],
+                        self.current_state[3],
+                        np.arctan2(self.current_state[4], self.current_state[3]),
+                        self.current_state[5], 
+                        self.last_control[1]
+                    ]
+                ),
+                np.array([u_opt[0], steer_v]) 
+            )
+
+        self.count = (self.count + 1) % self.time_window
+        self.time_history[:self.checkpoints-1, self.count] = np.array(self.checkpoint[1:]-self.checkpoint[:-1])
+        self.time_history[-1, self.count] = (self.checkpoint[-1] - self.checkpoint[0])
+    
+        if(self.count == 0):
+            print(np.max(self.time_history*1e-6, axis = 1))
+        # else:
+        #     print(f"\n--- SOLVER FAILED WITH STATUS {status} ---")
+        #     # Status codes: 0=success, 1=failure, 2=max iter, 3=MINLP fail, 4=QP solver failed
             
-            # 1. Print internal solver statistics
-            self.solver.print_statistics()
+        #     # 1. Print internal solver statistics
+        #     self.solver.print_statistics()
             
-            # 2. Check maximum residuals (stationarity, eq constraints, ineq constraints, comp)
-            residuals = self.solver.get_residuals()
-            print(f"Max Residuals (stat, eq, ineq, comp): {residuals}")
+        #     # 2. Check maximum residuals (stationarity, eq constraints, ineq constraints, comp)
+        #     residuals = self.solver.get_residuals()
+        #     print(f"Max Residuals (stat, eq, ineq, comp): {residuals}")
             
-            # 3. Trace the states node-by-node to find where the math exploded
-            N = self.solver.acados_ocp.dims.N
-            print("\n--- NODE TRAJECTORY DUMP ---")
-            for i in range(N + 1):
-                x_i = self.solver.get(i, "x")
-                print(f"Node {i} | State: {np.round(x_i, 3)}")
+        #     # 3. Trace the states node-by-node to find where the math exploded
+        #     N = self.solver.acados_ocp.dims.N
+        #     print("\n--- NODE TRAJECTORY DUMP ---")
+        #     for i in range(N + 1):
+        #         x_i = self.solver.get(i, "x")
+        #         print(f"Node {i} | State: {np.round(x_i, 3)}")
                 
-                if np.any(np.isnan(x_i)) or np.any(np.isinf(x_i)):
-                    print(f">>> FATAL ERROR: NaN/Inf detected at Node {i} <<<")
-                    if i > 0:
-                        u_prev = self.solver.get(i-1, "u")
-                        print(f">>> Control applied at Node {i-1}: {u_prev} <<<")
-                    break # Stop reading after first explosion
+        #         if np.any(np.isnan(x_i)) or np.any(np.isinf(x_i)):
+        #             print(f">>> FATAL ERROR: NaN/Inf detected at Node {i} <<<")
+        #             if i > 0:
+        #                 u_prev = self.solver.get(i-1, "u")
+        #                 print(f">>> Control applied at Node {i-1}: {u_prev} <<<")
+        #             break # Stop reading after first explosion
                     
-            print("-----------------------------------\n")
-            drive_msg = AckermannDriveStamped()
-            drive_msg.drive.speed = 0.0
-            drive_msg.drive.steering_angle = 0.0
-            self.cmd_pub.publish(drive_msg)
+        #     print("-----------------------------------\n")
+        #     drive_msg = AckermannDriveStamped()
+        #     drive_msg.drive.speed = 0.0
+        #     drive_msg.drive.steering_angle = 0.0
+        #     self.cmd_pub.publish(drive_msg)
             
-            # Reset internal memory safely
-            self.last_drive_command = np.array([0.0, 0.0])
-            self.last_control = np.array([0.0, 0.0])
-            self.get_logger().warn(f"MPC solver failed with status: {status}")
+        #     # Reset internal memory safely
+        #     self.last_drive_command = np.array([0.0, 0.0])
+        #     self.last_control = np.array([0.0, 0.0])
+        #     self.get_logger().warn(f"MPC solver failed with status: {status}")
 
             # self.first_control = True
 
@@ -869,7 +871,7 @@ class MPCNode(Node):
     def apply_control(self, u_opt):
         """Apply optimal control to the vehicle"""
         # acceleration = float(u_opt[0])
-        desired_v = self.solver.get(1, 'x')[3]
+        # desired_v = self.solver.get(1, 'x')[3]
         # for i in range(20):
         #     print(f"sol: {self.solver.get(i, 'x')}")
         # accel = float(u_opt[0])
