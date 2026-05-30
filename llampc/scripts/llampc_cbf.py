@@ -20,7 +20,7 @@ import jax.numpy as jnp
 from llampc.cbf_gen import cbf_qp_pacejka
 
 from llampc.nmpc_gen_pwm import setup_mpc
-from llampc.params import F110, F110_sim, get_param_dict_random
+from llampc.params import F110, F110_sim, get_param_dict_random, get_param_dict_grid
 from llampc.planner import get_reference_trajectory_segment, get_lookahead_point
 from llampc.utils import Track
 
@@ -136,8 +136,7 @@ class MPCNode(Node):
         self.params_car = F110()
         
         self.obstacles = [
-            (np.array([1.5, 1.3]), 0.08),
-            (np.array([2.0, 1.0]), 0.06),
+            (np.array([.75, -.25]), 0.05),
         ]
 
 
@@ -223,6 +222,8 @@ class MPCNode(Node):
                 'Cm': 0.0,  # motor speed saturation
             }
         
+        
+        
         # variation_dict = {
         #         'Bf': 0,   # 15% variation
         #         'Br': 0,   # 15% variation
@@ -237,9 +238,25 @@ class MPCNode(Node):
         #     }
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
         
-        num_models = 1
-        self.state_size = 6
-        param_dict = get_param_dict_random(mean_dict, variation_dict, num_models, ground_truth=True)
+        # random selection
+        # num_models = 1
+        # param_dict = get_param_dict_random(mean_dict, variation_dict, num_models, ground_truth=True)
+        
+        # grid discretization
+        discretization_dict = {
+            'Bf': 4,   # 15% variation
+            'Br': 4,   # 15% variation
+            'Cf': 3,   # 15% variation
+            'Cr': 3,   # 15% variation
+            'Df': 4,   # 15% variation
+            'Dr': 4,   # 15% variation
+            'Cro':1, # 15% variation
+            'Cd': 1,  # assume negligible drag
+            'Ce': 1,  # motor efficiency conversion should never be above 1
+            'Cm': 1,  # motor speed saturation
+        }
+        param_dict = get_param_dict_grid(mean_dict, variation_dict, discretization=discretization_dict, ground_truth=True)
+        num_models = len(param_dict['Bf'])
         
         self.get_logger().info("Dynamics bank starting")
 
@@ -526,7 +543,7 @@ class MPCNode(Node):
         self.get_logger().info("LLA BANK COMPILED")
 
     def odom_callback(self, msg):    
-        print("hello")    
+        # print("hello")    
         x = msg.pose.pose.position.x
         y = msg.pose.pose.position.y
         
@@ -555,9 +572,10 @@ class MPCNode(Node):
     def pure_pursuit_control(self, state, ref_point):
         x, y, psi = state[0], state[1], state[2]
 
-
         dx = ref_point[0] - x
         dy = ref_point[1] - y
+        
+        # Transform goal to vehicle local frame
         local_x =  np.cos(psi) * dx + np.sin(psi) * dy
         local_y = -np.sin(psi) * dx + np.cos(psi) * dy
 
@@ -566,8 +584,11 @@ class MPCNode(Node):
         if goal_dist < 0.1:
             steer = 0.0
         else:
-            numerator   = 2.0 * local_y
+            # You must include the wheelbase to convert curvature to a steering angle!
+            wheelbase   = self.params_car['lf']+self.params_car['lr'] # Fallback to 0.33m if missing
+            numerator   = 2.0 * wheelbase * local_y
             denominator = goal_dist**2
+            
             steer = float(np.clip(
                 np.arctan2(numerator, denominator),
                 self.params_car['min_steer'], self.params_car['max_steer']
@@ -584,7 +605,7 @@ class MPCNode(Node):
         
         self.checkpoint[0] = time.perf_counter_ns()
 
-        print(self.current_state)
+        # print(self.current_state)
 
         if self.track is None or self.current_state is None:
             return
@@ -626,14 +647,14 @@ class MPCNode(Node):
 
         # no need to copy states and trajectory in case of update b/c node is single thread
         # ref_segment, idx = get_reference_trajectory_segment(x0, v0, self.track, self.N+1, self.dt, self.projidx)
-        ref_point, idx = get_lookahead_point(self.current_state, self.track, self.projidx, lookahead_dist = 0.5)
+        ref_point, idx = get_lookahead_point(self.current_state, self.track, self.projidx, lookahead_dist = 0.7)
         self.projidx = idx
+        print(f"IDX: {self.projidx}")
 
         record_ref_trajectory = [ref_point]
-        # if self.publish_trajectories:
-        #     record_ref_trajectory = ref_segment.T
-        #     self.publish_ref_trajectory(ref_segment)
-            # print(f"REF: {ref_segment}")
+        if self.publish_trajectories:
+            self.publish_ref_trajectory(ref_point.reshape(-1, 1)) 
+            # print(f"REF: {ref_point}")
 
         self.checkpoint[2] = time.perf_counter_ns()
         
@@ -659,7 +680,7 @@ class MPCNode(Node):
 
         
             
-        print(f"SELECTED PARAMS {selected_model_params}")
+        # print(f"SELECTED PARAMS {selected_model_params}")
         
         ########################################################
         #### SETUP AND SOLVE MPC
@@ -746,7 +767,7 @@ class MPCNode(Node):
         # Swap back to [pwm, steer]
         u_opt = np.array([u_safe[1], u_safe[0]])
 
-        print(f"CONTROL: {u_opt}")
+        # print(f"CONTROL: {u_opt}")
 
         mpc_states = []
         mpc_controls = []
@@ -791,29 +812,29 @@ class MPCNode(Node):
             )
             self.checkpoint[6] = time.perf_counter_ns()
             
-        else:
-            # steer_v = self.solver.get(0, "u")[1]
-            self.lb_history.predict_states(
-                np.array(
-                    [
-                        self.current_state[0],
-                        self.current_state[1],
-                        self.current_state[2],
-                        self.current_state[3],
-                        np.arctan2(self.current_state[4], self.current_state[3]),
-                        self.current_state[5], 
-                        self.last_control[1]
-                    ]
-                ),
-                np.array([u_opt[0], steer_v]) 
-            )
+        # else:
+        #     # steer_v = self.solver.get(0, "u")[1]
+        #     self.lb_history.predict_states(
+        #         np.array(
+        #             [
+        #                 self.current_state[0],
+        #                 self.current_state[1],
+        #                 self.current_state[2],
+        #                 self.current_state[3],
+        #                 np.arctan2(self.current_state[4], self.current_state[3]),
+        #                 self.current_state[5], 
+        #                 self.last_control[1]
+        #             ]
+        #         ),
+        #         np.array([u_opt[0], steer_v]) 
+        #     )
 
         self.count = (self.count + 1) % self.time_window
         self.time_history[:self.checkpoints-1, self.count] = np.array(self.checkpoint[1:]-self.checkpoint[:-1])
         self.time_history[-1, self.count] = (self.checkpoint[-1] - self.checkpoint[0])
     
-        if(self.count == 0):
-            print(np.max(self.time_history*1e-6, axis = 1))
+        # if(self.count == 0):
+        #     print(f"TIME: {np.max(self.time_history*1e-6, axis = 1)}")
         # else:
         #     print(f"\n--- SOLVER FAILED WITH STATUS {status} ---")
         #     # Status codes: 0=success, 1=failure, 2=max iter, 3=MINLP fail, 4=QP solver failed
@@ -878,8 +899,8 @@ class MPCNode(Node):
         pwm = float(u_opt[0])
         steer = float(u_opt[1])
         
-        print("PWM")
-        print(pwm)
+        # print("PWM")
+        # print(pwm)
 
         # sensor_velocity = np.sqrt(self.current_state[3] **2 + self.current_state[4]**2)
         
@@ -891,13 +912,13 @@ class MPCNode(Node):
         # print(f"ORIGINAL {self.last_drive_command[0] + accel * self.dt}")
         # print(f"NEW {desired_v}")
         # print(f"NEW_INT {self.current_state[3] + accel * self.dt}")
-        # new_int = self.current_state[3] + accel * self.dt
+        new_int = self.current_state[3] + accel * self.dt
         # old = self.last_drive_command[0] + accel * self.dt
         
         # Convert acceleration to speed command (simple integration)
         # desired_speed = max(0.0, new_int)
 
-        drive_msg.drive.speed = 0.0
+        drive_msg.drive.speed = new_int
         drive_msg.drive.jerk = 1.0
         drive_msg.drive.acceleration = pwm
         drive_msg.drive.steering_angle = steer

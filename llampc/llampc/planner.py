@@ -147,6 +147,13 @@ def get_lookahead_point(x0, track, projidx, lookahead_dist):
 
     search_indices = np.arange(projidx, projidx + 50) % num_pts
     search_window  = raceline[:, search_indices]
+
+    # Skip ahead if the first two points in the window are identical 
+    # to avoid zero-division in projection
+    if np.allclose(search_window[:, 0], search_window[:, 1]):
+        search_indices = (search_indices + 1) % num_pts
+        search_window = raceline[:, search_indices]
+
     _, idx_rel     = track.project_fast(x=x0[0], y=x0[1], raceline=search_window)
     new_projidx    = search_indices[idx_rel]
 
@@ -154,14 +161,14 @@ def get_lookahead_point(x0, track, projidx, lookahead_dist):
         idx = (new_projidx + i) % num_pts
         dp = raceline[:2, idx] - x0[:2]
         if np.linalg.norm(dp) >= lookahead_dist:
-            s     = track.spline.s[idx]
-            xy    = track.spline.calc_position(s)
-            yaw   = track.spline.calc_yaw(s)
+            s = track.spline.s[idx] % track.spline.s[-1]  # wrap to valid range
+            xy  = track.spline.calc_position(s)
+            yaw = track.spline.calc_yaw(s)
             speed = track.spline_v.calc(s)
             return np.array([xy[0], xy[1], yaw, speed, 0.0, 0.0]), new_projidx
 
-    s     = track.spline.s[new_projidx]
-    xy    = track.spline.calc_position(s)
-    yaw   = track.spline.calc_yaw(s)
+    s = track.spline.s[idx] % track.spline.s[-1]  # wrap to valid range
+    xy  = track.spline.calc_position(s)
+    yaw = track.spline.calc_yaw(s)
     speed = track.spline_v.calc(s)
     return np.array([xy[0], xy[1], yaw, speed, 0.0, 0.0]), new_projidx
