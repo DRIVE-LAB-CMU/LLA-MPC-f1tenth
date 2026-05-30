@@ -66,6 +66,7 @@ install(PROGRAMS
   scripts/vesc_safety_bridge.py
   scripts/optitrack_node.py
   scripts/llampc_node.py
+  scripts/llampc_cbf.py
   DESTINATION lib/${PROJECT_NAME}
 )
 if(BUILD_TESTING)

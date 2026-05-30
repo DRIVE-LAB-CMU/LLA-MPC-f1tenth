@@ -152,7 +152,7 @@ def get_lookahead_point(x0, track, projidx, lookahead_dist):
 
     for i in range(num_pts):
         idx = (new_projidx + i) % num_pts
-        dp  = raceline[:2, idx] - x0
+        dp = raceline[:2, idx] - x0[:2]
         if np.linalg.norm(dp) >= lookahead_dist:
             s     = track.spline.s[idx]
             xy    = track.spline.calc_position(s)

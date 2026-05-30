@@ -117,9 +117,9 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'mocap_square2.npz')
-        self.declare_parameter('odom_topic', '/odometry/filtered')
-        #self.declare_parameter('odom_topic', '/odom')
+        self.declare_parameter('track_file_name', 'blevel_circle.npz')
+        # self.declare_parameter('odom_topic', '/odometry/filtered')
+        self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 15 #steps (for nmpc)
@@ -629,7 +629,7 @@ class MPCNode(Node):
         ref_point, idx = get_lookahead_point(self.current_state, self.track, self.projidx, lookahead_dist = 0.5)
         self.projidx = idx
 
-        record_ref_trajectory = []
+        record_ref_trajectory = [ref_point]
         # if self.publish_trajectories:
         #     record_ref_trajectory = ref_segment.T
         #     self.publish_ref_trajectory(ref_segment)
@@ -728,7 +728,7 @@ class MPCNode(Node):
         u_safe, cbf_info = cbf_qp_pacejka(
             x        = self.current_state,   # [px, py, psi, vx, vy, omega]
             u_nom    = u_nom_cbf,
-            lla_params = selected_model_params,
+            lla_params = selected_model_params[:10],
             known_params = self.dynamics_bank.get_known_params(),
             obstacles= self.obstacles,
             r_car    = self.r_car,
@@ -874,7 +874,7 @@ class MPCNode(Node):
         # desired_v = self.solver.get(1, 'x')[3]
         # for i in range(20):
         #     print(f"sol: {self.solver.get(i, 'x')}")
-        # accel = float(u_opt[0])
+        accel = float(u_opt[0])
         pwm = float(u_opt[0])
         steer = float(u_opt[1])
         

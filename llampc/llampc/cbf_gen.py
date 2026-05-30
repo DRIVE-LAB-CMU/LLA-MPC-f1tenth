@@ -42,7 +42,8 @@ def _cbf_psi(x, u, dt, lla_params, known_params, obstacles, r_car, alpha, N):
     """ψ(x, u; θ) = min_{i ∈ 0..N} [ h(x_i(u)) − (1 − α·i·dt)·h(x_0) ].
     Trajectory-min keeps the filter reactive to obstacles the endpoint-
     only check would skip past at speed."""
-    xs = np.asarray(_rollout_traj(lla_params, known_params, x, u, dt, N))
+    xs_rolled = np.asarray(_rollout_traj(lla_params, known_params, x, u, dt, N))
+    xs = np.vstack([x, xs_rolled])  # shape (N+1, 6), xs[0]=x, xs[1..N]=rollout
     h_now = _h_min(x, obstacles, r_car)
     psis = np.empty(N + 1)
     for i in range(N + 1):
