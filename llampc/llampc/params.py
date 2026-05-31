@@ -110,7 +110,7 @@ def get_param_dict_grid(mean_dict, variation_dict, discretization, ground_truth 
 			param_dict[key] = []
 	
 	if(noadapt):
-		return
+		return param_dict
      
 	param_grid_recurse({}, param_dict, mean_dict, variation_dict, discretization, key_list, 0)
 			
