@@ -245,7 +245,9 @@ class MPCNode(Node):
             'Ce': 1,  # motor efficiency conversion should never be above 1
             'Cm': 1,  # motor speed saturation
         }
-        param_dict = get_param_dict_grid(mean_dict, variation_dict, discretization=discretization_dict, ground_truth=True)
+        param_dict = get_param_dict_grid(mean_dict, variation_dict, 
+                                         discretization=discretization_dict, ground_truth=True
+                                         noadapt=False)
         num_models = len(param_dict['Bf'])
         
         self.get_logger().info("Dynamics bank starting")

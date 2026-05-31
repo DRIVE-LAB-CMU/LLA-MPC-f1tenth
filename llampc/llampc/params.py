@@ -97,7 +97,7 @@ def get_param_dict_random(mean_dict, variation_dict, num_models, ground_truth = 
 	return param_dict
 
 
-def get_param_dict_grid(mean_dict, variation_dict, discretization, ground_truth = False):
+def get_param_dict_grid(mean_dict, variation_dict, discretization, ground_truth = False, noadapt=False):
 	param_dict = {}
  
 	key_list = list(mean_dict.keys())
@@ -108,6 +108,9 @@ def get_param_dict_grid(mean_dict, variation_dict, discretization, ground_truth 
 	else:
 		for key in key_list:
 			param_dict[key] = []
+	
+	if(noadapt):
+		return
      
 	param_grid_recurse({}, param_dict, mean_dict, variation_dict, discretization, key_list, 0)
 			
