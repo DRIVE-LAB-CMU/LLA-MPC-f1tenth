@@ -110,6 +110,8 @@ def get_param_dict_grid(mean_dict, variation_dict, discretization, ground_truth 
 			param_dict[key] = []
 	
 	if(noadapt):
+		for key in key_list:
+			param_dict[key] = np.array(param_dict[key])
 		return param_dict
      
 	param_grid_recurse({}, param_dict, mean_dict, variation_dict, discretization, key_list, 0)
