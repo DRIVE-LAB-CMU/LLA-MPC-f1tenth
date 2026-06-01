@@ -136,7 +136,7 @@ class MPCNode(Node):
         self.params_car = F110()
         
         self.obstacles = [
-            (np.array([.75, -.25]), 0.05),
+            (np.array([.75, -.25]), 0.1),
         ]
 
 
@@ -498,7 +498,7 @@ class MPCNode(Node):
         variation_dict = None
         mean_dict = None
         
-        self.state_size = 0
+        self.state_size = 6
 
         if not self.sim:
             if(self.lla_type == "rp"):
@@ -765,7 +765,7 @@ class MPCNode(Node):
             )
 
         # Swap back to [pwm, steer]
-        u_opt = np.array([u_safe[1], u_safe[0]])
+        u_safe = np.array([u_safe[1], u_safe[0]])
 
         # print(f"CONTROL: {u_opt}")
 
@@ -802,7 +802,7 @@ class MPCNode(Node):
         ### PUBLISH MPC DATA
         # if status == 0:  # Success
         # Get optimal control
-        self.apply_control(u_opt) # Apply control
+        self.apply_control(u_safe) # Apply control
         # self.get_logger().info(f"Logging control {u_opt}")
         if not self.sim:
             #version for our dynamics
