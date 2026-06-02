@@ -441,11 +441,9 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.solver_options.sim_method_num_stages = 4
     
     ocp.solver_options.globalization = 'MERIT_BACKTRACKING'  # instead of default FIXED_STEP
-    ocp.solver_options.alpha_min = 0.05 
-    ocp.solver_options.alpha_reduction = 0.5
     
     # DROPPED FROM 10 to 2 (This makes the solver ~5x faster)
-    ocp.solver_options.sim_method_num_steps = 50
+    ocp.solver_options.sim_method_num_steps = 10
 
     ocp.solver_options.nlp_solver_type = 'SQP'
     ocp.solver_options.qp_solver_iter_max = 200 
