@@ -122,12 +122,12 @@ class MPCNode(Node):
         #self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
-        self.N = 15 #steps (for nmpc)
-        self.Tf = 0.6 # total time horizon (for nmpc)
+        self.N = 30 #steps (for nmpc)
+        self.Tf = 1.2 # total time horizon (for nmpc)
         self.dt = self.Tf / self.N
         self.control_callback_speed = 0.04
         self.lla_predict_horizon = 0.04
-        self.lla_reset_interval = 0
+        self.lla_reset_interval = 10
         self.lla_reset_counter = 0
 
         if(self.log_data):
@@ -246,7 +246,7 @@ class MPCNode(Node):
             'Cm': 1,  # motor speed saturation
         }
         param_dict = get_param_dict_grid(mean_dict, variation_dict, 
-                                         discretization=discretization_dict, ground_truth=True
+                                         discretization=discretization_dict, ground_truth=True,
                                          noadapt=False)
         num_models = len(param_dict['Bf'])
         
@@ -731,7 +731,9 @@ class MPCNode(Node):
 
         #########################################
         ### PUBLISH MPC DATA
-        if status == 0:  # Success
+        residuals = self.solver.get_residuals()
+        res_eq = residuals[1]
+        if status == 0 or (status == 2 and res_eq < 1e-4):  # Success
             # Get optimal control
             self.apply_control(u_opt) # Apply control
             # self.get_logger().info(f"Logging control {u_opt}")

@@ -310,12 +310,12 @@ def create_ocp(model, params_car, steps, horizon):
     w_xe = 0
     w_ye = 0
     
-    w_pwm = 1.0
+    w_pwm = 2.0
     w_steer = 0.1
     
-    w_slew = 0.001    
+    w_slew = 0
     w_steer_v = 0.01
-    w_a_long = 0.01
+    w_a_long = 0.0
       
     Q_flat = [w_x, w_y, w_theta, w_vel, 0, 0, w_pwm, w_steer, w_a_long]
     R_flat = [w_slew, w_steer_v]
@@ -422,6 +422,7 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.cost.zu_e  = w_slack_l1 * np.ones(nsbx_e)
     ocp.cost.Zl_e  = w_slack    * np.ones(nsbx_e)
     ocp.cost.Zu_e  = w_slack    * np.ones(nsbx_e)
+    
     ###############################################3
 
     
@@ -439,10 +440,14 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.solver_options.integrator_type = 'ERK'
     ocp.solver_options.sim_method_num_stages = 4
     
+    ocp.solver_options.globalization = 'MERIT_BACKTRACKING'  # instead of default FIXED_STEP
+    ocp.solver_options.alpha_min = 0.05 
+    ocp.solver_options.alpha_reduction = 0.5
+    
     # DROPPED FROM 10 to 2 (This makes the solver ~5x faster)
-    ocp.solver_options.sim_method_num_steps = 10
+    ocp.solver_options.sim_method_num_steps = 50
 
-    ocp.solver_options.nlp_solver_type = 'SQP_RTI'
+    ocp.solver_options.nlp_solver_type = 'SQP'
     ocp.solver_options.qp_solver_iter_max = 200 
     ocp.solver_options.print_level = 0
     ocp.solver_options.qp_solver_warm_start = 1    
@@ -451,7 +456,7 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.solver_options.levenberg_marquardt = 1e-2  # Increased damping
     ocp.solver_options.regularize_hessian = 1e-6   # Prevent singular Hessian crashes
     # ocp.solver_options.qp_solver_cond_N = N        # Enable full condensing for small horizons
-    ocp.solver_options.hpipm_mode = 'SPEED'       # Failsafe against stiff Pacejka matrices
+    ocp.solver_options.hpipm_mode = 'ROBUST'       # Failsafe against stiff Pacejka matrices
 
     return ocp
 
