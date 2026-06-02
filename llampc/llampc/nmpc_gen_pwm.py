@@ -454,7 +454,7 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.solver_options.levenberg_marquardt = 1e-2  # Increased damping
     ocp.solver_options.regularize_hessian = 1e-6   # Prevent singular Hessian crashes
     # ocp.solver_options.qp_solver_cond_N = N        # Enable full condensing for small horizons
-    ocp.solver_options.hpipm_mode = 'ROBUST'       # Failsafe against stiff Pacejka matrices
+    ocp.solver_options.hpipm_mode = 'SPEED'       # Failsafe against stiff Pacejka matrices
 
     return ocp
 
