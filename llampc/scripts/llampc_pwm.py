@@ -731,7 +731,7 @@ class MPCNode(Node):
 
         #########################################
         ### PUBLISH MPC DATA
-        if status == 0:  # Success
+        if status == 0 or status == 2:  # Success
             # Get optimal control
             self.apply_control(u_opt) # Apply control
             # self.get_logger().info(f"Logging control {u_opt}")
