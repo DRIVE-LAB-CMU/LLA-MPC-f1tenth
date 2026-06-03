@@ -652,7 +652,7 @@ class MPCNode(Node):
         # filtered_state[2] = (filtered_state[2] + np.pi) % (2 * np.pi) - np.pi
 
         aug_state = np.concatenate([filtered_state, self.last_control])
-        print(aug_state)
+        print(f"aug state: {aug_state}")
         self.solver.set(0, "lbx", aug_state)
         self.solver.set(0, "ubx", aug_state)
         def construct_params(N, selected_model_params, ref_segment):
