@@ -360,7 +360,7 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.model.cost_y_expr_e = ca.vertcat(
         x[0] - x_ref[0],   # x
         x[1] - x_ref[1],   # y
-        yaw_err_wrapped,    # yaw (wrapped)
+        yaw_err,    # yaw (wrapped)
         x[3] - x_ref[3],   # vx
         x[4] - x_ref[4],   # vy
         x[5] - x_ref[5],   # omega
