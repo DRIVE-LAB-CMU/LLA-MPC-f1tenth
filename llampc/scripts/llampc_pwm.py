@@ -710,12 +710,12 @@ class MPCNode(Node):
                 x_pred = self.solver.get(i, "x")[:6]
                 mpc_states.append(x_pred)
                 
-                # c_pred = self.solver.get(i, "x")[-2:]
-                # mpc_controls.append(c_pred)
+                c_pred = self.solver.get(i, "x")[-2:]
+                mpc_controls.append(c_pred)
 
-                # print(x_pred, c_pred)
+                print(x_pred, c_pred)
 
-                # print(f"PREDICTED STATES: {predicted_states}")
+                print(f"PREDICTED STATES: {setup_mpc_states}")
                 # print(f"PREDICTED CONTROLS: {predicted_controls}")
                 
             self.publish_predicted_trajectory(mpc_states) # Publish predicted trajectory
@@ -766,8 +766,8 @@ class MPCNode(Node):
             self.time_history[:self.checkpoints-1, self.count] = np.array(self.checkpoint[1:]-self.checkpoint[:-1])
             self.time_history[-1, self.count] = (self.checkpoint[-1] - self.checkpoint[0])
         
-            if(self.count == 0):
-                print(np.max(self.time_history*1e-6, axis = 1))
+            #if(self.count == 0):
+                #print(np.max(self.time_history*1e-6, axis = 1))
         else:
             print(f"\n--- SOLVER FAILED WITH STATUS {status} ---")
 
@@ -823,8 +823,8 @@ class MPCNode(Node):
         pwm = float(u_opt[0])
         steer = float(u_opt[1])
         
-        print("PWM")
-        print(pwm)
+        #print("PWM")
+        #print(pwm)
 
         # sensor_velocity = np.sqrt(self.current_state[3] **2 + self.current_state[4]**2)
         
