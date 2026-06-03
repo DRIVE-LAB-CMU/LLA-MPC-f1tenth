@@ -713,10 +713,10 @@ class MPCNode(Node):
                 c_pred = self.solver.get(i, "x")[-2:]
                 mpc_controls.append(c_pred)
 
-                print(x_pred, c_pred)
+                #print(x_pred, c_pred)
 
-                print(f"PREDICTED STATES: {mpc_states}")
-                # print(f"PREDICTED CONTROLS: {predicted_controls}")
+            print(f"PREDICTED STATES: {mpc_states}")
+            # print(f"PREDICTED CONTROLS: {predicted_controls}")
                 
             self.publish_predicted_trajectory(mpc_states) # Publish predicted trajectory
             
