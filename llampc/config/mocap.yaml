@@ -31,7 +31,7 @@ ekf_filter_node:
                   false, false, true,    # Yaw Velocity (Gyro Z)
                   true,  true,  false]   # X, Y Acceleration (Drift detection!)
     imu0_relative: true
-    imu0_linear_acceleration_rejection_threshold: 0.2
+    # imu0_linear_acceleration_rejection_threshold: 0.2
 
     # ---------------------------------------------------------
     # INPUT 3: ZUPT (Anti-Phantom Drift)
