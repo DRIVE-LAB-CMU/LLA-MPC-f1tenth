@@ -122,8 +122,8 @@ class MPCNode(Node):
         #self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
-        self.N = 15 #steps (for nmpc)
-        self.Tf = 0.6 # total time horizon (for nmpc)
+        self.N = 20 #steps (for nmpc)
+        self.Tf = 0.8 # total time horizon (for nmpc)
         self.dt = self.Tf / self.N
         self.control_callback_speed = 0.04
         self.lla_predict_horizon = 0.04
@@ -599,7 +599,7 @@ class MPCNode(Node):
 
         self.log_rollout_data(self.lb_history, one_step_cost, ok_time)
 
-        x0 = self.current_state[:3]
+        x0 = self.current_state[:2]
         v0 = self.current_state[3]
 
         self.checkpoint[1] = time.perf_counter_ns()
