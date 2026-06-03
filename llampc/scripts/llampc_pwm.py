@@ -122,8 +122,8 @@ class MPCNode(Node):
         #self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
-        self.N = 30 #steps (for nmpc)
-        self.Tf = 1.2 # total time horizon (for nmpc)
+        self.N = 20 #steps (for nmpc)
+        self.Tf = 0.8 # total time horizon (for nmpc)
         self.dt = self.Tf / self.N
         self.control_callback_speed = 0.04
         self.lla_predict_horizon = 0.04
@@ -247,7 +247,7 @@ class MPCNode(Node):
         }
         param_dict = get_param_dict_grid(mean_dict, variation_dict, 
                                          discretization=discretization_dict, ground_truth=True,
-                                         noadapt=False)
+                                         noadapt=True)
         num_models = len(param_dict['Bf'])
         
         self.get_logger().info("Dynamics bank starting")
@@ -536,7 +536,7 @@ class MPCNode(Node):
         self.get_logger().info("LLA BANK COMPILED")
 
     def odom_callback(self, msg):    
-        print("hello")    
+        # print("hello")    
         x = msg.pose.pose.position.x
         y = msg.pose.pose.position.y
         
@@ -567,7 +567,7 @@ class MPCNode(Node):
         
         self.checkpoint[0] = time.perf_counter_ns()
 
-        print(self.current_state)
+        print(f"CURSTATE: {self.current_state}")
 
         if self.track is None or self.current_state is None:
             return
@@ -640,7 +640,7 @@ class MPCNode(Node):
 
         
             
-        print(f"SELECTED PARAMS {selected_model_params}")
+        # print(f"SELECTED PARAMS {selected_model_params}")
         
         ########################################################
         #### SETUP AND SOLVE MPC
@@ -679,7 +679,7 @@ class MPCNode(Node):
         # print("DEBUG PARAMS NODE 0:", full_params[0])
 
         status = self.solver.solve()
-        self.solver.print_statistics()
+        # self.solver.print_statistics()
 
         # if status != 0:
         #     self.get_logger().warn(f"MPC solver failed with status: {status}. Resetting memory!")

@@ -440,8 +440,6 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.solver_options.integrator_type = 'ERK'
     ocp.solver_options.sim_method_num_stages = 4
     
-    ocp.solver_options.globalization = 'MERIT_BACKTRACKING'  # instead of default FIXED_STEP
-    
     # DROPPED FROM 10 to 2 (This makes the solver ~5x faster)
     ocp.solver_options.sim_method_num_steps = 10
 
