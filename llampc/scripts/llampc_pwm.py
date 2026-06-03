@@ -599,7 +599,7 @@ class MPCNode(Node):
 
         self.log_rollout_data(self.lb_history, one_step_cost, ok_time)
 
-        x0 = self.current_state[:2]
+        x0 = self.current_state[:3]
         v0 = self.current_state[3]
 
         self.checkpoint[1] = time.perf_counter_ns()
