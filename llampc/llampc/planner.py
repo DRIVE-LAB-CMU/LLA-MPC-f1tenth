@@ -87,61 +87,7 @@ from llampc.utils import Spline2D
 
 #     return xref, projidx#, vr
 
-# def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., wrap=True, skip=2, max_accel = 9.51):
-#     raceline = track.raceline
-#     num_pts = raceline.shape[1]
-    
-#     search_indices = np.arange(projidx, projidx + 50) % num_pts
-#     search_window = raceline[:, search_indices]
-
-#     if np.allclose(search_window[:, 0], search_window[:, 1]):
-#         search_indices = (search_indices + 1) % num_pts
-#         search_window = raceline[:, search_indices]
-    
-#     xy, idx_rel = track.project_fast(x=x0[0], y=x0[1], raceline=search_window)
-#     new_projidx = search_indices[idx_rel]
-
-#     dist_start = track.spline.s[new_projidx]
-#     max_s = track.spline.s[-1]
-    
-#     dist = dist_start
-#     v = max(v0, 0.2)
-
-#     # Generate N+1+skip points, then slice off the first `skip`
-#     total = N + 1 + skip
-#     xref_full = np.zeros([6, total])
-#     xref_full[:2, 0] = x0
-
-#     for idh in range(1, total):
-#         dist += scale * v * Ts
-        
-#         if wrap:
-#             s_sample = dist % max_s
-#         else:
-#             if dist >= max_s:
-#                 xref_full[:2, idh:] = track.spline.calc_position(max_s - 1e-4).reshape(2, 1)
-#                 xref_full[2, idh:] = track.spline.calc_yaw(max_s - 1e-4)
-#                 xref_full[3, idh:] = 0 
-#                 break
-#             s_sample = dist
-
-#         xref_full[:2, idh] = track.spline.calc_position(s_sample)
-#         xref_full[2, idh] = track.spline.calc_yaw(s_sample)
-#         v_next = track.spline_v.calc(s_sample)
-        
-#         v = min(v_next, max_accel * Ts + v) # velocity aware planner
-        
-#         xref_full[3, idh] = v 
-
-#     xref = xref_full[:, skip:skip + N + 1]
-
-#     return xref, new_projidx
-
-import numpy as np
-def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., wrap=True, skip=2, max_accel=9.51, alpha=0.8):
-    # Extract yaw directly from the state array
-    yaw0 = x0[2] 
-    
+def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., wrap=True, skip=2, max_accel = 9.51):
     raceline = track.raceline
     num_pts = raceline.shape[1]
     
@@ -158,26 +104,13 @@ def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., wr
     dist_start = track.spline.s[new_projidx]
     max_s = track.spline.s[-1]
     
-    # --- 1. CALCULATE INITIAL ERROR ---
-    base_xy = track.spline.calc_position(dist_start)
-    base_yaw = track.spline.calc_yaw(dist_start)
-    
-    err_x = x0[0] - base_xy[0]
-    err_y = x0[1] - base_xy[1]
-    err_yaw = np.arctan2(np.sin(yaw0 - base_yaw), np.cos(yaw0 - base_yaw))
-    # ----------------------------------
-    
     dist = dist_start
     v = max(v0, 0.2)
 
+    # Generate N+1+skip points, then slice off the first `skip`
     total = N + 1 + skip
     xref_full = np.zeros([6, total])
-    
-    # --- CRITICAL FIX HERE ---
-    # Assign x, y, and yaw all at once. 
-    # Using x0[:3] prevents broadcast errors if x0 is length 8.
-    xref_full[:3, 0] = x0[:3] 
-    # -------------------------
+    xref_full[:2, 0] = x0
 
     for idh in range(1, total):
         dist += scale * v * Ts
@@ -192,19 +125,11 @@ def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., wr
                 break
             s_sample = dist
 
-        spline_x, spline_y = track.spline.calc_position(s_sample)
-        spline_yaw = track.spline.calc_yaw(s_sample)
-        
-        # --- 2. APPLY DECAYING ERROR ---
-        decay = alpha ** idh
-        
-        xref_full[0, idh] = spline_x + (err_x * decay)
-        xref_full[1, idh] = spline_y + (err_y * decay)
-        xref_full[2, idh] = spline_yaw + (err_yaw * decay)
-        # -------------------------------
-        
+        xref_full[:2, idh] = track.spline.calc_position(s_sample)
+        xref_full[2, idh] = track.spline.calc_yaw(s_sample)
         v_next = track.spline_v.calc(s_sample)
-        v = min(v_next, max_accel * Ts + v) 
+        
+        v = min(v_next, max_accel * Ts + v) # velocity aware planner
         
         xref_full[3, idh] = v 
 
