@@ -715,7 +715,7 @@ class MPCNode(Node):
 
                 print(x_pred, c_pred)
 
-                print(f"PREDICTED STATES: {setup_mpc_states}")
+                print(f"PREDICTED STATES: {mpc_states}")
                 # print(f"PREDICTED CONTROLS: {predicted_controls}")
                 
             self.publish_predicted_trajectory(mpc_states) # Publish predicted trajectory
