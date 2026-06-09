@@ -645,8 +645,8 @@ class MPCNode(Node):
         ########################################################
         #### SETUP AND SOLVE MPC
         filtered_state = self.current_state.copy()
-        if( np.abs(self.current_state[3]) < 0.01):
-            filtered_state[3] = 0.01
+        if( np.abs(self.current_state[3]) < 0.1):
+            filtered_state[3] = 0.1
 
         
         # filtered_state[2] = (filtered_state[2] + np.pi) % (2 * np.pi) - np.pi
@@ -733,7 +733,10 @@ class MPCNode(Node):
         ### PUBLISH MPC DATA
         residuals = self.solver.get_residuals()
         res_eq = residuals[1]
-        if status == 0 or (status == 2 and res_eq < 1e-4):  # Success
+        vx = self.current_state[3]
+        eq_tol = 1e-2 if vx > 0.1 else 0.1   # much looser at low speed
+        
+        if status == 0 or (status == 2 and res_eq < eq_tol):  # Success
             # Get optimal control
             self.apply_control(u_opt) # Apply control
             # self.get_logger().info(f"Logging control {u_opt}")

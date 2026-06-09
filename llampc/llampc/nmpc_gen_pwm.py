@@ -439,11 +439,11 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.solver_options.sim_method_num_steps = 10
 
     ocp.solver_options.nlp_solver_type = 'SQP'
+    ocp.solver_options.nlp_solver_max_iter = 5  # 2-3 iterations
+    ocp.solver_options.globalization = 'FIXED_STEP'
     ocp.solver_options.print_level = 0
     ocp.solver_options.qp_solver_warm_start = 1    
     
-    ocp.solver_options.nlp_solver_tol_stat = 1e-3   # default is often 1e-6, too tight
-
     # STABILITY FIXES
     ocp.solver_options.levenberg_marquardt = 1e-4  # Increased damping
     ocp.solver_options.regularize_hessian = 1e-6   # Prevent singular Hessian crashes
