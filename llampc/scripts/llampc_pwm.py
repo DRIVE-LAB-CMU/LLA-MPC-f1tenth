@@ -117,7 +117,7 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'mocap_square2fast.npz')
+        self.declare_parameter('track_file_name', 'mocap_square2slow.npz')
         self.declare_parameter('odom_topic', '/odometry/filtered')
         #self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
@@ -127,7 +127,7 @@ class MPCNode(Node):
         self.dt = self.Tf / self.N
         self.control_callback_speed = 0.04
         self.lla_predict_horizon = 0.04
-        self.lla_reset_interval = 10
+        self.lla_reset_interval = 1
         self.lla_reset_counter = 0
 
         if(self.log_data):
@@ -247,7 +247,7 @@ class MPCNode(Node):
         }
         param_dict = get_param_dict_grid(mean_dict, variation_dict, 
                                          discretization=discretization_dict, ground_truth=True,
-                                         noadapt=True)
+                                         noadapt=False)
         num_models = len(param_dict['Bf'])
         
         self.get_logger().info("Dynamics bank starting")
@@ -646,13 +646,13 @@ class MPCNode(Node):
         #### SETUP AND SOLVE MPC
         filtered_state = self.current_state.copy()
         if( np.abs(self.current_state[3]) < 0.01):
-            filtered_state[3] = 0.1
+            filtered_state[3] = 0.01
 
         
         # filtered_state[2] = (filtered_state[2] + np.pi) % (2 * np.pi) - np.pi
 
         aug_state = np.concatenate([filtered_state, self.last_control])
-        print(f"aug state: {aug_state}")
+        #print(f"aug state: {aug_state}")
         self.solver.set(0, "lbx", aug_state)
         self.solver.set(0, "ubx", aug_state)
         def construct_params(N, selected_model_params, ref_segment):
@@ -715,7 +715,7 @@ class MPCNode(Node):
 
                 #print(x_pred, c_pred)
 
-            print(f"PREDICTED STATES: {mpc_states}")
+            # print(f"PREDICTED STATES: {mpc_states}")
             # print(f"PREDICTED CONTROLS: {predicted_controls}")
                 
             self.publish_predicted_trajectory(mpc_states) # Publish predicted trajectory

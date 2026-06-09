@@ -29,7 +29,7 @@ def export_model(params_car, linear = False):
 
     if not linear: 
         print("NONLINEAR MODEL USED")
-        eps = .1
+        eps = 0.1
         vx_dyn = ca.sqrt(x[3]**2 + eps)
 
         # eps_v = 0.05   # Transition smoothness
@@ -302,19 +302,17 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.cost.cost_type = 'NONLINEAR_LS'
     ocp.cost.cost_type_e = 'NONLINEAR_LS'
 
-    w_x = 6.0
-    w_y = 6.0
-    w_theta = 0.0
-    w_vel = 0.0
-    
-    w_xe = 0
-    w_ye = 0
-    
-    w_pwm = 1.0
+    w_x = 4.0
+    w_y = 4.0
+    w_xe = 0.0
+    w_ye = 0.0
+    w_theta = 0
+    w_vel = 0
+    w_pwm = 2
     w_steer = 0.1
-    
     w_slew = 0.0
     w_steer_v = 0.01
+    
     w_a_long = 0.001
       
     Q_flat = [w_x, w_y, w_theta, w_vel, 0, 0, w_pwm, w_steer, w_a_long]
@@ -386,7 +384,7 @@ def create_ocp(model, params_car, steps, horizon):
                                     0.5, 
                                     params_car['max_steer']])
     
-    ocp.constraints.lbu = np.array([-0.2, -params_car['max_steer_vel']])
+    ocp.constraints.lbu = np.array([-0.05, -params_car['max_steer_vel']])
     ocp.constraints.ubu = np.array([0.2, params_car['max_steer_vel']])
     ocp.constraints.idxbu = np.array([0, 1]) # 0 is slew rate, 1 is steer_vel
 
@@ -423,10 +421,7 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.cost.Zl_e  = w_slack    * np.ones(nsbx_e)
     ocp.cost.Zu_e  = w_slack    * np.ones(nsbx_e)
     
-    ###############################################3
-
-    
-    
+    ###############################################
 
 
     
@@ -443,12 +438,14 @@ def create_ocp(model, params_car, steps, horizon):
     # DROPPED FROM 10 to 2 (This makes the solver ~5x faster)
     ocp.solver_options.sim_method_num_steps = 10
 
-    ocp.solver_options.nlp_solver_type = 'SQP_RTI'
+    ocp.solver_options.nlp_solver_type = 'SQP'
     ocp.solver_options.print_level = 0
     ocp.solver_options.qp_solver_warm_start = 1    
+    
+    ocp.solver_options.nlp_solver_tol_stat = 1e-3   # default is often 1e-6, too tight
 
     # STABILITY FIXES
-    ocp.solver_options.levenberg_marquardt = 1e-2  # Increased damping
+    ocp.solver_options.levenberg_marquardt = 1e-4  # Increased damping
     ocp.solver_options.regularize_hessian = 1e-6   # Prevent singular Hessian crashes
     # ocp.solver_options.qp_solver_cond_N = N        # Enable full condensing for small horizons
     ocp.solver_options.hpipm_mode = 'SPEED'       # Failsafe against stiff Pacejka matrices
