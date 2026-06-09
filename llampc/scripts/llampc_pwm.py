@@ -561,7 +561,35 @@ class MPCNode(Node):
         self.current_state = np.array([x, y, phi, vx, vy, omega])
 
         # self.get_logger().info(f"Logging State {self.current_state}")
+    
+    def prepare_solve(self):
+        if self.first_control:
+            return
+        
+        for i in range(0, self.N - 1):
+            x_next = self.solver.get(i + 1, "x")
+            u_next = self.solver.get(i + 1, "u")
+            self.solver.set(i, "x", x_next)
+            self.solver.set(i, "u", u_next)
 
+        # For the very last node, just duplicate the second-to-last node 
+        # (the Levenberg-Marquardt damping will fix the slight error here)
+        self.solver.set(self.N - 1, "u", self.solver.get(self.N - 2, "u"))
+        self.solver.set(self.N, "x", self.solver.get(self.N - 1, "x"))
+        
+        for i in range(self.N):
+            # Overwrite the saved dual variables for the dynamics
+            num_pi = len(self.solver.get(i, "pi"))
+            self.solver.set(i, "pi", np.zeros(num_pi))
+            
+            # Overwrite the saved dual variables for the bounds/constraints
+            num_lam = len(self.solver.get(i, "lam"))
+            self.solver.set(i, "lam", np.zeros(num_lam))
+            
+        # Terminal node constraints
+        num_lam_e = len(self.solver.get(self.N, "lam"))
+        self.solver.set(self.N, "lam", np.zeros(num_lam_e))
+    
     def control_callback(self):
         # print(self.track)
         
@@ -647,11 +675,10 @@ class MPCNode(Node):
         filtered_state = self.current_state.copy()
         if( np.abs(self.current_state[3]) < 0.1):
             filtered_state[3] = 0.1
-
-        
-        # filtered_state[2] = (filtered_state[2] + np.pi) % (2 * np.pi) - np.pi
-
         aug_state = np.concatenate([filtered_state, self.last_control])
+        
+        self.prepare_solve()
+        
         #print(f"aug state: {aug_state}")
         self.solver.set(0, "lbx", aug_state)
         self.solver.set(0, "ubx", aug_state)
@@ -669,7 +696,7 @@ class MPCNode(Node):
 
             if(i == 0 or self.first_control):
                 self.solver.set(i, "x", aug_state)
-
+        
         if(self.first_control):
             self.first_control = False
             

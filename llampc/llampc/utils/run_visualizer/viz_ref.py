@@ -428,9 +428,9 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'sad.npz')
+    filepath = os.path.join(dir_path, 'unstable.npz')
 
-    ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square2.npz') 
+    ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square2slow.npz') 
     
     param_names = {
         0: 'Bf',

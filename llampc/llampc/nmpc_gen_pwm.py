@@ -61,8 +61,8 @@ def export_model(params_car, linear = False):
         # 4. Smoother Blending Function
         # Soften the transition so the Jacobian doesn't spike. 
         # At x[3] = 0, weight_dyn is effectively 0.0, so the solver only "sees" kinematics.
-        weight_dyn = 0.5 * (1.0 + ca.tanh(5.0 * (x[3] - 0.5))) 
-        weight_kin = 1.0 - weight_dyn
+        # weight_dyn = 0.5 * (1.0 + ca.tanh(5.0 * (x[3] - 0.5))) 
+        # weight_kin = 1.0 - weight_dyn
 
         v_offset = x[3] - 1.0
         weight_dyn = v_offset / ca.sqrt(1 + v_offset**2) # Ranges -1 to 1
