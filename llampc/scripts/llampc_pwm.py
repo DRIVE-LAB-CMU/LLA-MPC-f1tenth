@@ -796,8 +796,8 @@ class MPCNode(Node):
             self.time_history[:self.checkpoints-1, self.count] = np.array(self.checkpoint[1:]-self.checkpoint[:-1])
             self.time_history[-1, self.count] = (self.checkpoint[-1] - self.checkpoint[0])
         
-            #if(self.count == 0):
-                #print(np.max(self.time_history*1e-6, axis = 1))
+            if(self.count == 0):
+                print(np.max(self.time_history*1e-6, axis = 1))
         else:
             print(f"\n--- SOLVER FAILED WITH STATUS {status} ---")
 
