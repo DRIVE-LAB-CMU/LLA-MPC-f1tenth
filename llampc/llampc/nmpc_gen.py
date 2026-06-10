@@ -225,28 +225,27 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.cost.Zu_e  = w_slack    * np.ones(nsbx_e)
     ###############################################
     
-    ocp.constraints.lbu = np.array([-params_car['max_steer_vel']])
-    ocp.constraints.ubu = np.array([params_car['max_steer_vel']])
-    ocp.constraints.idxbu = np.array([1]) # 0 is jerk, 1 is steer_vel
+    ocp.constraints.lbu = np.array([-10, -params_car['max_steer_vel']])
+    ocp.constraints.ubu = np.array([10, params_car['max_steer_vel']])
+    ocp.constraints.idxbu = np.array([0, 1]) # 0 is jerk, 1 is steer_vel
 
     # ocp.constraints.lbu = np.array([-params_car['max_steer_vel']])
     # ocp.constraints.ubu = np.array([params_car['max_steer_vel']])
     # ocp.constraints.idxbu = np.array([1]) # 0 is jerk, 1 is steer_vel
 
     ocp.solver_options.qp_solver = 'PARTIAL_CONDENSING_HPIPM'
-    ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'
+    ocp.solver_options.hessian_approx = 'EXACT'
 
     ocp.solver_options.integrator_type = 'ERK'
     ocp.solver_options.sim_method_num_stages = 4
     
-    # DROPPED FROM 10 to 2 (This makes the solver ~5x faster)
     ocp.solver_options.sim_method_num_steps = 10
 
-    ocp.solver_options.nlp_solver_type = 'SQP'
-    ocp.solver_options.nlp_solver_max_iter = 10  # 2-3 iterations
+    ocp.solver_options.nlp_solver_type = 'SQP_RTI'
     ocp.solver_options.qp_solver_iter_max = 200 
     ocp.solver_options.print_level = 0
     ocp.solver_options.qp_solver_warm_start = 0    
+    # ocp.solver_options.globalization = 'MERIT_BACKTRACKING'
 
     # STABILITY FIXES
     ocp.solver_options.levenberg_marquardt = 1e-4  # Increased damping
