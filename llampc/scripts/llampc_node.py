@@ -117,9 +117,9 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'mocap_square2fast.npz')
-        self.declare_parameter('odom_topic', '/odometry/filtered')
-        #self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        self.declare_parameter('track_file_name', 'blevel_figure8.npz')
+        # self.declare_parameter('odom_topic', '/odometry/filtered')
+        self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
@@ -599,7 +599,7 @@ class MPCNode(Node):
 
         
             
-        print(f"SELECTED PARAMS {selected_model_params}")
+        # print(f"SELECTED PARAMS {selected_model_params}")
         
         ########################################################
         #### SETUP AND SOLVE MPC
@@ -611,7 +611,7 @@ class MPCNode(Node):
         # filtered_state[2] = (filtered_state[2] + np.pi) % (2 * np.pi) - np.pi
 
         aug_state = np.concatenate([filtered_state, self.last_control])
-        print(aug_state)
+        print(f"STATE {aug_state}")
         self.solver.set(0, "lbx", aug_state)
         self.solver.set(0, "ubx", aug_state)
         def construct_params(N, selected_model_params, ref_segment):
@@ -641,7 +641,7 @@ class MPCNode(Node):
         # print("DEBUG PARAMS NODE 0:", full_params[0])
 
         status = self.solver.solve()
-        self.solver.print_statistics()
+        # self.solver.print_statistics()
 
         # if status != 0:
         #     self.get_logger().warn(f"MPC solver failed with status: {status}. Resetting memory!")
@@ -692,6 +692,7 @@ class MPCNode(Node):
         if(self.lla_reset_interval != 0):
             self.lla_reset_counter = (self.lla_reset_counter + 1) % self.lla_reset_interval
 
+        self.checkpoint[5] = time.perf_counter_ns()
         #########################################
         ### PUBLISH MPC DATA
         if status == 0:  # Success
@@ -700,11 +701,10 @@ class MPCNode(Node):
             # self.get_logger().info(f"Logging control {u_opt}")
             if not self.sim:
                 #version for our dynamics
-                self.checkpoint[5] = time.perf_counter_ns()
+                
                 self.lb_history.predict_states(
                     self.current_state, u_opt, self.lla_reset_counter == 0
                 )
-                self.checkpoint[6] = time.perf_counter_ns()
                 
             else:
                 steer_v = self.solver.get(0, "u")[1]
@@ -723,12 +723,8 @@ class MPCNode(Node):
                     np.array([u_opt[0], steer_v]) 
                 )
 
-            self.count = (self.count + 1) % self.time_window
-            self.time_history[:self.checkpoints-1, self.count] = np.array(self.checkpoint[1:]-self.checkpoint[:-1])
-            self.time_history[-1, self.count] = (self.checkpoint[-1] - self.checkpoint[0])
+           
         
-            if(self.count == 0):
-                print(np.max(self.time_history*1e-6, axis = 1))
         else:
             print(f"\n--- SOLVER FAILED WITH STATUS {status} ---")
             # Status codes: 0=success, 1=failure, 2=max iter, 3=MINLP fail, 4=QP solver failed
@@ -764,6 +760,14 @@ class MPCNode(Node):
             self.last_drive_command = np.array([0.0, 0.0])
             self.last_control = np.array([0.0, 0.0])
             self.get_logger().warn(f"MPC solver failed with status: {status}")
+        
+        self.checkpoint[6] = time.perf_counter_ns()
+        self.count = (self.count + 1) % self.time_window
+        self.time_history[:self.checkpoints-1, self.count] = np.array(self.checkpoint[1:]-self.checkpoint[:-1])
+        self.time_history[-1, self.count] = (self.checkpoint[-1] - self.checkpoint[0])
+        
+        if(self.count == 0):
+            print(np.max(self.time_history*1e-6, axis = 1))
 
             # self.first_control = True
 
@@ -799,9 +803,9 @@ class MPCNode(Node):
         drive_msg.header.stamp = self.get_clock().now().to_msg()
         drive_msg.header.frame_id = "base_link"
 
-        print(f"ORIGINAL {self.last_drive_command[0] + accel * self.dt}")
-        print(f"NEW {desired_v}")
-        print(f"NEW_INT {self.current_state[3] + accel * self.dt}")
+        # print(f"ORIGINAL {self.last_drive_command[0] + accel * self.dt}")
+        # print(f"NEW {desired_v}")
+        # print(f"NEW_INT {self.current_state[3] + accel * self.dt}")
         new_int = self.current_state[3] + accel * self.dt
         old = self.last_drive_command[0] + accel * self.dt
         
