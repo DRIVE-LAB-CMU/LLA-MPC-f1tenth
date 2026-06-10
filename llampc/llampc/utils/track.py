@@ -104,7 +104,7 @@ class Track:
         for idl in range(n_waypoints-1):
             line = [raceline[:,idl], raceline[:,idl+1]]
             proj[:,idl], dist[idl] = Projection(point, line)
-        optidx = np.argmin(dist)
+        optidx = np.nanargmin(dist)
         optxy = proj[:,optidx]
         
         # print(f"new xy: {optxy}")
