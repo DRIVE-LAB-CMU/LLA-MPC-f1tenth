@@ -242,7 +242,7 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.solver_options.sim_method_num_steps = 10
 
     ocp.solver_options.nlp_solver_type = 'SQP_RTI'
-    ocp.solver_options.qp_solver_iter_max = 200 
+    ocp.solver_options.qp_solver_iter_max = 20
     ocp.solver_options.print_level = 0
     ocp.solver_options.qp_solver_warm_start = 0    
     # ocp.solver_options.globalization = 'MERIT_BACKTRACKING'
