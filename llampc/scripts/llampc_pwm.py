@@ -14,7 +14,7 @@ os.environ["JAX_PLATFORM_NAME"] = "cpu"
 # cc.initialize_cache("/home/kathy/jax_cache")
 import jax
 jax.config.update('jax_persistent_cache_min_compile_time_secs', 0)
-jax.config.update("jax_log_compiles", True)
+# jax.config.update("jax_log_compiles", True)
 import jax.numpy as jnp
 
 
@@ -236,8 +236,8 @@ class MPCNode(Node):
         discretization_dict = {
             'Bf': 4,   # 15% variation
             'Br': 4,   # 15% variation
-            'Cf': 3,   # 15% variation
-            'Cr': 3,   # 15% variation
+            'Cf': 4,   # 15% variation
+            'Cr': 4,   # 15% variation
             'Df': 4,   # 15% variation
             'Dr': 4,   # 15% variation
             'Cro':1, # 15% variation

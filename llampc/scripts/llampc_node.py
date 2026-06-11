@@ -14,13 +14,13 @@ os.environ["JAX_PLATFORM_NAME"] = "cpu"
 # cc.initialize_cache("/home/kathy/jax_cache")
 import jax
 jax.config.update('jax_persistent_cache_min_compile_time_secs', 0)
-jax.config.update("jax_log_compiles", True)
+# jax.config.update("jax_log_compiles", True)
 import jax.numpy as jnp
 
 
 
-from llampc.nmpc_gen import setup_mpc
-from llampc.params import F110, F110_sim, get_param_dict_random
+from llampc.nmpc_gen import setup_mpc_ipopt
+from llampc.params import F110, F110_sim, get_param_dict_random, param_validate_ptm
 from llampc.planner import get_reference_trajectory_segment
 from llampc.utils import Track
 
@@ -213,7 +213,9 @@ class MPCNode(Node):
         
         num_models = 5000
         self.state_size = 6
-        param_dict = get_param_dict_random(mean_dict, variation_dict, num_models, ground_truth=True)
+        param_dict = get_param_dict_random(mean_dict, variation_dict, 
+                                           num_models, ground_truth=True,
+                                           validate_param=param_validate_ptm)
         
         self.get_logger().info("Dynamics bank starting")
 
@@ -276,7 +278,8 @@ class MPCNode(Node):
         
         num_models = 1
         self.state_size = 6
-        param_dict = get_param_dict_random(mean_dict, variation_dict, num_models, ground_truth=True)
+        param_dict = get_param_dict_random(mean_dict, variation_dict, num_models, ground_truth=True,
+                                        validate_param=param_validate_ptm)
 
         self.dynamics_bank = dynamics.DBMPacejkaBank(
             params_car['lf'], params_car['lr'], 
@@ -331,7 +334,7 @@ class MPCNode(Node):
         
         num_models = 6000
         self.state_size = 6
-        param_dict = get_param_dict_random(mean_dict, variation_dict, num_models)
+        param_dict = get_param_dict_random(mean_dict, variation_dict, num_models, validate_param=param_validate_ptm)
 
         self.dynamics_bank = dynamics_rp.DBMPacejkaBankRP(
             params_car['lf'], params_car['lr'], 
@@ -485,7 +488,8 @@ class MPCNode(Node):
 
         # start solver
         self.current_state = None
-        self.solver = setup_mpc(self.N, self.Tf, build=True)
+        # self.solver = setup_mpc(self.N, self.Tf, build=True)
+        self.solver = setup_mpc_ipopt(self.N, self.Tf, build=True)
         self.get_logger().info("SOLVER COMPILED, WARM STARTING")
         
         self.lb_history.predict_states(

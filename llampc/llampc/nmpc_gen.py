@@ -238,17 +238,17 @@ def create_ocp(model, params_car, steps, horizon):
 
     ocp.solver_options.integrator_type = 'ERK'
     ocp.solver_options.sim_method_num_stages = 4
-    ocp.solver_options.regularize_method = 'CONVEXIFY' 
+    # ocp.solver_options.regularize_method = 'CONVEXIFY' 
     
     ocp.solver_options.sim_method_num_steps = 5
 
     ocp.solver_options.nlp_solver_type = 'SQP_RTI'
-    ocp.solver_options.qp_solver_iter_max = 20
+    ocp.solver_options.qp_solver_iter_max = 15
     ocp.solver_options.print_level = 0
     ocp.solver_options.qp_solver_warm_start = 0    
     
     ocp.solver_options.as_rti_level = 3  # does multiple QP solves per RTI step
-    ocp.solver_options.as_rti_iter = 3   # number of iterations
+    ocp.solver_options.as_rti_iter = 1   # number of iterations
     ocp.solver_options.globalization = 'FIXED_STEP'
 
     # STABILITY FIXES
@@ -402,4 +402,18 @@ def setup_mpc(steps, horizon, json_file='f1tenth_acados_ocp.json', solver_config
         raise
     finally:
         os.chdir(original_cwd) 
+        
+        
+def setup_mpc_ipopt(steps, horizon, params_car=F110):
+    
+    p_car = params_car()
+    try:
+        
+        f1tenth_model = export_model(p_car, exact = True)
+        solver = create_ipopt_solver(f1tenth_model, p_car, steps, horizon)
+
+        return solver
+    except Exception as e:
+        print(f"Error generating solver: {e}")
+        raise 
 
