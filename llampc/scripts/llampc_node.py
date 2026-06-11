@@ -660,15 +660,25 @@ class MPCNode(Node):
         
         if(self.first_control):
             self.first_control = False
+            
+        self.solver.options_set('rti_phase', 1)
+        self.solver.solve()
+
 
 
         self.checkpoint[3]= time.perf_counter_ns()
 
         # print("DEBUG STATE:", aug_state)
         # print("DEBUG PARAMS NODE 0:", full_params[0])
-
+        self.solver.options_set('rti_phase', 2)
         status = self.solver.solve()
+        # 1. Print internal solver statistics
         # self.solver.print_statistics()
+        
+        # 2. Check maximum residuals (stationarity, eq constraints, ineq constraints, comp)
+        # residuals = self.solver.get_residuals()
+        # print(f"Max Residuals (stat, eq, ineq, comp): {residuals}")
+            
 
         # if status != 0:
         #     self.get_logger().warn(f"MPC solver failed with status: {status}. Resetting memory!")
@@ -722,7 +732,7 @@ class MPCNode(Node):
         self.checkpoint[5] = time.perf_counter_ns()
         #########################################
         ### PUBLISH MPC DATA
-        if status == 0:  # Success
+        if status == 0 or status == 5:  # Success
             # Get optimal control
             self.apply_control(u_opt) # Apply control
             # self.get_logger().info(f"Logging control {u_opt}")

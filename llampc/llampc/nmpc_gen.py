@@ -234,18 +234,22 @@ def create_ocp(model, params_car, steps, horizon):
     # ocp.constraints.idxbu = np.array([1]) # 0 is jerk, 1 is steer_vel
 
     ocp.solver_options.qp_solver = 'PARTIAL_CONDENSING_HPIPM'
-    ocp.solver_options.hessian_approx = 'EXACT'
+    ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'
 
     ocp.solver_options.integrator_type = 'ERK'
     ocp.solver_options.sim_method_num_stages = 4
+    ocp.solver_options.regularize_method = 'CONVEXIFY' 
     
-    ocp.solver_options.sim_method_num_steps = 10
+    ocp.solver_options.sim_method_num_steps = 5
 
     ocp.solver_options.nlp_solver_type = 'SQP_RTI'
     ocp.solver_options.qp_solver_iter_max = 20
     ocp.solver_options.print_level = 0
     ocp.solver_options.qp_solver_warm_start = 0    
-    # ocp.solver_options.globalization = 'MERIT_BACKTRACKING'
+    
+    ocp.solver_options.as_rti_level = 3  # does multiple QP solves per RTI step
+    ocp.solver_options.as_rti_iter = 3   # number of iterations
+    ocp.solver_options.globalization = 'FIXED_STEP'
 
     # STABILITY FIXES
     ocp.solver_options.levenberg_marquardt = 1e-4  # Increased damping
