@@ -39,26 +39,39 @@ def _h_min(x, obstacles, r_car):
 
 # ── Predictive HOCBF condition (trajectory-min over an N-step rollout) ──
 def _cbf_psi(x, u, dt, lla_params, known_params, obstacles, r_car, alpha, N):
-    """ψ(x, u; θ) = min_{i ∈ 0..N} [ h(x_i(u)) − (1 − α·i·dt)·h(x_0) ].
-    Trajectory-min keeps the filter reactive to obstacles the endpoint-
-    only check would skip past at speed."""
+    """ψ(x, u; θ) = min_{i ∈ 1..N} [ h(x_i(u)) − (1 − α·dt)^i · h(x_0) ].
+
+    Discrete exponential-CBF form. The required margin decays geometrically
+    as (1 − α·dt)^i, which stays strictly positive and monotone for
+    α·dt < 1, so far-horizon nodes still carry a real constraint and the
+    factor can never go negative (which would invert the constraint and
+    permit collisions downrange).
+
+    The minimum runs over i = 1..N only. Node 0 is the current state x,
+    where h_i = h_now and the old (1 − α·i·dt) form gave exactly
+    h_now − 1·h_now = 0, pinning ψ ≤ 0 on every call and making the
+    'already safe' guard unfirable. x_0 is also not a future the control
+    can steer toward, so it does not belong in the predictive min.
+    """
     xs_rolled = np.asarray(_rollout_traj(lla_params, known_params, x, u, dt, N))
     xs = np.vstack([x, xs_rolled])  # shape (N+1, 6), xs[0]=x, xs[1..N]=rollout
     h_now = _h_min(x, obstacles, r_car)
-    psis = np.empty(N + 1)
-    for i in range(N + 1):
+    decay_base = 1.0 - alpha * dt
+    psis = np.empty(N)
+    for i in range(1, N + 1):
         h_i = _h_min(xs[i], obstacles, r_car)
-        psis[i] = h_i - (1.0 - alpha * i * dt) * h_now
+        decay = decay_base ** i
+        psis[i - 1] = h_i - decay * h_now
     return float(psis.min())
 
 
 # ── The QP-solver function ──────────────────────────────────────────────
-def cbf_qp_pacejka(x, u_nom, lla_params, known_params, obstacles, 
+def cbf_qp_pacejka(x, u_nom, lla_params, known_params, obstacles,
                     r_car=0.04,
                     dt=0.01, alpha=2.5, N=10,
                     delta_max=DELTA_MAX, d_min=D_MIN, d_max=D_MAX,
                     w_delta=1.0, w_d=1/0.35,
-                    eps_fd=(1e-3, 1e-3)):
+                    eps_fd=(0.05, 1e-3)):
     """Predictive HOCBF + weighted-2-D-QP obstacle-avoidance filter for
     the Pacejka race-car.
 
@@ -71,11 +84,16 @@ def cbf_qp_pacejka(x, u_nom, lla_params, known_params, obstacles,
     obstacles : list of (p_obs ∈ ℝ², r_obs ∈ ℝ) tuples
     r_car     : car radius (added to each obstacle's r)
     dt        : integration step
-    alpha     : HOCBF discount (continuous-time α)
+    alpha     : HOCBF discount (continuous-time α). Keep α·dt < 1 so the
+                discrete decay (1 − α·dt)^i stays positive.
     N         : predictive horizon (number of RK4 steps in the rollout)
     delta_max, d_min, d_max : actuator limits
     w_delta, w_d : QP cost weights; larger w_d ⇒ prefer steering over braking
-    eps_fd    : finite-difference perturbation for ∂ψ/∂u
+    eps_fd    : central-difference perturbation for ∂ψ/∂u. The steering
+                step must be large enough to cross the kink in the
+                min-over-rollout (a sub-0.1° probe reads ≈0 at the obstacle
+                bearing and the avoidance steer collapses to zero), so it
+                defaults to ~3° on δ.
 
     Returns
     -------
@@ -95,13 +113,17 @@ def cbf_qp_pacejka(x, u_nom, lla_params, known_params, obstacles,
         return u_nom.copy(), dict(active=False, psi=psi0,
                                     grad_psi=np.zeros(2))
 
-    # Finite-difference gradient ∇_u ψ at u_nom.
+    # Central-difference gradient ∇_u ψ at u_nom. Central (vs one-sided)
+    # so the gradient can see whichever steering direction reduces the
+    # predicted penetration even when ψ has a kink at the obstacle bearing.
     grad = np.zeros(2)
     for i in range(2):
         du = np.zeros(2); du[i] = eps_fd[i]
         psi_p = _cbf_psi(x, u_nom + du, dt, lla_params, known_params,
                           obstacles, r_car, alpha, N)
-        grad[i] = (psi_p - psi0) / eps_fd[i]
+        psi_m = _cbf_psi(x, u_nom - du, dt, lla_params, known_params,
+                          obstacles, r_car, alpha, N)
+        grad[i] = (psi_p - psi_m) / (2.0 * eps_fd[i])
 
     # Weighted QP: min ½‖u − u_nom‖²_W  s.t.  ψ_0 + ∇ψ·(u − u_nom) ≥ 0
     # with W = diag(w_delta, w_d).  Analytical half-space projection:
@@ -112,6 +134,14 @@ def cbf_qp_pacejka(x, u_nom, lla_params, known_params, obstacles,
         return u_nom.copy(), dict(active=False, psi=psi0, grad_psi=grad)
     delta_u = (-psi0 / den) * (Wi * grad)
     u_safe = u_nom + delta_u
+
+    # While unsafe (ψ < 0), the filter may brake but must never command MORE
+    # throttle than nominal: a positive d-correction here just drives the car
+    # into the obstacle faster. Clamp the throttle channel to <= nominal
+    # before the box clip.
+    if psi0 < 0:
+        u_safe[D_] = min(u_safe[D_], float(u_nom[D_]))
+
     u_safe[DELTA_] = float(np.clip(u_safe[DELTA_], -delta_max, delta_max))
     u_safe[D_]     = float(np.clip(u_safe[D_],     d_min,     d_max))
     return u_safe, dict(active=True, psi=psi0, grad_psi=grad)
