@@ -681,6 +681,9 @@ class MPCNode(Node):
             delta_max = self.params_car['max_steer'],
             d_min     = 0.01,
             d_max     = self.max_pwm,
+            w_delta=0.1, 
+            w_d=1/0.35,
+            eps_fd=(0.15, 1e-3),
             # Closed-loop rollout: the CBF applies u_nom only on the first
             # step and re-evaluates pure pursuit at every later predicted
             # state, so steering has real authority over psi (a frozen-u

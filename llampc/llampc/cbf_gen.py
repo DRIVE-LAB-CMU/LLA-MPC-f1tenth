@@ -60,7 +60,7 @@ def cbf_qp_pacejka(x, u_nom, lla_params, known_params, obstacles,
                                 obstacles, r_car, alpha, N, return_states=True)
     if psi0 >= 0:
         return u_nom.copy(), dict(active=False, psi=psi0,
-                                    grad_psi=np.zeros(2), rollout=rollout_xs)
+                                  grad_psi=np.zeros(2), rollout=rollout_xs)
 
     grad = np.zeros(2)
     for i in range(2):
@@ -70,30 +70,6 @@ def cbf_qp_pacejka(x, u_nom, lla_params, known_params, obstacles,
         psi_m = _cbf_psi(x, u_nom - du, dt, lla_params, known_params,
                           obstacles, r_car, alpha, N)
         grad[i] = (psi_p - psi_m) / (2.0 * eps_fd[i])
-
-    # --- direct body-frame-lateral steering authority --------------------
-    px, py, psi = x[PX_], x[PY_], x[PSI_]
-    v = np.hypot(x[VX_], x[VY_])
-    
-    if obstacles:
-        p_near, r_near = min(
-            obstacles,
-            key=lambda pr: np.hypot(px - pr[0][0], py - pr[0][1]) - (pr[1] + r_car)
-        )
-        dxo, dyo = p_near[0] - px, p_near[1] - py
-        x_body =  np.cos(psi) * dxo + np.sin(psi) * dyo   
-        y_body = -np.sin(psi) * dxo + np.cos(psi) * dyo   
-        
-        if x_body > 0.0:
-            keep = r_near + r_car
-            dist = np.hypot(dxo, dyo)
-            k_geo, prox_cap, y_eps = 2.0, 3.0, 0.05
-            prox = prox_cap / (1.0 + max(dist - keep, 0.0) / keep)
-            side = 1.0 if abs(y_body) < y_eps else np.sign(y_body)
-            grad_steer_geo = -k_geo * v * prox * side
-            if abs(grad[DELTA_]) < abs(grad_steer_geo):
-                grad[DELTA_] = grad_steer_geo
-    # ---------------------------------------------------------------------
 
     Wi = np.array([1.0 / w_delta, 1.0 / w_d])
     den = float(grad @ (Wi * grad))
