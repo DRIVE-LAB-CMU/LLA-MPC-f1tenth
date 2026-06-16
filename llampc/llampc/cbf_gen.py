@@ -31,7 +31,8 @@ def _h_min(x, obstacles, r_car):
 # ── Predictive HOCBF condition (trajectory-min over an N-step rollout) ──
 def _cbf_psi(x, u, dt, lla_params, known_params, obstacles, r_car, alpha, N,
              return_states=False):
-    xs_rolled = np.asarray(_rollout_traj(lla_params, known_params, x, u, dt, N))
+    u_dyn = np.array([u[D_], u[DELTA_]])  # [δ, d] -> [pwm, steer] for diffequation
+    xs_rolled = np.asarray(_rollout_traj(lla_params, known_params, x, u_dyn, dt, N))
     xs = np.vstack([x, xs_rolled])  
     h_now = _h_min(x, obstacles, r_car)
     decay_base = 1.0 - alpha * dt
