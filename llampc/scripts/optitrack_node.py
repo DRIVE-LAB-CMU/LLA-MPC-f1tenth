@@ -114,9 +114,9 @@ class OptitrackSubscriber(Node):
 
         # Axis permutation matrix
         P = np.array([
-            [0, 0, -1],  # x_new = z_old
+            [0, 1, 0],  # x_new = z_old
             [1, 0, 0],  # y_new = x_old
-            [0, 1, 0]   # z_new = y_old
+            [0, 0, 1]   # z_new = y_old
         ])
 
         # Transform rotation matrix
