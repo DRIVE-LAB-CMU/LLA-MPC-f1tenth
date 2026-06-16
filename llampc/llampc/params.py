@@ -133,7 +133,7 @@ def get_param_dict_random(mean_dict, variation_dict, num_models, ground_truth=Fa
     return param_dict
 
 
-def get_param_dict_grid(mean_dict, variation_dict, discretization, ground_truth = False, noadapt=False):
+def get_param_dict_grid(mean_dict, variation_dict, discretization, ground_truth = False, noadapt=False, validate_param = None):
     param_dict = {}
  
     key_list = list(mean_dict.keys())
@@ -150,7 +150,7 @@ def get_param_dict_grid(mean_dict, variation_dict, discretization, ground_truth 
             param_dict[key] = np.array(param_dict[key])
         return param_dict
      
-    param_grid_recurse({}, param_dict, mean_dict, variation_dict, discretization, key_list, 0)
+    param_grid_recurse({}, param_dict, mean_dict, variation_dict, discretization, key_list, 0, validate_param)
             
     for key in key_list:
         param_dict[key] = np.array(param_dict[key])
@@ -172,12 +172,12 @@ def param_grid_recurse(model, param_dict, mean_dict, variation_dict, discretizat
     key = key_list[index]
     if(discretization[key] <= 1):
         model[key] = mean_dict[key]
-        param_grid_recurse(model, param_dict, mean_dict, variation_dict, discretization, key_list, index+1)
+        param_grid_recurse(model, param_dict, mean_dict, variation_dict, discretization, key_list, index+1, validate_param)
     else:
         interval = (2 * variation_dict[key]) / (discretization[key] -1)
         for i in range(discretization[key]):
             model[key] = (mean_dict[key] - variation_dict[key]) + interval * i
-            param_grid_recurse(model, param_dict, mean_dict, variation_dict, discretization, key_list, index+1)
+            param_grid_recurse(model, param_dict, mean_dict, variation_dict, discretization, key_list, index+1, validate_param)
             
             
             
