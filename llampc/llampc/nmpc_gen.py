@@ -13,11 +13,11 @@ def export_model(params_car, exact = False):
 
     model.name = "f1tenth"
 
-    x = ca.MX.sym('x', 8) # state: x, y, phi, vx, vy, omega, acceleration, delta
-    u = ca.MX.sym('u', 2) # control rate: jerk, steer rate
-    p = ca.MX.sym('p', 12)
+    x = ca.SX.sym('x', 8) # state: x, y, phi, vx, vy, omega, acceleration, delta
+    u = ca.SX.sym('u', 2) # control rate: jerk, steer rate
+    p = ca.SX.sym('p', 12)
 
-    x_ref = ca.MX.sym('x_ref', 8)
+    x_ref = ca.SX.sym('x_ref', 8)
     
 
     mass = params_car['mass']
@@ -65,23 +65,47 @@ def export_model(params_car, exact = False):
         dx7 = u[1]
 
     else:
-        Frx = mass * x[6]* ( p[8]  -  p[9] * x[3]) - p[6] - p[7] * x[3] * x[3]
+        # 1. Extract states for readability
+        psi   = x[2]
+        vx    = x[3]
+        vy    = x[4]
+        omega = x[5]
+        accel = x[6]
+        steer = x[7]
 
-        alphaf = x[7] - ca.atan2(x[5] * lf + x[4], x[3])
-        alphar = ca.atan2(x[5] * lr - x[4], x[3])
+        # 2. Low-speed singularity protection using if_else
+        vmin = 0.02
+        vy_safe    = ca.if_else(vx < vmin, 0.0, vy)
+        omega_safe = ca.if_else(vx < vmin, 0.0, omega)
+        steer_safe = ca.if_else(vx < vmin, 0.0, steer)
+        vx_safe    = ca.if_else(vx < vmin, vmin, vx)
 
+        # 3. Compute forces using the "safe" variables
+        # We use vx_safe here so drag forces don't behave weirdly at zero speed
+        Frx = mass * accel * (p[8] - p[9] * vx_safe) - p[6] - p[7] * vx_safe * vx_safe
+        
+        # Slip angles evaluate safely because vx_safe is never less than 0.05
+        alphaf = steer_safe - ca.atan2(omega_safe * lf + vy_safe, vx_safe)
+        alphar = ca.atan2(omega_safe * lr - vy_safe, vx_safe)
+
+        # Pacejka lateral tire forces
         Ffy = p[4] * ca.sin(p[2] * ca.atan(p[0] * alphaf))
         Fry = p[5] * ca.sin(p[3] * ca.atan(p[1] * alphar))
 
-        dx0 = (x[3] * ca.cos(x[2])) - (x[4] * ca.sin(x[2])) #xdot
-        dx1 = (x[3] * ca.sin(x[2])) + (x[4] * ca.cos(x[2])) #ydot
-        dx2 = x[5] #phidot
-        dx3 = ((Frx - Ffy * ca.sin(x[7])) / mass) + (x[4] * x[5]) #vxdot
-        dx4 = ((Fry + Ffy * ca.cos(x[7])) / mass ) - (x[3] * x[5]) #vydot
-        dx5 = (lf * Ffy * ca.cos(x[7]) - lr * Fry) / Iz #omegadot
-        dx6 = u[0] # jerk
-        dx7 = u[1] # steer rate
+        # 4. Compute derivatives
+        # Use ACTUAL vx and vy for world position so the car can perfectly stop
+        dx0 = (vx * ca.cos(psi)) - (vy * ca.sin(psi)) # xdot
+        dx1 = (vx * ca.sin(psi)) + (vy * ca.cos(psi)) # ydot
+        dx2 = omega                                   # phidot
 
+        # Use SAFE variables for dynamics so the solver doesn't panic at zero speed
+        dx3 = ((Frx - Ffy * ca.sin(steer_safe)) / mass) + (vy_safe * omega_safe) # vxdot
+        dx4 = ((Fry + Ffy * ca.cos(steer_safe)) / mass) - (vx_safe * omega_safe) # vydot
+        dx5 = (lf * Ffy * ca.cos(steer_safe) - lr * Fry) / Iz                    # omegadot
+        
+        # Control inputs
+        dx6 = u[0] # jerk (accel rate)
+        dx7 = u[1] # steer rate
 
     f_expl = ca.vertcat(dx0, dx1, dx2, dx3, dx4, dx5, dx6, dx7)
 
@@ -90,30 +114,6 @@ def export_model(params_car, exact = False):
     model.x = x
     model.u = u
     model.p = ca.vertcat(p, x_ref)
-
-    print("\n--- CASADI PRE-SOLVE DIAGNOSTIC ---")
-    try:
-        test_dyn_func = ca.Function('test_dyn', [model.x, model.u, model.p], [model.f_expl_expr])
-        
-        x_test = np.array([0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0]) # x, y, yaw, vx, vy, omega, a, steer
-        u_test = np.array([0.0, 0.0]) # jerk, steer_rate
-        
-        p_len = model.p.shape[0]
-        p_test = np.ones(p_len) * 0.1 
-        p_test[-8:] = x_test # Set x_ref to match x_test
-        
-        # Evaluate
-        dx_eval = test_dyn_func(x_test, u_test, p_test)
-        print("Dynamics evaluated at v_x = 5.0:")
-        print(dx_eval)
-        
-        if np.any(np.isnan(dx_eval)) or np.any(np.isinf(dx_eval)):
-            print("CRITICAL: Your CasADi dynamics evaluate to NaN/Inf. The solver is dead on arrival.")
-        else:
-            print("CasADi math is sound. The issue is in the Acados QP/Constraints.")
-    except Exception as e:
-        print(f"CasADi Function creation failed: {e}")
-    print("-----------------------------------\n")
 
     return model
 
@@ -136,14 +136,14 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.cost.cost_type = 'NONLINEAR_LS'
     ocp.cost.cost_type_e = 'NONLINEAR_LS'
 
-    w_x = 4.0
-    w_y = 4.0
+    w_x = 1.0
+    w_y = 1.0
     w_xe = 0.0
     w_ye = 0.0
-    w_accel = 0.01
-    w_steer = 0.01
-    w_jerk = 0.001
-    w_steer_v = 0.1
+    w_accel = 0.002
+    w_steer = 1
+    w_jerk = 0.0
+    w_steer_v = 0.0
     # w_vel = 0.001
     Q_flat = [w_x, w_y, 0, 0, 0, 0, w_accel, w_steer]
     R_flat = [w_jerk, w_steer_v]
@@ -225,9 +225,9 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.cost.Zu_e  = w_slack    * np.ones(nsbx_e)
     ###############################################
     
-    ocp.constraints.lbu = np.array([-10, -params_car['max_steer_vel']])
-    ocp.constraints.ubu = np.array([10, params_car['max_steer_vel']])
-    ocp.constraints.idxbu = np.array([0, 1]) # 0 is jerk, 1 is steer_vel
+    # ocp.constraints.lbu = np.array([-10, -params_car['max_steer_vel']])
+    # ocp.constraints.ubu = np.array([10, params_car['max_steer_vel']])
+    # ocp.constraints.idxbu = np.array([0, 1]) # 0 is jerk, 1 is steer_vel
 
     # ocp.constraints.lbu = np.array([-params_car['max_steer_vel']])
     # ocp.constraints.ubu = np.array([params_car['max_steer_vel']])
@@ -260,116 +260,181 @@ def create_ocp(model, params_car, steps, horizon):
     return ocp
 
 
-def create_ipopt_solver(model, params_car, steps, horizon):
-    N  = steps
-    dt = horizon / N
+import casadi as ca
+import numpy as np
 
-    x      = model.x
-    u      = model.u
-    p_sym  = model.p
-    f_expr = model.f_expl_expr
 
-    f_func      = ca.Function('f',      [x, u, p_sym], [f_expr])
 
-    w_x = 4.0
-    w_y = 4.0
-    w_xe = 0.0
-    w_ye = 0.0
-    w_accel = 0.01
-    w_steer = 0.01
-    w_jerk = 0.001
-    w_steer_v = 0.1
+# =============================================================================
+# 6-STATE model, condensed from the user's 8-state f1tenth model.
+#
+#   8-state original:  x = [x,y,psi,vx,vy,omega, accel, steer],  u = [jerk, steer_rate]
+#                      with dx6 = jerk, dx7 = steer_rate (pure integrators)
+#
+#   6-state condensed: x = [x,y,psi,vx,vy,omega],  u = [accel, steer]  (COMMANDS)
+#                      the integrators are removed; accel/steer are controls.
+#                      jerk / steer_rate are recovered as the inter-stage
+#                      differences (accel_k - accel_{k-1}) / dt  etc., penalized
+#                      and rate-limited as expressions in the solver.
+#
+#   The 6-row dynamics are exactly the `exact=True` branch of the original.
+#   Parameter layout p (length 12) is unchanged:
+#     p[0]=Bf p[1]=Br p[2]=Cf p[3]=Cr p[4]=Df p[5]=Dr
+#     p[6]=Cr0 p[7]=Cr2 p[8]=p8 p[9]=p9 p[10]=grade_long p[11]=grade_lat
+# =============================================================================
+import casadi as ca
+import numpy as np
 
-    Q = np.array([w_x, w_y, 0, 0, 0, 0, w_accel, w_steer])
-    R = np.array([w_jerk, w_steer_v])
+import numpy as np
+import casadi as ca
+import numpy as np
+import casadi as cs
 
-    X_vars = ca.MX.sym('X', 8, N + 1)
-    U_vars = ca.MX.sym('U', 2, N)
-    p_tire = ca.MX.sym('p_tire', 12)
-    X_ref  = ca.MX.sym('Xref',  8, N + 1)
-
-    obj = 0
-    g, g_lb, g_ub = [], [], []
-
-    for k in range(N):
-        xk   = X_vars[:, k]
-        uk   = U_vars[:, k]
-        xref = X_ref[:, k]
-        p_k  = ca.vertcat(p_tire, xref)
-
-        err  = xk - xref
-        obj += ca.dot(err, err * Q)
-        obj += ca.dot(uk, uk * R)
-        M      = 1
-        dt_sub = dt / M
-        xk_int = xk
-        for _ in range(M):
-            k1 = f_func(xk_int,               uk, p_k)
-            k2 = f_func(xk_int + dt_sub/2*k1, uk, p_k)
-            k3 = f_func(xk_int + dt_sub/2*k2, uk, p_k)
-            k4 = f_func(xk_int + dt_sub  *k3, uk, p_k)
-            xk_int = xk_int + dt_sub/6 * (k1 + 2*k2 + 2*k3 + k4)
-
-        g.append(X_vars[:, k + 1] - xk_int)
-        g_lb.extend([0.0] * 8)
-        g_ub.extend([0.0] * 8)
-
-    lbx_list, ubx_list = [], []
-    for _ in range(N + 1):
-        lbx_list.extend([-ca.inf, -ca.inf, -ca.inf,
-                          -0.5, -4.0, -2*np.pi, params_car['min_acc'],
-                          params_car['min_steer']])
-        ubx_list.extend([ ca.inf,  ca.inf,  ca.inf,
-                          params_car['max_v'], 4.0, 2*np.pi, 0.5, params_car['max_acc'],
-                          params_car['max_steer']])
-    for _ in range(N):
-        lbx_list.extend([-10, -params_car['max_steer_vel']])
-        ubx_list.extend([10,  params_car['max_steer_vel']])
-
-    lbx = np.array(lbx_list)
-    ubx = np.array(ubx_list)
-
-    all_vars   = ca.vertcat(ca.reshape(X_vars, -1, 1),
-                            ca.reshape(U_vars, -1, 1))
-    all_params = ca.vertcat(p_tire, ca.reshape(X_ref, -1, 1))
-
-    nlp = {'x': all_vars, 'f': obj, 'g': ca.vertcat(*g), 'p': all_params}
-
-    solver = ca.nlpsol('ipopt_mpc', 'ipopt', nlp, {
-        'ipopt.max_iter':              500,
-        'ipopt.tol':                   1e-4,
-        'ipopt.acceptable_tol':        1e-3,
-        'ipopt.acceptable_iter':       5,
-        'ipopt.hessian_approximation': 'limited-memory',
-        'ipopt.print_level':           0,
-        'print_time':                  0,
-    })
-
-    def solve(x0_state: np.ndarray,
-          p_tire_val: np.ndarray,
-          x_ref_traj: np.ndarray) -> dict:
+# =============================================================================
+# 1. INLINED DYNAMICS (Parametric Tires & Motors, Baked-in Mass/Geometry)
+# =============================================================================
+def get_dynamics(x, u, p_tire, m, dxdt_sym):
+    """
+    Inlines the symbolic operations.
+    Tire and motor parameters are now passed dynamically via the p_tire symbolic vector (length 12).
+    """
+    pwm, steer = u[0], u[1]
+    psi, vx, vy, omega = x[2], x[3], x[4], x[5]
     
-        p_val = np.concatenate([p_tire_val, x_ref_traj.flatten(order='F')])
+    # Extract parametric tire and motor variables (matches length 12 layout)
+    Bf, Br, Cf, Cr, Df, Dr = p_tire[0], p_tire[1], p_tire[2], p_tire[3], p_tire[4], p_tire[5]
+    Cm1, Cm2, Cr0, Cr2     = p_tire[6], p_tire[7], p_tire[8], p_tire[9]
+
+    vmin = 0.05
+    vy    = cs.if_else(vx < vmin, 0, vy)
+    omega = cs.if_else(vx < vmin, 0, omega)
+    steer = cs.if_else(vx < vmin, 0, steer)
+    vx    = cs.if_else(vx < vmin, vmin, vx)
+
+    # Motor params are now parametric
+    Frx = (Cm1 - Cm2 * vx) * pwm - Cr0 - Cr2 * (vx ** 2)
+    
+    alphaf = steer - cs.atan2((m['lf'] * omega + vy), vx)
+    alphar = cs.atan2((m['lr'] * omega - vy), vx)
+    
+    # Pacejka equations use the parametric variables
+    Ffy = Df * cs.sin(Cf * cs.arctan(Bf * alphaf))
+    Fry = Dr * cs.sin(Cr * cs.arctan(Br * alphar))
+
+    dxdt_sym[0] = vx * cs.cos(psi) - vy * cs.sin(psi)
+    dxdt_sym[1] = vx * cs.sin(psi) + vy * cs.cos(psi)
+    dxdt_sym[2] = omega
+    dxdt_sym[3] = 1 / m['mass'] * (Frx - Ffy * cs.sin(steer)) + vy * omega
+    dxdt_sym[4] = 1 / m['mass'] * (Fry + Ffy * cs.cos(steer)) - vx * omega
+    dxdt_sym[5] = 1 / m['Iz']   * (Ffy * m['lf'] * cs.cos(steer) - Fry * m['lr'])
+    
+    return dxdt_sym
+
+
+# =============================================================================
+# 2. CREATE IPOPT SOLVER (Functional Closure)
+# =============================================================================
+def create_ipopt_solver(horizon, Ts, Q, R, base_params):
+    """
+    Builds a single CasADi NLP problem that accepts tire & motor parameters at runtime.
+    """
+    n_states  = 6
+    n_inputs  = 2
+    xref_size = 2
+
+    # --- Symbolic Variables ---
+    x0     = cs.SX.sym('x0', n_states, 1)
+    xref   = cs.SX.sym('xref', xref_size, horizon + 1)
+    uprev  = cs.SX.sym('uprev', 2, 1)
+    x      = cs.SX.sym('x', n_states, horizon + 1)
+    u      = cs.SX.sym('u', n_inputs, horizon)
+    dxdtc  = cs.SX.sym('dxdt', n_states, 1)
+    
+    # New: 12-element symbolic vector for the Pacejka + Motor variables
+    p_tire = cs.SX.sym('p_tire', 12, 1)
+
+    cost_tracking = 0
+    cost_actuation = 0
+    cost_violation = 0
+
+    # --- Terminal Cost & Initial State ---
+    cost_tracking += (x[:xref_size, -1] - xref[:xref_size, -1]).T @ Q @ (x[:xref_size, -1] - xref[:xref_size, -1])
+    constraints = x[:, 0] - x0
+
+    # --- Loop 1: Dynamics Continuity ---
+    for idh in range(horizon):
+        # Pass the p_tire symbolic vector into the dynamics
+        dxdt = get_dynamics(x[:, idh], u[:, idh], p_tire, base_params, dxdtc)
+        constraints = cs.vertcat(constraints, x[:, idh + 1] - x[:, idh] - Ts * dxdt)
+
+    # --- Loop 2: Path Cost + Actuation + Bounds ---
+    for idh in range(horizon):
+        deltaU = (u[:, idh] - uprev) if idh == 0 else (u[:, idh] - u[:, idh - 1])
+
+        cost_tracking  += (x[:xref_size, idh + 1] - xref[:xref_size, idh + 1]).T @ Q @ (x[:xref_size, idh + 1] - xref[:xref_size, idh + 1])
+        cost_actuation += deltaU.T @ R @ deltaU
+
+        constraints = cs.vertcat(constraints,  u[:, idh] - base_params['max_inputs'])
+        constraints = cs.vertcat(constraints, -u[:, idh] + base_params['min_inputs'])
+        constraints = cs.vertcat(constraints,  deltaU[1] - base_params['max_rates'][1] * Ts)
+        constraints = cs.vertcat(constraints, -deltaU[1] + base_params['min_rates'][1] * Ts)
+
+    # --- Compile Problem ---
+    cost  = cost_tracking + cost_actuation + cost_violation
+    xvars = cs.vertcat(cs.reshape(x, -1, 1), cs.reshape(u, -1, 1))
+    
+    # Append p_tire to the end of the parameter vector
+    pvars = cs.vertcat(cs.reshape(x0, -1, 1), cs.reshape(xref, -1, 1), cs.reshape(uprev, -1, 1), p_tire)
+
+    nlp = {'x': xvars, 'p': pvars, 'f': cost, 'g': constraints}
+    
+    ipoptoptions = {
+        'print_level': 0, 
+        'print_timing_statistics': 'yes', 
+        'max_iter': 100,
+        'linear_solver': 'mumps',
+        'mumps_pivtol': 1e-6,
+        'mumps_mem_percent': 200,
+        'mumps_pivot_order': 0
+    }
+    options = {'expand': True, 'print_time': True, 'ipopt': ipoptoptions}
+    problem = cs.nlpsol('nmpc', 'ipopt', nlp, options)
+
+    # --- Closure Solver ---
+    # Signature updated to require p_tire_val (which should be length 12)
+    def solve(x0_val, xref_val, uprev_val, p_tire_val):
+        Aineq = np.zeros([0, 2]); bineq = np.zeros([0, 1])
         
-        lbx[:8] = x0_state
-        ubx[:8] = x0_state
+        arg = {}
+        arg['p'] = np.concatenate([
+            x0_val.reshape(-1, 1),
+            xref_val.T.reshape(-1, 1),
+            uprev_val.reshape(-1, 1),
+            Aineq.T.reshape(-1, 1), # Kept for byte-compatibility
+            bineq.T.reshape(-1, 1), # Kept for byte-compatibility
+            p_tire_val.reshape(-1, 1)
+        ])
+        arg['lbx'] = -np.inf * np.ones(n_states * (horizon + 1) + n_inputs * horizon)
+        arg['ubx'] =  np.inf * np.ones(n_states * (horizon + 1) + n_inputs * horizon)
+        arg['lbg'] = np.concatenate([np.zeros(n_states * (horizon + 1)), -np.inf * np.ones(horizon * 6)])
+        arg['ubg'] = np.concatenate([np.zeros(n_states * (horizon + 1)),  np.zeros(horizon * 6)])
 
-        sol = solver(lbx=lbx, ubx=ubx, lbg=g_lb, ubg=g_ub, p=p_val)
-
-        res      = sol['x'].full().flatten()
-        nx_total = 8 * (N + 1)
-        X_sol    = res[:nx_total].reshape(8, N + 1, order='F')
-        U_sol    = res[nx_total:].reshape(2, N,     order='F')
-
+        res  = problem(**arg)
+        
+        # Extract and reshape the predicted states for the full horizon (Shape: 6 x N+1)
+        xmpc = res['x'][:n_states * (horizon + 1)].full().reshape(horizon + 1, n_states).T
+        
+        # Extract and reshape the control inputs for the full horizon (Shape: 2 x N)
+        umpc = res['x'][n_states * (horizon + 1):n_states * (horizon + 1) + n_inputs * horizon].full().reshape(horizon, n_inputs).T
+        
+        # Return both the immediate control to apply and the full predicted trajectory
         return {
-            'u':      U_sol[:, 0],
-            'X':      X_sol,
-            'U':      U_sol,
-            'status': solver.stats()['return_status'],
+            'u': umpc[:, 0],
+            'X': xmpc
         }
-        
     return solve
 
+    
 def get_solver_directory(solver_config = "default"):
     # package_dir = Path(get_package_share_directory('llampc'))
     package_dir = Path(__file__).parent.resolve()
@@ -409,11 +474,114 @@ def setup_mpc_ipopt(steps, horizon, params_car=F110):
     p_car = params_car()
     try:
         
-        f1tenth_model = export_model(p_car, exact = True)
-        solver = create_ipopt_solver(f1tenth_model, p_car, steps, horizon)
+        w_x = 1.0
+        w_y = 1.0
+        w_xe = 0.0
+        w_ye = 0.0
+        w_accel = 0.002
+        w_steer = 1
+        w_jerk = 0.0
+        w_steer_v = 0.0
+        # w_vel = 0.001
+        Q = np.diag([w_x, w_y])
+        R = np.diag([w_jerk, w_steer_v])
+
+        
+        solver = create_ipopt_solver(steps, horizon/steps, Q, R, p_car)
+        # solver = setupNLP(steps, horizon/steps,np.diag([1, 1]), 
+        #                   np.diag([0, 0]), np.diag([0.005, 1]),
+        #                   )
 
         return solver
     except Exception as e:
         print(f"Error generating solver: {e}")
         raise 
 
+import os
+import re
+import ast
+import time
+import numpy as np
+import casadi as ca
+# =================================================================
+# 2. FILE PARSER WITH TIMING EXTRACTION
+# =================================================================
+def parse_mpc_log_file(file_path):
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    with open(file_path, 'r') as f:
+        raw_text = f.read().replace('\xa0', ' ')
+
+    blocks = raw_text.split("x0:[")
+    parsed_cases = []
+
+    for idx, block in enumerate(blocks[1:]):
+        full_block = "x0:[" + block
+        try:
+            x0_match = re.search(r"x0:\[(.*?)\]", full_block)
+            x0 = np.fromstring(x0_match.group(1).replace('\n', ' '), sep=' ')
+
+            xref_match = re.search(r"xref:\[\[(.*?)]\s*\[(.*?)]\]", full_block, re.DOTALL)
+            r1 = np.fromstring(xref_match.group(1).replace('\n', ' '), sep=' ')
+            r2 = np.fromstring(xref_match.group(2).replace('\n', ' '), sep=' ')
+            xref = np.vstack([r1, r2])
+
+            uprev_match = re.search(r"uprev:\[(.*?)\]", full_block)
+            uprev = np.fromstring(uprev_match.group(1).replace('\n', ' '), sep=' ')
+
+            dict_match = re.search(r"params(\{.*?\})", full_block)
+            params_line = ast.literal_eval(dict_match.group(1))
+
+            time_match = re.search(r"total\s*\|\s*([\d\.]+)ms", full_block)
+            their_time = float(time_match.group(1)) if time_match else None
+
+            parsed_cases.append({
+                'params_car': params_line,
+                'x0': x0,
+                'xref': xref,
+                'uprev': uprev,
+                'their_time_ms': their_time
+            })
+        except Exception as err:
+            print(f"⚠️ Block parse exception at index {idx}: {err}")
+
+    return parsed_cases
+
+
+# =================================================================
+# 3. CLEAN LIVE REPLAY REPLAY LOOP
+# =================================================================
+if __name__ == "__main__":
+    log_file = "mpc_log.txt"
+    test_cases = parse_mpc_log_file(log_file)
+    
+    if not test_cases:
+        print("❌ Workspace processing halted: No log lines loaded.")
+        exit()
+
+    initial_snapshot = test_cases[0]['params_car']
+    steps = test_cases[0]['xref'].shape[1] - 1
+    horizon = steps * 0.05
+
+    print("🔨 Instantiating underlying optimization graph...")
+    solve_fcn = create_ipopt_solver(initial_snapshot, steps=steps, horizon=horizon)
+    print("✔️ Graph ready. Processing sequential replay iterations:\n")
+
+    for idx, case in enumerate(test_cases):
+        line_params = case['params_car']
+        p_tire_val = [
+            line_params['Bf'],  line_params['Br'],  line_params['Cf'],  line_params['Cr'],  
+            line_params['Df'],  line_params['Dr'],  line_params['Cm1'], line_params['Cm2'], 
+            line_params['Cr0'], line_params['Cr2'], 0.0,                0.0
+        ]
+
+        print(f"=== Running Replay Iteration {idx+36} ===")
+        their_time_str = f"{case['their_time_ms']:.2f} ms" if case['their_time_ms'] is not None else "N/A"
+        print(f"-> Expected Log Wall-Time: {their_time_str}")
+
+        # The internal C++ CasADi timers will dump their block directly to the screen here:
+        results = solve_fcn(case['x0'], case['xref'], case['uprev'], p_tire_val)
+
+        print(f"-> Status: {results['status']} | Iters Taken: {results['iters']}")
+        print(f"-> Output Control Vector -> PWM: {results['u'][0]:.5f}, Steer: {results['u'][1]:.5f}\n")

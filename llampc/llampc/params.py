@@ -85,8 +85,10 @@ def F110():
     return params
 
 def param_validate_ptm(model):
-    return model['Bf'] * model['Cf'] * model['Df'] <= 450 \
-        and model['Br'] * model['Cr'] * model['Dr'] <= 450 
+    return model['Bf'] * model['Cf'] <= 17 \
+        and model['Br'] * model['Cr'] <= 17 \
+        and model['Bf'] * model['Cf'] * model['Df'] <= 300 \
+        and model['Br'] * model['Cr'] * model['Dr'] <= 300
 
 
 def get_param_dict_random(mean_dict, variation_dict, num_models, ground_truth=False, validate_param=None):

@@ -19,7 +19,7 @@ import jax.numpy as jnp
 
 
 
-from llampc.nmpc_gen import setup_mpc_ipopt
+from llampc.nmpc_gen import setup_mpc
 from llampc.params import F110, F110_sim, get_param_dict_random, param_validate_ptm
 from llampc.planner import get_reference_trajectory_segment
 from llampc.utils import Track
@@ -123,7 +123,7 @@ class MPCNode(Node):
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
-        self.Tf = 0.8 # total time horizon (for nmpc)
+        self.Tf = 0.4 # total time horizon (for nmpc)
         self.dt = self.Tf / self.N
         self.control_callback_speed = 0.04
         self.lla_predict_horizon = 0.04
@@ -189,8 +189,8 @@ class MPCNode(Node):
             'Br': 6.5,
             'Cf': 1.4,
             'Cr': 1.4,
-            'Df': 17.0,
-            'Dr': 17.0,
+            'Df': 14.0,
+            'Dr': 14.0,
             'Cro': 0.2,
             'Cd': 0.0,
             'Ce': 0.55,
@@ -198,12 +198,12 @@ class MPCNode(Node):
         }
 
         variation_dict = {
-                'Bf': 5.5,   # 15% variation
-                'Br': 5.5,   # 15% variation
+                'Bf': 4.5,   # 15% variation
+                'Br': 4.5,   # 15% variation
                 'Cf': 0.3,   # 15% variation
                 'Cr': 0.3,   # 15% variation
-                'Df': 15,   # 15% variation
-                'Dr': 15,   # 15% variation
+                'Df': 8,   # 15% variation
+                'Dr': 8,   # 15% variation
                 'Cro': 0.2, # 15% variation
                 'Cd': 0,  # assume negligible drag
                 'Ce': 0.45,  # motor efficiency conversion should never be above 1
@@ -488,8 +488,7 @@ class MPCNode(Node):
 
         # start solver
         self.current_state = None
-        # self.solver = setup_mpc(self.N, self.Tf, build=True)
-        self.solver = setup_mpc_ipopt(self.N, self.Tf, build=True)
+        self.solver = setup_mpc(self.N, self.Tf, build=True)
         self.get_logger().info("SOLVER COMPILED, WARM STARTING")
         
         self.lb_history.predict_states(
@@ -672,7 +671,7 @@ class MPCNode(Node):
 
         self.checkpoint[3]= time.perf_counter_ns()
 
-        # print("DEBUG STATE:", aug_state)
+        print("DEBUG STATE:", aug_state)
         # print("DEBUG PARAMS NODE 0:", full_params[0])
         self.solver.options_set('rti_phase', 2)
         status = self.solver.solve()
