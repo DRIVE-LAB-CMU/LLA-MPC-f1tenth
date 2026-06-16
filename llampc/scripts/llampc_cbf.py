@@ -534,6 +534,24 @@ class MPCNode(Node):
             min_clear = min(min_clear, clear)
         return (min_clear < 0.0), float(min_clear)
 
+    # def cbf_rollout_policy(self, state):
+    #     """Closed-loop control the CBF replays at each predicted state.
+
+    #     Re-plans pure pursuit toward the raceline from the predicted state,
+    #     so the CBF rollout is a genuine turn-then-straighten maneuver rather
+    #     than a frozen arc. Returned in CBF [delta, d] order (pure_pursuit
+    #     returns [pwm, steer] = [d, delta], so the two are swapped).
+
+    #     projidx is passed read-only — get_lookahead_point's returned index is
+    #     intentionally discarded so the rollout never mutates the node's
+    #     progress along the track.
+    #     """
+    #     ref_pt, _ = get_lookahead_point(
+    #         state, self.track, self.projidx, lookahead_dist=0.7
+    #     )
+    #     u_pp = self.pure_pursuit_control(state, ref_pt)   # [pwm, steer]
+    #     return np.array([u_pp[1], u_pp[0]])               # [delta, d]
+
     def pure_pursuit_control(self, state, ref_point):
         x, y, psi = state[0], state[1], state[2]
 
@@ -654,7 +672,7 @@ class MPCNode(Node):
             r_car    = self.r_car,
             dt       = self.dt,
             alpha    = 10,
-            N        = 10,
+            N        = 20,
             # Match the CBF actuator bounds to THIS car's real command ranges.
             # The d-channel here carries pwm duty, not a normalized [-1, 1]
             # throttle, so the [-1, 1] module defaults would let the QP drive
@@ -663,6 +681,12 @@ class MPCNode(Node):
             delta_max = self.params_car['max_steer'],
             d_min     = 0.01,
             d_max     = self.max_pwm,
+            # Closed-loop rollout: the CBF applies u_nom only on the first
+            # step and re-evaluates pure pursuit at every later predicted
+            # state, so steering has real authority over psi (a frozen-u
+            # rollout gave delta a near-zero gradient and the filter could
+            # only brake).
+            # policy    = self.cbf_rollout_policy,
         )
 
 
@@ -686,8 +710,15 @@ class MPCNode(Node):
         # Swap back to [pwm, steer]
         u_safe = np.array([u_safe[1], u_safe[0]])
 
+        # Log the CBF's predictive rollout (the trajectory it reasoned over)
+        # so it can be replayed in the visualizer. rollout is (N+1, 6) with
+        # row 0 = current state, rows 1..N = predicted states. Drop row 0 so
+        # only the lookahead is shown.
         mpc_states = []
         mpc_controls = []
+        cbf_rollout = cbf_info.get('rollout', None)
+        if cbf_rollout is not None:
+            mpc_states = [np.asarray(s, dtype=float) for s in cbf_rollout[1:]]
 
         self.log_lla_data(selected_model_params, selected_model_index, mpc_states, record_ref_trajectory)
 
@@ -782,7 +813,7 @@ class MPCNode(Node):
             float(u_opt[1]),  # acceleration
             float(u_opt[0]),  # steer
             float(status),    # solver status
-            float(self.solver.get_cost())  # optimal cost
+            # float(self.solver.get_cost())  # optimal cost
         ]
         self.mpc_info_pub.publish(info_msg)
 
