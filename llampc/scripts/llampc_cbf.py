@@ -53,13 +53,13 @@ class MPCNode(Node):
 
         self.declare_params()
         self.initialize_mpc()
-       
+
         # drive commands
         self.last_drive_command = np.array([0.0, 0.0]) #vx, steer
         self.last_control = np.array([0.0, 0.0]) #acceleration, steer
         self.rates = np.array([0.0, 0.0])
         self.first_control = True
-        
+
         self.projidx = 0
 
         # timing
@@ -130,11 +130,11 @@ class MPCNode(Node):
         self.lla_reset_interval = 0
         self.lla_reset_counter = 0
         self.r_car = 0.04
-        
-        self.min_pwm = 0.05
+
+        self.min_pwm = 0.1
         self.max_pwm = 0.2
         self.params_car = F110()
-        
+
         self.obstacles = [
             (np.array([.75, -.25]), 0.1),
         ]
@@ -145,7 +145,7 @@ class MPCNode(Node):
 
             ros_log_root = os.path.expanduser("~/.ros/log")
             os.makedirs(ros_log_root, exist_ok=True)
-            
+
             timestamp = int(time.time() * 1e6)
             self.log_file = os.path.join(ros_log_root, f"{out_file}_{timestamp}.npz")
             self.log_buffer = {
@@ -163,11 +163,11 @@ class MPCNode(Node):
                 "running_cost":[],
             }
             self.get_logger().info(f"Logging MPC data to {self.log_file}")
-    
+
     def regular_setup(self):
         self.get_logger().info("Regular MPC Initialized")
         params_car = F110()
-        
+
         # mean_dict = {
         #     'Bf': 16.0,
         #     'Br': 16.0,
@@ -178,7 +178,7 @@ class MPCNode(Node):
         #     'Cro': 0.0,
         #     'Cd': 0.0,
         #     'Ce': 0.55,
-        #     'Cm': .05, 
+        #     'Cm': .05,
         # }
 
         # variation_dict = {
@@ -205,9 +205,9 @@ class MPCNode(Node):
             'Cro': 0.0,
             'Cd': 0.0,
             'Ce': 10,
-            'Cm': 0.0, 
+            'Cm': 0.0,
         }
-        
+
 
         variation_dict = {
                 'Bf': 5.5,   # 15% variation
@@ -221,9 +221,9 @@ class MPCNode(Node):
                 'Ce': 0,  # motor efficiency conversion should never be above 1
                 'Cm': 0.0,  # motor speed saturation
             }
-        
-        
-        
+
+
+
         # variation_dict = {
         #         'Bf': 0,   # 15% variation
         #         'Br': 0,   # 15% variation
@@ -237,11 +237,11 @@ class MPCNode(Node):
         #         'Cm': 0.0,  # motor speed saturation
         #     }
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
-        
+
         # random selection
         # num_models = 1
         # param_dict = get_param_dict_random(mean_dict, variation_dict, num_models, ground_truth=True)
-        
+
         # grid discretization
         discretization_dict = {
             'Bf': 4,   # 15% variation
@@ -255,14 +255,16 @@ class MPCNode(Node):
             'Ce': 1,  # motor efficiency conversion should never be above 1
             'Cm': 1,  # motor speed saturation
         }
-        param_dict = get_param_dict_grid(mean_dict, variation_dict, discretization=discretization_dict, ground_truth=True)
+        param_dict = get_param_dict_grid(mean_dict, variation_dict,
+                                         discretization=discretization_dict, ground_truth=True,
+                                         noadapt=False)
         num_models = len(param_dict['Bf'])
-        
+
         self.get_logger().info("Dynamics bank starting")
 
         self.dynamics_bank = dynamics.DBMPacejkaBank(
-            params_car['lf'], params_car['lr'], 
-            params_car['mass'], params_car['Iz'], 
+            params_car['lf'], params_car['lr'],
+            params_car['mass'], params_car['Iz'],
             param_dict['Bf'], param_dict['Br'],
             param_dict['Cf'], param_dict['Cr'],
             param_dict['Df'], param_dict['Dr'],
@@ -271,9 +273,9 @@ class MPCNode(Node):
             0, 0,
             num_models
         )
-        
+
         self.get_logger().info("History starting")
-        
+
         history_length=40
         self.lb_history = history.LBHistory(
             num_models, history_length,
@@ -282,13 +284,13 @@ class MPCNode(Node):
             self.dynamics_bank, dynamics.diffequation,
             buffer_size = [0, 0]
         )
-        
+
         self.get_logger().info("History generation complete")
 
     def exp_setup(self):
         self.get_logger().info("novar Initialized")
         params_car = F110()
-        
+
         mean_dict = {
             'Bf': 15.0,
             'Br': 15.0,
@@ -299,8 +301,8 @@ class MPCNode(Node):
             'Cro': 0.02,
             'Cd': 0.001,
             'Ce': 1.0,
-            'Cm': .05, 
-            
+            'Cm': .05,
+
         }
 
         variation_dict = {
@@ -316,14 +318,14 @@ class MPCNode(Node):
                 'Cm': 0, # 15% variation
             }
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
-        
+
         num_models = 1
         self.state_size = 6
         param_dict = get_param_dict_random(mean_dict, variation_dict, num_models, ground_truth=True)
 
         self.dynamics_bank = dynamics.DBMPacejkaBank(
-            params_car['lf'], params_car['lr'], 
-            params_car['mass'], params_car['Iz'], 
+            params_car['lf'], params_car['lr'],
+            params_car['mass'], params_car['Iz'],
             param_dict['Bf'], param_dict['Br'],
             param_dict['Cf'], param_dict['Cr'],
             param_dict['Df'], param_dict['Dr'],
@@ -332,7 +334,7 @@ class MPCNode(Node):
             0, 0,
             num_models
         )
-        
+
         history_length=25
         self.lb_history = history.LBHistory(
             num_models, history_length,
@@ -346,17 +348,17 @@ class MPCNode(Node):
         self.get_logger().info("Roll Pitch MPC Initialized")
         params_car = F110()
         variation_dict = {
-            'Df': .2,   
+            'Df': .2,
             'Dr': .2,
-            'roll': np.pi/4, 
+            'roll': np.pi/4,
             'pitch': np.pi/4
         }
 
         mean_dict = {
             'Df': 0.8,
             'Dr': 0.8,
-            'roll': 0, 
-            'pitch': 0  
+            'roll': 0,
+            'pitch': 0
         }
 
         static_dict = {
@@ -367,18 +369,18 @@ class MPCNode(Node):
             'Cro': 0.02,
             'Cd': 0.001,
             'Ce': 1.0,
-            'Cm': .05, 
+            'Cm': .05,
         }
 
         cost_weights = np.array([1.0, 1.0, 0.1, 0.01, .01, 0]) # x, y, theta, vx, vy, omega
-        
+
         num_models = 6000
         self.state_size = 6
         param_dict = get_param_dict_random(mean_dict, variation_dict, num_models)
 
         self.dynamics_bank = dynamics_rp.DBMPacejkaBankRP(
-            params_car['lf'], params_car['lr'], 
-            params_car['mass'], params_car['Iz'], 
+            params_car['lf'], params_car['lr'],
+            params_car['mass'], params_car['Iz'],
             static_dict['Bf'], static_dict['Br'],
             static_dict['Cf'], static_dict['Cr'],
             param_dict['Df'], param_dict['Dr'],
@@ -401,13 +403,13 @@ class MPCNode(Node):
         cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0, 0])
 
         mean_dict = {
-            'C_Sf': params_car['C_Sf'], 
+            'C_Sf': params_car['C_Sf'],
             'C_Sr':params_car['C_Sr'],
             'mu': params_car['mu'],
         }
 
         variation_dict = {
-            'C_Sf': 0, 
+            'C_Sf': 0,
             'C_Sr': 0,
             'mu': 0,
         }
@@ -435,7 +437,7 @@ class MPCNode(Node):
     def full_setup(self):
         self.get_logger().info("Regular MPC Initialized")
         params_car = F110()
-        
+
         mean_dict = {
             'Bf': 15.0,
             'Br': 15.0,
@@ -446,7 +448,7 @@ class MPCNode(Node):
             'Cro': 0,
             'Cd': 0,
             'Ce': 1.0,
-            'Cm': 0, 
+            'Cm': 0,
             'roll': 0,
             'pitch': 0
         }
@@ -465,26 +467,26 @@ class MPCNode(Node):
             'roll': np.pi/4,
             'pitch': np.pi/4
         }
-        
+
         cost_weights = np.array([1.0, 1.0, 0.1, 0.01, 0.01, 0]) # x, y, theta, vx, vy, omega
-        
+
         num_models = 7000
         self.state_size = 6
         param_dict = get_param_dict_random(mean_dict, variation_dict, num_models)
 
         self.dynamics_bank = dynamics_full.DBMPacejkaBank(
-            params_car['lf'], params_car['lr'], 
-            params_car['mass'], params_car['Iz'], 
+            params_car['lf'], params_car['lr'],
+            params_car['mass'], params_car['Iz'],
             param_dict['Bf'], param_dict['Br'],
             param_dict['Cf'], param_dict['Cr'],
             param_dict['Df'], param_dict['Dr'],
             param_dict['Cro'], param_dict['Cd'],
             param_dict['Ce'], param_dict['Cm'],
             param_dict['roll'], param_dict['pitch'],
-            
-            
+
+
         )
-        
+
         history_length=25
         self.lb_history = history.LBHistory(
             num_models, history_length,
@@ -497,7 +499,7 @@ class MPCNode(Node):
     def initialize_mpc(self):
         variation_dict = None
         mean_dict = None
-        
+
         self.state_size = 6
 
         if not self.sim:
@@ -509,10 +511,10 @@ class MPCNode(Node):
                 self.full_setup()
             else:
                 self.regular_setup()
-            
+
         else:
             self.sim_setup()
-            
+
 
         import multiprocessing
         self.get_logger().info(f"Devices seen: {multiprocessing.cpu_count()}")
@@ -530,7 +532,7 @@ class MPCNode(Node):
         self.current_state = None
         # self.solver = setup_mpc(self.N, self.Tf, build=True)
         self.get_logger().info("SOLVER COMPILED, WARM STARTING")
-        
+
         self.lb_history.predict_states(
             np.zeros(self.state_size), np.zeros(2)
             )
@@ -542,11 +544,11 @@ class MPCNode(Node):
         self.lb_history.reset()
         self.get_logger().info("LLA BANK COMPILED")
 
-    def odom_callback(self, msg):    
-        # print("hello")    
+    def odom_callback(self, msg):
+        # print("hello")
         x = msg.pose.pose.position.x
         y = msg.pose.pose.position.y
-        
+
         # Convert quaternion to yaw
         qx = msg.pose.pose.orientation.x
         qy = msg.pose.pose.orientation.y
@@ -560,7 +562,7 @@ class MPCNode(Node):
         phi = np.unwrap([prev_phi, phi])[1]
 
         # print(phi)
-        
+
         vx = msg.twist.twist.linear.x
         vy = msg.twist.twist.linear.y
         omega = msg.twist.twist.angular.z
@@ -568,13 +570,13 @@ class MPCNode(Node):
         self.current_state = np.array([x, y, phi, vx, vy, omega])
 
         # self.get_logger().info(f"Logging State {self.current_state}")
-        
+
     def pure_pursuit_control(self, state, ref_point):
         x, y, psi = state[0], state[1], state[2]
 
         dx = ref_point[0] - x
         dy = ref_point[1] - y
-        
+
         # Transform goal to vehicle local frame
         local_x =  np.cos(psi) * dx + np.sin(psi) * dy
         local_y = -np.sin(psi) * dx + np.cos(psi) * dy
@@ -588,7 +590,7 @@ class MPCNode(Node):
             wheelbase   = self.params_car['lf']+self.params_car['lr'] # Fallback to 0.33m if missing
             numerator   = 2.0 * wheelbase * local_y
             denominator = goal_dist**2
-            
+
             steer = float(np.clip(
                 np.arctan2(numerator, denominator),
                 self.params_car['min_steer'], self.params_car['max_steer']
@@ -599,17 +601,17 @@ class MPCNode(Node):
         pwm   = float(self.min_pwm + scale * np.sqrt(1.0 - abs(steer / self.params_car['max_steer'])))
 
         return np.array([pwm, steer])
-    
+
     def control_callback(self):
         # print(self.track)
-        
+
         self.checkpoint[0] = time.perf_counter_ns()
 
         # print(self.current_state)
 
         if self.track is None or self.current_state is None:
             return
-        
+
         ##############################################
         ### BANK UPDATE
         one_step_cost = None
@@ -629,7 +631,7 @@ class MPCNode(Node):
                         self.current_state[2],
                         self.current_state[3],
                         np.arctan2(self.current_state[4], self.current_state[3]),
-                        self.current_state[5], 
+                        self.current_state[5],
                         self.last_control[1]
                     ]
                 )
@@ -653,11 +655,11 @@ class MPCNode(Node):
 
         record_ref_trajectory = [ref_point]
         if self.publish_trajectories:
-            self.publish_ref_trajectory(ref_point.reshape(-1, 1)) 
+            self.publish_ref_trajectory(ref_point.reshape(-1, 1))
             # print(f"REF: {ref_point}")
 
         self.checkpoint[2] = time.perf_counter_ns()
-        
+
         selected_model_params = None
         if self.sim:
             selected_model_index = -1
@@ -671,24 +673,24 @@ class MPCNode(Node):
                 0.02,
                 0.001,
                 1.0,
-                .05, 
+                .05,
             ]
             )
         else:
             selected_model_index = self.lb_history.get_best_model()
             selected_model_params = self.dynamics_bank.get_model_params_arr(selected_model_index)
 
-        
-            
+
+
         # print(f"SELECTED PARAMS {selected_model_params}")
-        
+
         ########################################################
         #### SETUP AND SOLVE MPC
         # filtered_state = self.current_state.copy()
         # if( np.abs(self.current_state[3]) < 0.01):
         #     filtered_state[3] = 0.1
 
-        
+
         # # filtered_state[2] = (filtered_state[2] + np.pi) % (2 * np.pi) - np.pi
 
         # aug_state = np.concatenate([filtered_state, self.last_control])
@@ -701,7 +703,7 @@ class MPCNode(Node):
         #     # self.get_logger().info(f"{full_params}")
         #     full_params[:, 12:12+6] = ref_segment[:6, :N+1].T #reference x, y, theta
         #     return full_params
-        
+
         # full_params = construct_params(self.N, selected_model_params, ref_segment)
 
         # for i in range(self.N+1):
@@ -712,7 +714,7 @@ class MPCNode(Node):
 
         # if(self.first_control):
         #     self.first_control = False
-            
+
         self.checkpoint[3]= time.perf_counter_ns()
 
         # print("DEBUG STATE:", aug_state)
@@ -723,17 +725,17 @@ class MPCNode(Node):
 
         # if status != 0:
         #     self.get_logger().warn(f"MPC solver failed with status: {status}. Resetting memory!")
-            
+
         #     # Rescue the solver from the death spiral by flatlining the guess
         #     for i in range(self.N + 1):
         #         self.solver.set(i, "x", aug_state)
-            
+
         #     # Reset the controls to 0.0 to prevent steering spikes
         #     for i in range(self.N):
         #         self.solver.set(i, "u", np.zeros(2))
 
         # status = self.solver.solve()
-        
+
         u_opt = self.pure_pursuit_control(self.current_state, ref_point)
 
 
@@ -741,7 +743,7 @@ class MPCNode(Node):
 
         # u_opt = self.solver.get(1, "x")[-2:] # pwm, delta
         # solved_node = self.solver.get(1, "x")
-        
+
         u_nom_cbf = np.array([u_opt[1], u_opt[0]])  # [steer, pwm]
 
         # Pull the current best Pacejka params (first 6: Bf,Cf,Df,Br,Cr,Dr)
@@ -756,8 +758,16 @@ class MPCNode(Node):
             dt       = self.dt,
             alpha    = 2.5,
             N        = 10,
+            # Match the CBF actuator bounds to THIS car's real command ranges.
+            # The d-channel here carries pwm duty, not a normalized [-1, 1]
+            # throttle, so the [-1, 1] module defaults would let the QP drive
+            # pwm negative when braking near an obstacle.  Pin to the pure-
+            # pursuit pwm band so the filter can only stay in forward duty.
+            delta_max = self.params_car['max_steer'],
+            d_min     = 0.01,
+            d_max     = self.max_pwm,
         )
-    
+
 
         if cbf_info['active']:
             self.get_logger().warn(
@@ -771,14 +781,14 @@ class MPCNode(Node):
 
         mpc_states = []
         mpc_controls = []
-        
+
         # if(self.publish_trajectories):
-            
-            
+
+
         #     for i in range(self.N + 1):
         #         x_pred = self.solver.get(i, "x")[:6]
         #         mpc_states.append(x_pred)
-                
+
                 # c_pred = self.solver.get(i, "x")[-2:]
                 # mpc_controls.append(c_pred)
 
@@ -786,12 +796,12 @@ class MPCNode(Node):
 
                 # print(f"PREDICTED STATES: {predicted_states}")
                 # print(f"PREDICTED CONTROLS: {predicted_controls}")
-                
+
             # self.publish_predicted_trajectory(mpc_states) # Publish predicted trajectory
-            
+
         self.log_lla_data(selected_model_params, selected_model_index, mpc_states, record_ref_trajectory)
 
-        
+
         if(not ok_time):
             self.lla_reset_counter = 0
 
@@ -807,11 +817,14 @@ class MPCNode(Node):
         if not self.sim:
             #version for our dynamics
             self.checkpoint[5] = time.perf_counter_ns()
+            # Feed the bank the control we ACTUALLY applied (post-CBF), not the
+            # pre-filter pure-pursuit command.  u_safe is [pwm, steer]; the bank
+            # predict_states expects the same [pwm, steer] order as u_opt.
             self.lb_history.predict_states(
-                self.current_state, u_opt, self.lla_reset_counter == 0
+                self.current_state, u_safe, self.lla_reset_counter == 0
             )
             self.checkpoint[6] = time.perf_counter_ns()
-            
+
         # else:
         #     # steer_v = self.solver.get(0, "u")[1]
         #     self.lb_history.predict_states(
@@ -822,50 +835,50 @@ class MPCNode(Node):
         #                 self.current_state[2],
         #                 self.current_state[3],
         #                 np.arctan2(self.current_state[4], self.current_state[3]),
-        #                 self.current_state[5], 
+        #                 self.current_state[5],
         #                 self.last_control[1]
         #             ]
         #         ),
-        #         np.array([u_opt[0], steer_v]) 
+        #         np.array([u_opt[0], steer_v])
         #     )
 
         self.count = (self.count + 1) % self.time_window
         self.time_history[:self.checkpoints-1, self.count] = np.array(self.checkpoint[1:]-self.checkpoint[:-1])
         self.time_history[-1, self.count] = (self.checkpoint[-1] - self.checkpoint[0])
-    
+
         # if(self.count == 0):
         #     print(f"TIME: {np.max(self.time_history*1e-6, axis = 1)}")
         # else:
         #     print(f"\n--- SOLVER FAILED WITH STATUS {status} ---")
         #     # Status codes: 0=success, 1=failure, 2=max iter, 3=MINLP fail, 4=QP solver failed
-            
+
         #     # 1. Print internal solver statistics
         #     self.solver.print_statistics()
-            
+
         #     # 2. Check maximum residuals (stationarity, eq constraints, ineq constraints, comp)
         #     residuals = self.solver.get_residuals()
         #     print(f"Max Residuals (stat, eq, ineq, comp): {residuals}")
-            
+
         #     # 3. Trace the states node-by-node to find where the math exploded
         #     N = self.solver.acados_ocp.dims.N
         #     print("\n--- NODE TRAJECTORY DUMP ---")
         #     for i in range(N + 1):
         #         x_i = self.solver.get(i, "x")
         #         print(f"Node {i} | State: {np.round(x_i, 3)}")
-                
+
         #         if np.any(np.isnan(x_i)) or np.any(np.isinf(x_i)):
         #             print(f">>> FATAL ERROR: NaN/Inf detected at Node {i} <<<")
         #             if i > 0:
         #                 u_prev = self.solver.get(i-1, "u")
         #                 print(f">>> Control applied at Node {i-1}: {u_prev} <<<")
         #             break # Stop reading after first explosion
-                    
+
         #     print("-----------------------------------\n")
         #     drive_msg = AckermannDriveStamped()
         #     drive_msg.drive.speed = 0.0
         #     drive_msg.drive.steering_angle = 0.0
         #     self.cmd_pub.publish(drive_msg)
-            
+
         #     # Reset internal memory safely
         #     self.last_drive_command = np.array([0.0, 0.0])
         #     self.last_control = np.array([0.0, 0.0])
@@ -898,12 +911,12 @@ class MPCNode(Node):
         accel = float(u_opt[0])
         pwm = float(u_opt[0])
         steer = float(u_opt[1])
-        
+
         # print("PWM")
         # print(pwm)
 
         # sensor_velocity = np.sqrt(self.current_state[3] **2 + self.current_state[4]**2)
-        
+
         # Create Ackermann drive message
         drive_msg = AckermannDriveStamped()
         drive_msg.header.stamp = self.get_clock().now().to_msg()
@@ -914,7 +927,7 @@ class MPCNode(Node):
         # print(f"NEW_INT {self.current_state[3] + accel * self.dt}")
         new_int = self.current_state[3] + accel * self.dt
         # old = self.last_drive_command[0] + accel * self.dt
-        
+
         # Convert acceleration to speed command (simple integration)
         # desired_speed = max(0.0, new_int)
 
@@ -923,12 +936,12 @@ class MPCNode(Node):
         drive_msg.drive.acceleration = pwm
         drive_msg.drive.steering_angle = steer
 
-        self.cmd_pub.publish(drive_msg) 
+        self.cmd_pub.publish(drive_msg)
 
         self.last_drive_command = np.array([pwm, steer])
         # print( acceleration * self.dt)
         self.last_control = np.array([pwm, steer])
-        
+
 
     def publish_predicted_trajectory(self, predicted_states):
         """Publish predicted trajectory for visualization"""
@@ -936,7 +949,7 @@ class MPCNode(Node):
         path_msg = PoseArray()
         path_msg.header.stamp = self.get_clock().now().to_msg()
         path_msg.header.frame_id = "map"
-        
+
         for state in predicted_states:
             pose_unstamped = Pose()
             pose_unstamped.position.x = float(state[0])
@@ -946,13 +959,13 @@ class MPCNode(Node):
             yaw = float(state[2])
             pose_unstamped.orientation.w = np.cos(yaw / 2.0)
             pose_unstamped.orientation.z = np.sin(yaw / 2.0)
-            
+
             path_msg.poses.append(pose_unstamped)
 
         # print(f"{predicted_states}")
-        
+
         self.predicted_path_pub.publish(path_msg)
-    
+
     def publish_mpc_info(self, u_opt, status):
         """Publish MPC solver information"""
         info_msg = Float64MultiArray()
@@ -993,7 +1006,7 @@ class MPCNode(Node):
                 state=np.array(self.log_buffer["state"]),
                 params=np.array(self.log_buffer["params"]),
                 model_index=np.array(self.log_buffer["model_idx"]),
-                ctrl=np.array(self.log_buffer["ctrl"]), 
+                ctrl=np.array(self.log_buffer["ctrl"]),
                 states=np.array(self.log_buffer["predicted_state"]),
                 mpc_rollout=np.array(self.log_buffer["mpc_rollout"]),
                 ref_trajectory=np.array(self.log_buffer["ref_trajectory"]),

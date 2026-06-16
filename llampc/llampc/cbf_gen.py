@@ -24,7 +24,7 @@ NX = 6
 
 # Default actuator limits
 DELTA_MAX = 0.40
-D_MIN, D_MAX = -1.0, 1.0
+D_MIN, D_MAX = 0.0, 0.5
 
 _rollout_traj = rollout(_rk4_step, dynamics.diffequation)
 
