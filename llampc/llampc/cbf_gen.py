@@ -84,9 +84,7 @@ def cbf_qp_pacejka(x, u_nom, lla_params, known_params, obstacles,
     
 
     if psi0 < 0:
-        psi_delta = _cbf_psi(x, u_safe[0], dt, lla_params, known_params,
-                          obstacles, r_car, alpha, N)
-        psi_d = _cbf_psi(x, u_safe[1], dt, lla_params, known_params,
+        psi_final = _cbf_psi(x, u_safe, dt, lla_params, known_params,
                           obstacles, r_car, alpha, N)
         
         brake_psi_scale = 0.3
@@ -96,4 +94,4 @@ def cbf_qp_pacejka(x, u_nom, lla_params, known_params, obstacles,
     u_safe[DELTA_] = float(np.clip(u_safe[DELTA_], -delta_max, delta_max))
     u_safe[D_]     = float(np.clip(u_safe[D_],     d_min,     d_max))
     return u_safe, dict(active=True, psi=psi0, grad_psi=grad,
-                        rollout=rollout_xs, psi_delta = psi_delta, psi_d = psi_d)
+                        rollout=rollout_xs, psi_final = psi_final)

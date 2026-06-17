@@ -700,7 +700,7 @@ class MPCNode(Node):
                 f"CBF active! psi={cbf_info['psi']:.4f}, correction={u_safe - u_nom_cbf}"
             )
             self.get_logger().warn(
-                f"CBF active! psi_delta={cbf_info['psi_delta']:.4f}, psi_d={cbf_info['psi_d']:.4f}"
+                f"CBF active! psi_final={cbf_info['psi_final']:.4f}"
             )
             
 
