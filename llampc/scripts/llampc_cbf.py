@@ -135,7 +135,7 @@ class MPCNode(Node):
 
         self.obstacles = [
             (np.array([1, -0.5]), 0.5),
-            (np.array([-2.5, 0]), 0.5),
+            (np.array([-1, 0.7]), 0.5),
         ]
 
 
@@ -672,7 +672,7 @@ class MPCNode(Node):
             obstacles= self.obstacles,
             r_car    = self.r_car,
             dt       = self.dt,
-            alpha    = 1,
+            alpha    = 0.1,
             N        = 1,
             # Match the CBF actuator bounds to THIS car's real command ranges.
             # The d-channel here carries pwm duty, not a normalized [-1, 1]
