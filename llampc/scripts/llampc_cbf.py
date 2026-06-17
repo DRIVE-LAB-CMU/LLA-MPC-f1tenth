@@ -692,12 +692,17 @@ class MPCNode(Node):
             # only brake).
             # policy    = self.cbf_rollout_policy,
         )
+        
 
 
         if cbf_info['active']:
             self.get_logger().warn(
                 f"CBF active! psi={cbf_info['psi']:.4f}, correction={u_safe - u_nom_cbf}"
             )
+            self.get_logger().warn(
+                f"CBF active! psi_delta={cbf_info['psi_delta']:.4f}, psi_d={cbf_info['psi_d']:.4f}"
+            )
+            
 
         # Physical-violation check at the CURRENT state (independent of the
         # CBF's predictive psi). Print in RED whenever the car center is
