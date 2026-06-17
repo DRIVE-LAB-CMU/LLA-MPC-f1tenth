@@ -623,7 +623,7 @@ class MPCNode(Node):
         #############################################
         ### GET REF TRAJECTORY AND MODEL FOR ROLLOUT
 
-        ref_point, idx = get_lookahead_point(self.current_state, self.track, self.projidx, lookahead_dist = 0.7)
+        ref_point, idx = get_lookahead_point(self.current_state, self.track, self.projidx, lookahead_dist = 1.2)
         self.projidx = idx
         print(f"IDX: {self.projidx}")
 
@@ -672,7 +672,7 @@ class MPCNode(Node):
             obstacles= self.obstacles,
             r_car    = self.r_car,
             dt       = self.dt,
-            alpha    = 2.5,
+            alpha    = 1,
             N        = 1,
             # Match the CBF actuator bounds to THIS car's real command ranges.
             # The d-channel here carries pwm duty, not a normalized [-1, 1]

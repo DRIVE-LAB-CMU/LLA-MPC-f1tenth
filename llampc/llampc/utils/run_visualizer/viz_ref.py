@@ -507,7 +507,7 @@ def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
     # filepath = os.path.join(dir_path, 'safety.npz')
-    filepath = os.path.join(dir_path, 'cbf2.npz')
+    filepath = os.path.join(dir_path, 'cbf3.npz')
 
     ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square2slow.npz')
 
@@ -528,7 +528,8 @@ def main():
 
     # Same obstacle definition as the MPC/CBF node: list of (center, radius).
     obstacles = [
-        (np.array([.75, -.25]), 0.5),
+        (np.array([1, -0.5]), 0.5),
+        (np.array([-2.5, 0]), 0.5),
     ]
     r_car = 0.04
 
