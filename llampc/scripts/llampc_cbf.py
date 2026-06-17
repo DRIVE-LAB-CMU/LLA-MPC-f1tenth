@@ -125,17 +125,18 @@ class MPCNode(Node):
         self.dt = self.Tf / self.N
         self.control_callback_speed = 0.04
         self.lla_predict_horizon = 0.04
-        self.lla_reset_interval = 0
+        self.lla_reset_interval = 5
         self.lla_reset_counter = 0
         self.r_car = 0.04
 
-        self.min_pwm = 0.1
+        self.min_pwm = 0.2
         self.max_pwm = 0.3
         self.params_car = F110()
 
         self.obstacles = [
             (np.array([1, -0.5]), 0.5),
             (np.array([-1, 1.7]), 0.5),
+            (np.array([-3, -2]), 1),
         ]
 
 
@@ -211,7 +212,7 @@ class MPCNode(Node):
         }
         param_dict = get_param_dict_grid(mean_dict, variation_dict,
                                          discretization=discretization_dict, ground_truth=True,
-                                         noadapt=False)
+                                         noadapt=True)
         num_models = len(param_dict['Bf'])
 
         self.get_logger().info("Dynamics bank starting")
@@ -672,15 +673,15 @@ class MPCNode(Node):
             obstacles= self.obstacles,
             r_car    = self.r_car,
             dt       = self.dt,
-            alpha    = 0.1,
-            N        = 1,
+            alpha    = 2.5,
+            N        = 2,
             # Match the CBF actuator bounds to THIS car's real command ranges.
             # The d-channel here carries pwm duty, not a normalized [-1, 1]
             # throttle, so the [-1, 1] module defaults would let the QP drive
             # pwm negative when braking near an obstacle.  Pin to the pure-
             # pursuit pwm band so the filter can only stay in forward duty.
             delta_max = self.params_car['max_steer'],
-            d_min     = 0.1,
+            d_min     = 0.2,
             d_max     = self.max_pwm,
             w_delta=0.1, 
             w_d=1/0.35,
