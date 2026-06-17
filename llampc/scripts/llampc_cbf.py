@@ -130,7 +130,7 @@ class MPCNode(Node):
         self.r_car = 0.04
 
         self.min_pwm = 0.1
-        self.max_pwm = 0.2
+        self.max_pwm = 0.3
         self.params_car = F110()
 
         self.obstacles = [
@@ -680,7 +680,7 @@ class MPCNode(Node):
             # pwm negative when braking near an obstacle.  Pin to the pure-
             # pursuit pwm band so the filter can only stay in forward duty.
             delta_max = self.params_car['max_steer'],
-            d_min     = 0.05,
+            d_min     = 0.1,
             d_max     = self.max_pwm,
             w_delta=0.1, 
             w_d=1/0.35,
