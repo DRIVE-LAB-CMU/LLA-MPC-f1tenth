@@ -135,7 +135,7 @@ class MPCNode(Node):
 
         self.obstacles = [
             (np.array([1, -0.5]), 0.5),
-            (np.array([-1, 0.7]), 0.5),
+            (np.array([-1, 1.7]), 0.5),
         ]
 
 
