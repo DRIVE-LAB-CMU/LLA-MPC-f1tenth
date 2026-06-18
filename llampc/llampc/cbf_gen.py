@@ -94,4 +94,4 @@ def cbf_qp_pacejka(x, u_nom, lla_params, known_params, obstacles,
     u_safe[DELTA_] = float(np.clip(u_safe[DELTA_], -delta_max, delta_max))
     u_safe[D_]     = float(np.clip(u_safe[D_],     d_min,     d_max))
     return u_safe, dict(active=True, psi=psi0, grad_psi=grad,
-                        rollout=rollout_xs, psi_final = psi_final)
+                        rollout=rollout_xs[:, :3], psi_final = psi_final)

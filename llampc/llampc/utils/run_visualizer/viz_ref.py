@@ -16,10 +16,6 @@ class StateVisualizer:
         self.param_names = param_names
         self.ref_filepath = ref_filepath
 
-        # Obstacles in the SAME form the CBF uses: list of (center, radius)
-        # where center is a 2-vector [px, py] and radius is the obstacle's
-        # own radius (r_obs). r_car is added on top to recover the true
-        # keep-out boundary r_obs + r_car, matching _h_obstacle in the CBF.
         self.r_car = r_car
         self.obstacles = []
         if obstacles:
@@ -116,7 +112,6 @@ class StateVisualizer:
             min_y = min(min_y, self.ref_y.min())
             max_y = max(max_y, self.ref_y.max())
 
-        # Make sure obstacle circles (inflated by r_car) fit in view.
         for p_obs, r_obs in self.obstacles:
             reach = r_obs + self.r_car
             min_x = min(min_x, p_obs[0] - reach)
@@ -167,9 +162,6 @@ class StateVisualizer:
         if self.ref_x is not None and self.ref_y is not None:
             self.ax.plot(self.ref_x, self.ref_y, 'k--', alpha=0.4, linewidth=1.5, label='Raceline', zorder=1)
 
-        # Draw obstacles as circles, matching the CBF's (center, radius) form.
-        # Solid ring = the obstacle itself (r_obs); dashed ring = the inflated
-        # keep-out boundary the CBF actually enforces (r_obs + r_car).
         for p_obs, r_obs in self.obstacles:
             obs_circle = Circle(
                 (p_obs[0], p_obs[1]), r_obs,
@@ -200,7 +192,6 @@ class StateVisualizer:
         self.y_vel_arrow = None
         self.accel_arrow = None
 
-        # Yaw arrow collections for rollout and ref trajectory nodes
         self.rollout_yaw_arrows = []
         self.ref_traj_yaw_arrows = []
 
@@ -257,14 +248,14 @@ class StateVisualizer:
           * a single point listed -> [[x, y]]    or [[x, y, yaw]] (shape (1,2)/(1,3))
           * many points           -> (N, state)  or (state, N)
 
-        The state axis is identified by its width (2 = x,y; 3 = x,y,yaw),
-        which is reliable even when the other heuristic (shape[0] < shape[1])
-        is ambiguous, e.g. a square (3,3) block.
+        cols is checked first so that (N, state) arrays are accepted without
+        transposing. rows is only used as a fallback for (state, N) layout.
+        This correctly handles N=2 or N=3, where checking both flags was
+        ambiguous and could silently return a wrongly-transposed array.
         """
         arr = np.asarray(arr, dtype=float)
 
         if arr.ndim == 1:
-            # Single bare point: promote to a 1-row (N, state) array.
             return arr.reshape(1, -1)
 
         if arr.ndim != 2:
@@ -272,15 +263,13 @@ class StateVisualizer:
 
         rows, cols = arr.shape
         state_widths = (2, 3)
-        row_is_state = rows in state_widths
-        col_is_state = cols in state_widths
 
-        if col_is_state and not row_is_state:
-            return arr            # already (N, state)
-        if row_is_state and not col_is_state:
-            return arr.T          # (state, N) -> (N, state)
-        # Ambiguous (e.g. square 3x3) or unrecognized: assume rows are points,
-        # matching how the producer stacks them.
+        if cols in state_widths:
+            return arr        # already (N, state)
+        if rows in state_widths:
+            return arr.T      # (state, N) -> (N, state)
+
+        # Unknown layout; assume rows are points (typical producer layout).
         return arr
 
     def _clear_yaw_arrows(self, arrow_list):
@@ -291,21 +280,16 @@ class StateVisualizer:
         arrow_list.clear()
 
     def _draw_yaw_arrows(self, arr, color, arrow_list, yaw_len=0.15):
-        """Draw yaw arrows at each node of a trajectory array.
-
-        Accepts a single point or a list of points, with or without a yaw
-        column. Points lacking a yaw entry (width 2) are skipped, since there
-        is no heading to draw.
-        """
+        """Draw yaw arrows at each node of a trajectory array."""
         pts = self._as_points(arr)
         if pts.shape[1] < 3:
-            return  # no yaw column -> nothing to draw
+            return
 
         xs, ys, yaws = pts[:, 0], pts[:, 1], pts[:, 2]
 
         for x, y, yaw in zip(xs, ys, yaws):
             if yaw == 0.0:
-                continue  # skip unfilled nodes
+                continue
             arrow = FancyArrow(
                 x, y,
                 yaw_len * np.cos(yaw),
@@ -329,7 +313,6 @@ class StateVisualizer:
         self.trail.set_data(self.x[:frame_idx+1], self.y[:frame_idx+1])
         self.point.set_data([self.x[frame_idx]], [self.y[frame_idx]])
 
-        # Update MPC Rollout: line + points + yaw arrows
         self._clear_yaw_arrows(self.rollout_yaw_arrows)
         if self.mpc_rollout is not None and frame_idx < len(self.mpc_rollout):
             current_rollout = self.mpc_rollout[frame_idx]
@@ -345,7 +328,6 @@ class StateVisualizer:
             self.rollout_line.set_data([], [])
             self.rollout_points.set_data([], [])
 
-        # Update ref_trajectory: line + points + yaw arrows
         self._clear_yaw_arrows(self.ref_traj_yaw_arrows)
         if self.ref_trajectory is not None and frame_idx < len(self.ref_trajectory):
             current_ref_traj = self.ref_trajectory[frame_idx]
@@ -506,8 +488,7 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    # filepath = os.path.join(dir_path, 'safety.npz')
-    filepath = os.path.join(dir_path, 'cbf22.npz')
+    filepath = os.path.join(dir_path, 'cbfa.npz')
 
     ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square2slow.npz')
 
@@ -526,8 +507,7 @@ def main():
         11: 'Pitch'
     }
 
-    # Same obstacle definition as the MPC/CBF node: list of (center, radius).
-    obstacles =  [
+    obstacles = [
             (np.array([0.5, -0.5]), 0.5),
             # (np.array([-1, 1.7]), 0.5),
             (np.array([1.5, 0.5]), 0.5)

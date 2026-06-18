@@ -4,7 +4,7 @@ import os
 def main():
     """Loads trajectory data and prints all states, controls, and parameters to the console."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'nshworks.npz')
+    filepath = os.path.join(dir_path, 'cbfa.npz')
     
     if not os.path.exists(filepath):
         print(f"Error: Could not find {filepath}")
