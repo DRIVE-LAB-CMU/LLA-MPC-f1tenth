@@ -134,9 +134,9 @@ class MPCNode(Node):
         self.params_car = F110()
 
         self.obstacles =  [
-            (np.array([0.5, -0.5]), 0.5),
+            (np.array([1.75, -1.0]), 0.75),
             # (np.array([-1, 1.7]), 0.5),
-            (np.array([1.5, 0.5]), 0.5)
+            (np.array([0.5, 0.5]), 0.5)
         ]
 
 
