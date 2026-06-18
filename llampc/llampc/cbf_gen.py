@@ -76,7 +76,7 @@ def cbf_qp_pacejka(x, u_nom, lla_params, known_params, obstacles,
     den = float(grad @ (Wi * grad))
     if den < 1e-10:
         return u_nom.copy(), dict(active=False, psi=psi0, grad_psi=grad,
-                                  rollout=rollout_xs)
+                                  rollout=rollout_xs[:, :3])
     delta_u = (-psi0 / den) * (Wi * grad)
     u_safe = u_nom + delta_u
     

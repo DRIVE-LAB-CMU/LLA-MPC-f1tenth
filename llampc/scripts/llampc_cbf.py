@@ -728,7 +728,7 @@ class MPCNode(Node):
         mpc_controls = []
         cbf_rollout = cbf_info.get('rollout', None)
         if cbf_rollout is not None:
-            mpc_states = [np.asarray(s, dtype=float) for s in cbf_rollout[1:]]
+            mpc_states = np.asarray(cbf_rollout[:], dtype=float)  # (N, 3)
 
         self.log_lla_data(selected_model_params, selected_model_index, mpc_states, record_ref_trajectory)
 
