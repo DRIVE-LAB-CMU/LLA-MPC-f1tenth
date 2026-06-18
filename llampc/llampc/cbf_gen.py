@@ -61,7 +61,7 @@ def cbf_qp_pacejka(x, u_nom, lla_params, known_params, obstacles,
                                 obstacles, r_car, alpha, N, return_states=True)
     if psi0 >= 0:
         return u_nom.copy(), dict(active=False, psi=psi0,
-                                  grad_psi=np.zeros(2), rollout=rollout_xs)
+                                  grad_psi=np.zeros(2), rollout=rollout_xs[:, :3])
 
     grad = np.zeros(2)
     for i in range(2):
