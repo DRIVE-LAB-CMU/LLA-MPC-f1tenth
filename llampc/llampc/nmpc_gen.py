@@ -13,8 +13,8 @@ def export_model(params_car, exact = False):
 
     model.name = "f1tenth"
 
-    x = ca.SX.sym('x', 8) # state: x, y, phi, vx, vy, omega, acceleration, delta
-    u = ca.SX.sym('u', 2) # control rate: jerk, steer rate
+    x = ca.SX.sym('x', 5) # state: x, y, phi,  vx, delta
+    u = ca.SX.sym('u', 2) # control rate: accel, steer rate
     p = ca.SX.sym('p', 12)
 
     x_ref = ca.SX.sym('x_ref', 8)
@@ -181,7 +181,7 @@ def create_ocp(model, params_car, steps, horizon):
 
     ocp.constraints.idxbx = np.array([3, 4,5, 6, 7])
     ocp.constraints.lbx = np.array([-0.5, 
-                                -4,
+                                -4,4
                                 -2 * np.pi,
                                 params_car['min_acc'], 
                                 params_car['min_steer']])

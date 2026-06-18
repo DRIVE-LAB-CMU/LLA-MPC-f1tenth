@@ -133,10 +133,10 @@ class MPCNode(Node):
         self.max_pwm = 0.3
         self.params_car = F110()
 
-        self.obstacles = [
-            (np.array([1, -0.5]), 0.5),
-            (np.array([-1, 1.7]), 0.5),
-            (np.array([-3, -2]), 1),
+        self.obstacles =  [
+            (np.array([0.5, -0.5]), 0.5),
+            # (np.array([-1, 1.7]), 0.5),
+            (np.array([1.5, 0.5]), 0.5)
         ]
 
 
