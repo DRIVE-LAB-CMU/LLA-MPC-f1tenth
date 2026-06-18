@@ -673,7 +673,7 @@ class MPCNode(Node):
             obstacles= self.obstacles,
             r_car    = self.r_car,
             dt       = self.dt,
-            alpha    = 2.5,
+            alpha    = 1,
             N        = 2,
             # Match the CBF actuator bounds to THIS car's real command ranges.
             # The d-channel here carries pwm duty, not a normalized [-1, 1]
@@ -683,8 +683,8 @@ class MPCNode(Node):
             delta_max = self.params_car['max_steer'],
             d_min     = 0.1,
             d_max     = self.max_pwm,
-            w_delta=0.1, 
-            w_d=1/0.35,
+            w_delta=0.01, 
+            w_d=3,
             eps_fd=(0.05, 1e-3),
             # Closed-loop rollout: the CBF applies u_nom only on the first
             # step and re-evaluates pure pursuit at every later predicted
