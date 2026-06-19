@@ -21,8 +21,9 @@ gpu = jax.devices("cpu")[0]
 
 @jax.jit
 def get_lookback_error(last_predicted_states, x_t, cost_weights):
-    cost = jnp.sum(jnp.square(x_t[None, :] - last_predicted_states) * cost_weights[None, :], axis = 1)
-    
+    error = x_t[None, :] - last_predicted_states
+    error = error.at[:, 2].set((error[:, 2] + jnp.pi) % (2 * jnp.pi) - jnp.pi)
+    cost = jnp.sum(jnp.square(error) * cost_weights[None, :], axis=1)
 
     return cost
 
