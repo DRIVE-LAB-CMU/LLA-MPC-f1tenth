@@ -195,7 +195,7 @@ class MPCNode(Node):
                 'Cm': 0.0,  # motor speed saturation
             }
 
-        cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
+        cost_weights = np.array([20.0, 20.0, 20.0, 5.0, 1.0, 0.2])# x, y, theta, vx, vy, omega
 
         # grid discretization
         discretization_dict = {

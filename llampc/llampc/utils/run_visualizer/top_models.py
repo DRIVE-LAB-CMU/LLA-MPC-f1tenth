@@ -15,7 +15,7 @@ from collections import Counter
 # Configuration — edit these before running
 # ---------------------------------------------------------------------------
 NPZ_PATH   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cbfa.npz")
-TOP_N      = 5            # how many top models to report
+TOP_N      = 10            # how many top models to report
 USE_MEDIAN = False        # True = use median params, False = use mean
 
 # Must match the visualizer's DEFAULT_LOG_ORDER (order params are stored in npz)
