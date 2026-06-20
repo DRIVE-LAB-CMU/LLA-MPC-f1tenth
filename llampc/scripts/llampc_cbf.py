@@ -125,12 +125,12 @@ class MPCNode(Node):
         self.dt = self.Tf / self.N
         self.control_callback_speed = 0.04
         self.lla_predict_horizon = 0.04
-        self.lla_reset_interval = 5
+        self.lla_reset_interval = 1
         self.lla_reset_counter = 0
         self.r_car = 0.04
 
         self.min_pwm = 0.1
-        self.max_pwm = 0.3
+        self.max_pwm = 0.25
         self.params_car = F110()
 
         self.obstacles =  [
@@ -195,16 +195,16 @@ class MPCNode(Node):
                 'Cm': 0.0,  # motor speed saturation
             }
 
-        cost_weights = np.array([20.0, 20.0, 20.0, 5.0, 1.0, 0.2])# x, y, theta, vx, vy, omega
+        cost_weights = np.array([0.0, 0.0, 20.0, 0.0, 1.0, 0.01])# x, y, theta, vx, vy, omega
 
         # grid discretization
         discretization_dict = {
-            'Bf': 4,   # 15% variation
-            'Br': 4,   # 15% variation
-            'Cf': 3,   # 15% variation
-            'Cr': 3,   # 15% variation
-            'Df': 4,   # 15% variation
-            'Dr': 4,   # 15% variation
+            'Bf': 1,   # 15% variation
+            'Br': 1,   # 15% variation
+            'Cf': 6,   # 15% variation
+            'Cr': 6,   # 15% variation
+            'Df': 10,   # 15% variation
+            'Dr': 10,   # 15% variation
             'Cro':1, # 15% variation
             'Cd': 1,  # assume negligible drag
             'Ce': 1,  # motor efficiency conversion should never be above 1
@@ -212,7 +212,7 @@ class MPCNode(Node):
         }
         param_dict = get_param_dict_grid(mean_dict, variation_dict,
                                          discretization=discretization_dict, ground_truth=True,
-                                         noadapt=True)
+                                         noadapt=False)
         num_models = len(param_dict['Bf'])
 
         self.get_logger().info("Dynamics bank starting")
@@ -681,7 +681,7 @@ class MPCNode(Node):
             # pwm negative when braking near an obstacle.  Pin to the pure-
             # pursuit pwm band so the filter can only stay in forward duty.
             delta_max = self.params_car['max_steer'],
-            d_min     = 0.1,
+            d_min     = self.min_pwm,
             d_max     = self.max_pwm,
             w_delta=0.01, 
             w_d=3,
