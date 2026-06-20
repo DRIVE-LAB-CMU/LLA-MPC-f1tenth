@@ -42,7 +42,7 @@ BANK_ORDER = ['Bf', 'Br', 'Cf', 'Cr', 'Df', 'Dr', 'Cro', 'Cd', 'Ce', 'Cm']
 # Order in which the logged `params` field is laid out by get_model_params_arr().
 # >>> VERIFY against your dynamics.DBMPacejkaBank.get_model_params_arr(). <<<
 # (Doc 2's comment implies the first six are Bf,Cf,Df,Br,Cr,Dr.)
-DEFAULT_LOG_ORDER = ['Bf', 'Cf', 'Df', 'Br', 'Cr', 'Dr', 'Cro', 'Cd', 'Ce', 'Cm']
+DEFAULT_LOG_ORDER = ['Bf', 'Br', 'Cf', 'Cr', 'Df', 'Dr', 'Cro', 'Cd', 'Ce', 'Cm']
 
 # State layout: [x, y, theta, dx, dy, omega]. Short labels used for the
 # per-component cost checkboxes; index 2 (theta) is angle-wrapped in cost calc.
@@ -254,6 +254,23 @@ class StateVisualizer:
         self.load_data(filepath)
         self.load_ref_data()
         self.prepare_rollouts()
+        
+        g = self.general_trajs["nominal"]["one_step"]
+        l = self.lla_one_step_traj
+        nom = dict_to_bank_vec(general_models["nominal"])
+        print("params equal:", np.allclose(self.lla_params_over_time, nom[None, :]))
+        n = min(len(g), len(l))
+        d = np.abs(g[:n] - l[:n])
+        print("max state diff:", d.max(), "at", np.unravel_index(d.argmax(), d.shape))
+        
+        nom = dict_to_bank_vec(general_models["nominal"])
+        print("BANK_ORDER:", BANK_ORDER)
+        print("nominal vec:", nom)
+        print("lla[0]     :", self.lla_params_over_time[0])
+        print("lla varies?:", not np.allclose(self.lla_params_over_time,
+                                            self.lla_params_over_time[0][None, :]))
+        
+        
         self.setup_figure()
         self.current_frame = 0
         self.playing = False
@@ -1250,7 +1267,8 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'cbff.npz')
+    # filepath = os.path.join(dir_path, 'cbfj.npz') # good one for now 1 step
+    filepath = os.path.join(dir_path, 'cbfi.npz')
 
     ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square2slow.npz')
 
@@ -1430,7 +1448,7 @@ def main():
         ol_reset_interval=5,
         full_open_loop=False,
         window_P=40,
-        cost_form=np.array([20.0, 20.0, 20.0, 5.0, 1.0, 0.2])
+        cost_form= np.array([0.0, 0.0, 20.0, 0.0, 1.0, 0.01])
     )
     visualizer.show()
 
