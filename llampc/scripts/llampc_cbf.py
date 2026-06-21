@@ -242,219 +242,216 @@ class MPCNode(Node):
 
         self.get_logger().info("History generation complete")
 
-    def exp_setup(self):
-        self.get_logger().info("novar Initialized")
-        params_car = F110()
+    # def exp_setup(self):
+    #     self.get_logger().info("novar Initialized")
+    #     params_car = F110()
 
-        mean_dict = {
-            'Bf': 15.0,
-            'Br': 15.0,
-            'Cf': 1.0,
-            'Cr': 1.0,
-            'Df': 0.95,
-            'Dr': 0.95,
-            'Cro': 0.02,
-            'Cd': 0.001,
-            'Ce': 1.0,
-            'Cm': .05,
+    #     mean_dict = {
+    #         'Bf': 15.0,
+    #         'Br': 15.0,
+    #         'Cf': 1.0,
+    #         'Cr': 1.0,
+    #         'Df': 0.95,
+    #         'Dr': 0.95,
+    #         'Cro': 0.02,
+    #         'Cd': 0.001,
+    #         'Ce': 1.0,
+    #         'Cm': .05,
 
-        }
+    #     }
 
-        variation_dict = {
-                'Bf': 0, # 15% variation
-                'Br': 0, # 15% variation
-                'Cf': 0, # 15% variation
-                'Cr': 0, # 15% variation
-                'Df': 0,
-                'Dr': 0,
-                'Cro':0, # 15% variation
-                'Cd': 0, # 15% variation
-                'Ce': 0, # 15% variation
-                'Cm': 0, # 15% variation
-            }
-        cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
+    #     variation_dict = {
+    #             'Bf': 0, # 15% variation
+    #             'Br': 0, # 15% variation
+    #             'Cf': 0, # 15% variation
+    #             'Cr': 0, # 15% variation
+    #             'Df': 0,
+    #             'Dr': 0,
+    #             'Cro':0, # 15% variation
+    #             'Cd': 0, # 15% variation
+    #             'Ce': 0, # 15% variation
+    #             'Cm': 0, # 15% variation
+    #         }
+    #     cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0]) # x, y, theta, vx, vy, omega
 
-        num_models = 1
-        self.state_size = 6
-        param_dict = get_param_dict_random(mean_dict, variation_dict, num_models, ground_truth=True)
+    #     num_models = 1
+    #     self.state_size = 6
+    #     param_dict = get_param_dict_random(mean_dict, variation_dict, num_models, ground_truth=True)
 
-        self.dynamics_bank = dynamics.DBMPacejkaBank(
-            params_car['lf'], params_car['lr'],
-            params_car['mass'], params_car['Iz'],
-            param_dict['Bf'], param_dict['Br'],
-            param_dict['Cf'], param_dict['Cr'],
-            param_dict['Df'], param_dict['Dr'],
-            param_dict['Cro'], param_dict['Cd'],
-            param_dict['Ce'], param_dict['Cm'],
-            0, 0,
-            num_models
-        )
+    #     self.dynamics_bank = dynamics.DBMPacejkaBank(
+    #         params_car['lf'], params_car['lr'],
+    #         params_car['mass'], params_car['Iz'],
+    #         param_dict['Bf'], param_dict['Br'],
+    #         param_dict['Cf'], param_dict['Cr'],
+    #         param_dict['Df'], param_dict['Dr'],
+    #         param_dict['Cro'], param_dict['Cd'],
+    #         param_dict['Ce'], param_dict['Cm'],
+    #         0, 0,
+    #         num_models
+    #     )
 
-        history_length=25
-        self.lb_history = history.LBHistory(
-            num_models, history_length,
-            self.lla_predict_horizon, cost_weights,
-            self.state_size, rk4Factory,
-            self.dynamics_bank, dynamics.diffequation
-        )
-
-
-    def rp_setup(self):
-        self.get_logger().info("Roll Pitch MPC Initialized")
-        params_car = F110()
-        variation_dict = {
-            'Df': .2,
-            'Dr': .2,
-            'roll': np.pi/4,
-            'pitch': np.pi/4
-        }
-
-        mean_dict = {
-            'Df': 0.8,
-            'Dr': 0.8,
-            'roll': 0,
-            'pitch': 0
-        }
-
-        static_dict = {
-            'Bf': 15.0,
-            'Br': 15.0,
-            'Cf': 1.0,
-            'Cr': 1.0,
-            'Cro': 0.02,
-            'Cd': 0.001,
-            'Ce': 1.0,
-            'Cm': .05,
-        }
-
-        cost_weights = np.array([1.0, 1.0, 0.1, 0.01, .01, 0]) # x, y, theta, vx, vy, omega
-
-        num_models = 6000
-        self.state_size = 6
-        param_dict = get_param_dict_random(mean_dict, variation_dict, num_models)
-
-        self.dynamics_bank = dynamics_rp.DBMPacejkaBankRP(
-            params_car['lf'], params_car['lr'],
-            params_car['mass'], params_car['Iz'],
-            static_dict['Bf'], static_dict['Br'],
-            static_dict['Cf'], static_dict['Cr'],
-            param_dict['Df'], param_dict['Dr'],
-            static_dict['Cro'], static_dict['Cd'],
-            static_dict['Ce'], static_dict['Cm'],
-            param_dict['roll'], param_dict['pitch'],
-            num_models
-        )
-
-        history_length=25
-        self.lb_history = history.LBHistory(
-            num_models, history_length,
-            self.lla_predict_horizon, cost_weights,
-            self.state_size, rk4Factory,
-            self.dynamics_bank, dynamics_rp.diffequation
-        )
-
-    def sim_setup(self):
-        params_car = F110_sim()
-        cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0, 0])
-
-        mean_dict = {
-            'C_Sf': params_car['C_Sf'],
-            'C_Sr':params_car['C_Sr'],
-            'mu': params_car['mu'],
-        }
-
-        variation_dict = {
-            'C_Sf': 0,
-            'C_Sr': 0,
-            'mu': 0,
-        }
-
-        num_models = 10
-        self.state_size = 7
-
-        param_dict = get_param_dict_random(mean_dict, variation_dict, num_models)
-        self.dynamics_bank = dynamics_sim.DynamicSimBank(
-            params_car['lf'], params_car['lr'],
-            params_car['m'], params_car['I'],
-            params_car["h"], params_car['v_switch'],
-            params_car['a_max'], params_car['v_min'],
-            params_car['v_max'], params_car['s_min'],
-            params_car['s_max'], params_car['sv_min'],
-            params_car['sv_max'],
-                param_dict['C_Sf'], param_dict['C_Sr'],
-                param_dict['mu'],num_models
-            )
-        self.lb_history = history.LBHistory(
-            num_models, 20, 0.2, cost_weights, 7,
-            rk4Factory, self.dynamics_bank, dynamics_sim.diffequation
-        )
-
-    def full_setup(self):
-        self.get_logger().info("Regular MPC Initialized")
-        params_car = F110()
-
-        mean_dict = {
-            'Bf': 15.0,
-            'Br': 15.0,
-            'Cf': 1.0,
-            'Cr': 1.0,
-            'Df': 0.8,
-            'Dr': 0.8,
-            'Cro': 0,
-            'Cd': 0,
-            'Ce': 1.0,
-            'Cm': 0,
-            'roll': 0,
-            'pitch': 0
-        }
-
-        variation_dict = {
-            'Bf': .15 * mean_dict['Bf'],   # 15% variation
-            'Br': .15 * mean_dict['Br'],   # 15% variation
-            'Cf': .15 * mean_dict['Cf'],   # 15% variation
-            'Cr': .15 * mean_dict['Cr'],   # 15% variation
-            'Df': .15 * mean_dict['Df'],   # 15% variation
-            'Dr': .15 * mean_dict['Dr'],   # 15% variation
-            'Cro': 0.15* mean_dict['Cro'], # 15% variation
-            'Cd': 0.15* mean_dict['Cd'],  # 15% variation
-            'Ce': 0.15* mean_dict['Ce'],  # 15% variation
-            'Cm': 0.15* mean_dict['Cm'],  # 15% variation,
-            'roll': np.pi/4,
-            'pitch': np.pi/4
-        }
-
-        cost_weights = np.array([1.0, 1.0, 0.1, 0.01, 0.01, 0]) # x, y, theta, vx, vy, omega
-
-        num_models = 7000
-        self.state_size = 6
-        param_dict = get_param_dict_random(mean_dict, variation_dict, num_models)
-
-        self.dynamics_bank = dynamics_full.DBMPacejkaBank(
-            params_car['lf'], params_car['lr'],
-            params_car['mass'], params_car['Iz'],
-            param_dict['Bf'], param_dict['Br'],
-            param_dict['Cf'], param_dict['Cr'],
-            param_dict['Df'], param_dict['Dr'],
-            param_dict['Cro'], param_dict['Cd'],
-            param_dict['Ce'], param_dict['Cm'],
-            param_dict['roll'], param_dict['pitch'],
+    #     history_length=25
+    #     self.lb_history = history.LBHistory(
+    #         num_models, history_length,
+    #         self.lla_predict_horizon, cost_weights,
+    #         self.state_size, rk4Factory,
+    #         self.dynamics_bank, dynamics.diffequation
+    #     )
 
 
-        )
+    # def rp_setup(self):
+    #     self.get_logger().info("Roll Pitch MPC Initialized")
+    #     params_car = F110()
+    #     variation_dict = {
+    #         'Df': .2,
+    #         'Dr': .2,
+    #         'roll': np.pi/4,
+    #         'pitch': np.pi/4
+    #     }
 
-        history_length=25
-        self.lb_history = history.LBHistory(
-            num_models, history_length,
-            self.lla_predict_horizon, cost_weights,
-            self.state_size, rk4Factory,
-            self.dynamics_bank, dynamics_full.diffequation
-        )
+    #     mean_dict = {
+    #         'Df': 0.8,
+    #         'Dr': 0.8,
+    #         'roll': 0,
+    #         'pitch': 0
+    #     }
+
+    #     static_dict = {
+    #         'Bf': 15.0,
+    #         'Br': 15.0,
+    #         'Cf': 1.0,
+    #         'Cr': 1.0,
+    #         'Cro': 0.02,
+    #         'Cd': 0.001,
+    #         'Ce': 1.0,
+    #         'Cm': .05,
+    #     }
+
+    #     cost_weights = np.array([1.0, 1.0, 0.1, 0.01, .01, 0]) # x, y, theta, vx, vy, omega
+
+    #     num_models = 6000
+    #     self.state_size = 6
+    #     param_dict = get_param_dict_random(mean_dict, variation_dict, num_models)
+
+    #     self.dynamics_bank = dynamics_rp.DBMPacejkaBankRP(
+    #         params_car['lf'], params_car['lr'],
+    #         params_car['mass'], params_car['Iz'],
+    #         static_dict['Bf'], static_dict['Br'],
+    #         static_dict['Cf'], static_dict['Cr'],
+    #         param_dict['Df'], param_dict['Dr'],
+    #         static_dict['Cro'], static_dict['Cd'],
+    #         static_dict['Ce'], static_dict['Cm'],
+    #         param_dict['roll'], param_dict['pitch'],
+    #         num_models
+    #     )
+
+    #     history_length=25
+    #     self.lb_history = history.LBHistory(
+    #         num_models, history_length,
+    #         self.lla_predict_horizon, cost_weights,
+    #         self.state_size, rk4Factory,
+    #         self.dynamics_bank, dynamics_rp.diffequation
+    #     )
+
+    # def sim_setup(self):
+    #     params_car = F110_sim()
+    #     cost_weights = np.array([1.0, 1.0, 0, 0, 0, 0, 0])
+
+    #     mean_dict = {
+    #         'C_Sf': params_car['C_Sf'],
+    #         'C_Sr':params_car['C_Sr'],
+    #         'mu': params_car['mu'],
+    #     }
+
+    #     variation_dict = {
+    #         'C_Sf': 0,
+    #         'C_Sr': 0,
+    #         'mu': 0,
+    #     }
+
+    #     num_models = 10
+    #     self.state_size = 7
+
+    #     param_dict = get_param_dict_random(mean_dict, variation_dict, num_models)
+    #     self.dynamics_bank = dynamics_sim.DynamicSimBank(
+    #         params_car['lf'], params_car['lr'],
+    #         params_car['m'], params_car['I'],
+    #         params_car["h"], params_car['v_switch'],
+    #         params_car['a_max'], params_car['v_min'],
+    #         params_car['v_max'], params_car['s_min'],
+    #         params_car['s_max'], params_car['sv_min'],
+    #         params_car['sv_max'],
+    #             param_dict['C_Sf'], param_dict['C_Sr'],
+    #             param_dict['mu'],num_models
+    #         )
+    #     self.lb_history = history.LBHistory(
+    #         num_models, 20, 0.2, cost_weights, 7,
+    #         rk4Factory, self.dynamics_bank, dynamics_sim.diffequation
+    #     )
+
+    # def full_setup(self):
+    #     self.get_logger().info("Regular MPC Initialized")
+    #     params_car = F110()
+
+    #     mean_dict = {
+    #         'Bf': 15.0,
+    #         'Br': 15.0,
+    #         'Cf': 1.0,
+    #         'Cr': 1.0,
+    #         'Df': 0.8,
+    #         'Dr': 0.8,
+    #         'Cro': 0,
+    #         'Cd': 0,
+    #         'Ce': 1.0,
+    #         'Cm': 0,
+    #         'roll': 0,
+    #         'pitch': 0
+    #     }
+
+    #     variation_dict = {
+    #         'Bf': .15 * mean_dict['Bf'],   # 15% variation
+    #         'Br': .15 * mean_dict['Br'],   # 15% variation
+    #         'Cf': .15 * mean_dict['Cf'],   # 15% variation
+    #         'Cr': .15 * mean_dict['Cr'],   # 15% variation
+    #         'Df': .15 * mean_dict['Df'],   # 15% variation
+    #         'Dr': .15 * mean_dict['Dr'],   # 15% variation
+    #         'Cro': 0.15* mean_dict['Cro'], # 15% variation
+    #         'Cd': 0.15* mean_dict['Cd'],  # 15% variation
+    #         'Ce': 0.15* mean_dict['Ce'],  # 15% variation
+    #         'Cm': 0.15* mean_dict['Cm'],  # 15% variation,
+    #         'roll': np.pi/4,
+    #         'pitch': np.pi/4
+    #     }
+
+    #     cost_weights = np.array([1.0, 1.0, 0.1, 0.01, 0.01, 0]) # x, y, theta, vx, vy, omega
+
+    #     num_models = 7000
+    #     self.state_size = 6
+    #     param_dict = get_param_dict_random(mean_dict, variation_dict, num_models)
+
+    #     self.dynamics_bank = dynamics_full.DBMPacejkaBank(
+    #         params_car['lf'], params_car['lr'],
+    #         params_car['mass'], params_car['Iz'],
+    #         param_dict['Bf'], param_dict['Br'],
+    #         param_dict['Cf'], param_dict['Cr'],
+    #         param_dict['Df'], param_dict['Dr'],
+    #         param_dict['Cro'], param_dict['Cd'],
+    #         param_dict['Ce'], param_dict['Cm'],
+    #         param_dict['roll'], param_dict['pitch'],
+
+
+    #     )
+
+    #     history_length=25
+    #     self.lb_history = history.LBHistory(
+    #         num_models, history_length,
+    #         self.lla_predict_horizon, cost_weights,
+    #         self.state_size, rk4Factory,
+    #         self.dynamics_bank, dynamics_full.diffequation
+    #     )
 
 
     def initialize_mpc(self):
-        variation_dict = None
-        mean_dict = None
-
         self.state_size = 6
 
         if not self.sim:
