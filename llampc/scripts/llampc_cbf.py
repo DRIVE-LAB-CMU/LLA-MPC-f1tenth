@@ -125,7 +125,7 @@ class MPCNode(Node):
         self.dt = self.Tf / self.N
         self.control_callback_speed = 0.04
         self.lla_predict_horizon = 0.04
-        self.lla_reset_interval = 1
+        self.lla_reset_interval = 0
         self.lla_reset_counter = 0
         self.r_car = 0.04
 
