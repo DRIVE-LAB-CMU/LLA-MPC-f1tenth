@@ -1,12 +1,19 @@
-import os
-import multiprocessing
+"""Interactive state-trajectory visualizer.
 
-# Force threading backends to use all cores (must be set before jax import).
-_num_cores = str(multiprocessing.cpu_count())
-os.environ.setdefault("XLA_FLAGS", "--xla_cpu_multi_thread_eigen=true")
-os.environ.setdefault("OMP_NUM_THREADS", _num_cores)
-os.environ.setdefault("OPENBLAS_NUM_THREADS", _num_cores)
-os.environ.setdefault("MKL_NUM_THREADS", _num_cores)
+Two windows:
+  * main      - trajectory plot + per-parameter time series + playback controls
+  * diagnostics - sliding-window cost, one-step difference, and (optional)
+                  M-step lookahead error, sharing cost-component checkboxes
+
+Run as a script. Rollout backend lives in rollouts.py; if it is unavailable the
+visualizer falls back to precomputed npz arrays or the recorded run only.
+"""
+
+import os
+import sys
+
+# Ensure rollouts.py is imported from THIS file's directory, regardless of cwd.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from matplotlib.lines import Line2D
 import numpy as np
@@ -14,185 +21,18 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button, CheckButtons
 from matplotlib.patches import FancyArrow, Circle, Patch
 
-# ---------------------------------------------------------------------------
-# Rollout backend (optional). Absolute imports so this file still runs as a
-# plain script. If unavailable, the visualizer falls back to loading any
-# precomputed rollout arrays already in the npz, or just the recorded run.
-# ---------------------------------------------------------------------------
-try:
-    from llampc.params import F110
-    from llampc.rollout import history_no_record
-    from llampc.rollout import dynamic as dynamics
-    from llampc.rollout.rk6 import rk6Factory
-    import jax
-    _ROLLOUT_OK = True
-    _ROLLOUT_ERR = None
-except Exception as e:  # noqa: BLE001
-    _ROLLOUT_OK = False
-    _ROLLOUT_ERR = e
+from rollouts import (
+    _ROLLOUT_OK, _ROLLOUT_ERR,
+    BANK_ORDER, DEFAULT_LOG_ORDER, COST_DIM_LABELS,
+    dict_to_bank_vec, remap_to_bank_order,
+    simulate_general_models, simulate_lla_rollout, simulate_lla_one_step,
+    simulate_general_m_step, simulate_lla_m_step,
+)
 
-
-# ===========================================================================
-# Rollout configuration / helpers
-# ===========================================================================
-# Order the DBMPacejkaBank constructor expects:
-#   lf, lr, mass, Iz, Bf, Br, Cf, Cr, Df, Dr, Cro, Cd, Ce, Cm, roll, pitch, n
-BANK_ORDER = ['Bf', 'Br', 'Cf', 'Cr', 'Df', 'Dr', 'Cro', 'Cd', 'Ce', 'Cm']
-
-# Order in which the logged `params` field is laid out by get_model_params_arr().
-# >>> VERIFY against your dynamics.DBMPacejkaBank.get_model_params_arr(). <<<
-# (Doc 2's comment implies the first six are Bf,Cf,Df,Br,Cr,Dr.)
-DEFAULT_LOG_ORDER = ['Bf', 'Br', 'Cf', 'Cr', 'Df', 'Dr', 'Cro', 'Cd', 'Ce', 'Cm']
-
-# State layout: [x, y, theta, dx, dy, omega]. Short labels used for the
-# per-component cost checkboxes; index 2 (theta) is angle-wrapped in cost calc.
-COST_DIM_LABELS = ['x', 'y', 'theta', 'vx', 'vy', 'omega']
-
-
-def dict_to_bank_vec(d):
-    """Build a single bank-order param vector from a {name: value} dict."""
-    return np.array([d.get(k, 0.0) for k in BANK_ORDER], dtype=np.float32)
-
-
-def remap_to_bank_order(params, source_order):
-    """Reorder an (N, P) param array from `source_order` into BANK_ORDER.
-
-    Any BANK_ORDER key missing from source_order is filled with 0.0.
-    """
-    params = np.asarray(params, dtype=np.float32)
-    if params.ndim == 1:
-        params = params[None, :]
-
-    out = np.zeros((params.shape[0], len(BANK_ORDER)), dtype=np.float32)
-    for i, key in enumerate(BANK_ORDER):
-        if key in source_order:
-            col = source_order.index(key)
-            if col < params.shape[1]:
-                out[:, i] = params[:, col]
-    return out
-
-
-def build_bank(params_bank, params_car, num_models):
-    """params_bank: (num_models, 10) in BANK_ORDER."""
-    p = params_bank
-    return dynamics.DBMPacejkaBank(
-        params_car['lf'], params_car['lr'], params_car['mass'], params_car['Iz'],
-        p[:, 0], p[:, 1],   # Bf, Br
-        p[:, 2], p[:, 3],   # Cf, Cr
-        p[:, 4], p[:, 5],   # Df, Dr
-        p[:, 6], p[:, 7],   # Cro, Cd
-        p[:, 8], p[:, 9],   # Ce, Cm
-        0, 0, num_models     # roll, pitch, n
-    )
-
-
-def simulate_general_models(total, recording, general_params_bank, params_car,
-                            dt, ol_reset_interval, cost_weights,
-                            full_open_loop=False):
-    """Simulate N fixed models in parallel; each keeps its OWN params all run.
-
-    general_params_bank: (num_models, 10) in BANK_ORDER.
-    Returns (traj_open_loop, traj_one_step), each (total, num_models, state_dim).
-    """
-    num_models = len(general_params_bank)
-    print(f"[rollout] general models: {num_models} fixed banks, {total} steps")
-
-    bank = build_bank(general_params_bank, params_car, num_models)
-    lb = history_no_record.LBHistory(
-        num_models, dt, np.asarray(cost_weights),
-        6, rk6Factory, bank, dynamics.diffequation, buffer_size=[0, 0]
-    )
-
-    state0 = recording["state"][0]
-
-    # ONE STEP: store the 1-step prediction of the state AT time t (made from
-    # truth[t-1]); index 0 is truth, so it sits on the recorded path. This keeps
-    # one_step[t] comparable to truth[t] at the same index (no off-by-one).
-    one_step = [np.tile(state0, (num_models, 1))]
-    for t in range(total):
-        lb.predict_states(recording["state"][t], recording["ctrl"][t])
-        one_step.append(np.array(lb.last_predicted_states))
-    traj_one_step = np.array(one_step[:total])
-
-    # OPEN LOOP: store the model state AT time t. At each reset the state is
-    # snapped to truth[t] and that anchor is what gets stored, so the reset point
-    # lands exactly on the recorded trajectory; we then integrate forward.
-    open_loop = []
-    current = np.tile(state0, (num_models, 1))
-    for t in range(total):
-        if not full_open_loop and t % ol_reset_interval == 0:
-            current = np.tile(recording["state"][t], (num_models, 1))   # anchor = truth[t]
-        open_loop.append(np.array(current))                             # state AT time t
-        lb.predict_states(current, recording["ctrl"][t])                # advance t -> t+1
-        current = np.array(lb.last_predicted_states)
-    traj_open_loop = np.array(open_loop)
-
-    return traj_open_loop, traj_one_step
-
-
-def simulate_lla_rollout(total, recording, lla_params_over_time, params_car,
-                         dt, ol_reset_interval, full_open_loop=False):
-    """Single trajectory whose Pacejka params change EVERY timestep, fed by the
-    optimal-per-timestep sequence taken from the LLA log.
-
-    lla_params_over_time: (total, 10) in BANK_ORDER. Returns (total, state_dim).
-    traj[t] is the state AT time t: reset to truth[t] every ol_reset_interval
-    (so the reset point sits exactly on the recorded trajectory), then
-    integrated forward using the t-th parameter set.
-    """
-    print(f"[rollout] LLA dynamic: {total} steps (params change per timestep)")
-    num_steps = len(lla_params_over_time)
-
-    bank = build_bank(lla_params_over_time, params_car, num_steps)
-    integrator = rk6Factory(jax.device_put(bank.param_bank), dynamics.diffequation, dt)
-    known_params = bank.get_known_params()
-
-    traj_dynamic = []
-    current_state = recording["state"][0]
-
-    for t in range(num_steps):
-        u_t = recording["ctrl"][t]
-
-        if not full_open_loop and t % ol_reset_interval == 0:
-            current_state = recording["state"][t]          # anchor = truth[t]
-
-        traj_dynamic.append(np.array(current_state))        # store the state AT time t
-
-        # Advance t -> t+1 using the t-th parameter set.
-        batched_state = np.tile(current_state, (num_steps, 1))
-        next_states = integrator(known_params, batched_state, u_t)
-        current_state = np.array(next_states[t])
-
-    return np.array(traj_dynamic)
-
-
-def simulate_lla_one_step(total, recording, lla_params_over_time, params_car, dt):
-    """One-step predictions for the LLA model: each step predicts from truth[t],
-    using the t-th parameter set, producing the predicted state at t+1.
-
-    Returns (total, state_dim) where traj[0] = truth[0] (anchored) and
-    traj[t] = one-step prediction from truth[t-1] using params[t-1].
-    This mirrors the general models' one-step convention so the same
-    'one_step' mode toggle applies uniformly.
-    """
-    print(f"[rollout] LLA one-step: {total} steps")
-    num_steps = len(lla_params_over_time)
-
-    bank = build_bank(lla_params_over_time, params_car, num_steps)
-    integrator = rk6Factory(jax.device_put(bank.param_bank), dynamics.diffequation, dt)
-    known_params = bank.get_known_params()
-
-    state0 = recording["state"][0]
-    one_step = [np.array(state0)]   # index 0 = truth[0], same as general one-step
-
-    for t in range(total):
-        u_t = recording["ctrl"][t]
-        # Predict from truth[t] using the t-th LLA params.
-        batched_state = np.tile(recording["state"][t], (num_steps, 1))
-        next_states = integrator(known_params, batched_state, u_t)
-        one_step.append(np.array(next_states[t]))   # prediction for t+1
-
-    return np.array(one_step[:total])
+if _ROLLOUT_OK:
+    from rollouts import F110
+else:
+    F110 = None
 
 
 # ===========================================================================
@@ -205,7 +45,8 @@ class StateVisualizer:
                  param_names=None, obstacles=None, r_car=0.04,
                  general_models=None, compute_rollouts=True,
                  dt=1.0 / 40.0, ol_reset_interval=40, cost_weights=None,
-                 full_open_loop=False, log_order=None, window_P=20, cost_form=None):
+                 full_open_loop=False, log_order=None, window_P=20, cost_form=None,
+                 compute_m_step=False, m_step_M=10):
         self.n_params_to_show = n_params_to_show
         self.params_per_column = params_per_column
         self.param_names = param_names
@@ -237,6 +78,12 @@ class StateVisualizer:
         self.log_order = log_order or DEFAULT_LOG_ORDER
         self.params_car = F110() if _ROLLOUT_OK else None
 
+        # M-step lookahead config (expensive: ~total * M integrator calls).
+        self.compute_m_step = bool(compute_m_step)
+        self.m_step_M = int(m_step_M)
+        self.show_m_step = True
+        self._has_m_step = False
+
         # Rollout state (filled by prepare_rollouts)
         self.lla_traj = None           # open-loop (or periodically-reset) dynamic traj
         self.lla_one_step_traj = None  # one-step traj for LLA
@@ -248,30 +95,16 @@ class StateVisualizer:
         # Display toggles (defaults so early update_frame calls are safe)
         self.show_lla = True            # LLA dynamic rollout on/off
         self.show_general = True        # general fixed-param models on/off
+        self.show_velocity = True       # velocity/accel state-indicator arrows on/off
         self.model_mode = "open_loop"   # 'open_loop' or 'one_step' (applies to LLA + general)
         self.window_P = int(window_P)   # length of the model evaluation window
 
         self.load_data(filepath)
         self.load_ref_data()
         self.prepare_rollouts()
-        
-        g = self.general_trajs["nominal"]["one_step"]
-        l = self.lla_one_step_traj
-        nom = dict_to_bank_vec(general_models["nominal"])
-        print("params equal:", np.allclose(self.lla_params_over_time, nom[None, :]))
-        n = min(len(g), len(l))
-        d = np.abs(g[:n] - l[:n])
-        print("max state diff:", d.max(), "at", np.unravel_index(d.argmax(), d.shape))
-        
-        nom = dict_to_bank_vec(general_models["nominal"])
-        print("BANK_ORDER:", BANK_ORDER)
-        print("nominal vec:", nom)
-        print("lla[0]     :", self.lla_params_over_time[0])
-        print("lla varies?:", not np.allclose(self.lla_params_over_time,
-                                            self.lla_params_over_time[0][None, :]))
-        
-        
+
         self.setup_figure()
+        self.setup_cost_figure()
         self.current_frame = 0
         self.playing = False
         self.setup_artists()
@@ -420,6 +253,8 @@ class StateVisualizer:
 
         # Sliding-window cost curves for the cost subplot.
         self._compute_cost_curves()
+        # M-step lookahead error (gated by compute_m_step; expensive).
+        self._compute_m_step_curves()
 
     def _step_cost_components(self, traj):
         """Per-timestep, per-state-dimension weighted squared error vs truth,
@@ -459,27 +294,24 @@ class StateVisualizer:
         return component_curves @ mask
 
     def _compute_cost_curves(self):
-        """Build the sliding-window PER-COMPONENT cost time series for LLA
-        (both modes) + each general model (both modes), used by the cost
-        subplot. Each dimension is windowed independently across the full
-        run; the displayed total is recombined on toggle via _combine_active,
-        with no recomputation of the underlying per-dimension costs needed."""
         self.cost_time = None
-        self.lla_cost_components = {}   # mode -> (T, D) windowed per-dim arr
-        self.gen_cost_components = {}   # name -> {mode: (T, D) windowed arr}
+        self.lla_cost_components = {}      # mode -> (T, D) windowed
+        self.gen_cost_components = {}      # name -> {mode: (T, D) windowed}
+        self.lla_onestep_components = None # (T, D) un-windowed, one-step traj
+        self.gen_onestep_components = {}   # name -> (T, D) un-windowed
         if self.rollout_len == 0:
             return
 
         T = self.rollout_len
         self.cost_time = np.asarray(self.time[:T], dtype=float)
 
-        # LLA: compute per-component cost for whichever mode trajectories exist.
         if self.lla_traj is not None:
             self.lla_cost_components['open_loop'] = self._sliding_window(
                 self._step_cost_components(self.lla_traj))
         if self.lla_one_step_traj is not None:
             self.lla_cost_components['one_step'] = self._sliding_window(
                 self._step_cost_components(self.lla_one_step_traj))
+            self.lla_onestep_components = self._step_cost_components(self.lla_one_step_traj)
 
         for name in self.general_order:
             self.gen_cost_components[name] = {
@@ -487,6 +319,45 @@ class StateVisualizer:
                     self._step_cost_components(self.general_trajs[name][mode]))
                 for mode in ("open_loop", "one_step")
             }
+            self.gen_onestep_components[name] = self._step_cost_components(
+                self.general_trajs[name]['one_step'])
+
+    def _compute_m_step_curves(self):
+        """Per-dim, per-start-time M-step lookahead error for LLA + general
+        models, for BOTH modes (so the mode toggle just switches arrays).
+        Gated by compute_m_step; requires the rollout backend."""
+        self.lla_m_step_components = {}     # mode -> (T, D)
+        self.gen_m_step_components = {}     # name -> {mode: (T, D)}
+        if not self.compute_m_step or self.rollout_len == 0:
+            return
+        if not _ROLLOUT_OK:
+            print("[m-step] rollout backend unavailable; skipping M-step lookahead.")
+            return
+
+        T = self.rollout_len
+        M = self.m_step_M
+        modes = ("open_loop", "one_step")
+
+        if self.lla_params_over_time is not None:
+            for mode in modes:
+                comp = simulate_lla_m_step(
+                    T, self.recording, self.lla_params_over_time, self.params_car,
+                    self.dt, M, self.cost_form, mode, self.ol_reset_interval,
+                    full_open_loop=self.full_open_loop)
+                self.lla_m_step_components[mode] = comp[:T]
+
+        names = [n for n in self.general_order if n in self.general_models]
+        if names:
+            bank = np.stack([dict_to_bank_vec(self.general_models[n]) for n in names])
+            for mode in modes:
+                comp = simulate_general_m_step(
+                    T, self.recording, bank, self.params_car,
+                    self.dt, M, self.cost_form, mode, self.ol_reset_interval,
+                    full_open_loop=self.full_open_loop)
+                for i, name in enumerate(names):
+                    self.gen_m_step_components.setdefault(name, {})[mode] = comp[:T, i, :]
+
+        self._has_m_step = bool(self.lla_m_step_components or self.gen_m_step_components)
 
     def _iter_limit_trajs(self):
         """Trajectories used to size the axes (the well-behaved ones)."""
@@ -514,6 +385,26 @@ class StateVisualizer:
         components) for the current model_mode."""
         comp = self.gen_cost_components[name][self.model_mode]
         return self._combine_active(comp)
+
+    def _lla_onestep_curve(self):
+        if self.lla_onestep_components is None:
+            return None
+        return self._combine_active(self.lla_onestep_components)
+
+    def _gen_onestep_curve(self, name):
+        return self._combine_active(self.gen_onestep_components[name])
+
+    def _lla_m_step_curve(self):
+        comp = self.lla_m_step_components.get(self.model_mode)
+        if comp is None:
+            return None
+        return self._combine_active(comp)
+
+    def _gen_m_step_curve(self, name):
+        modes = self.gen_m_step_components.get(name)
+        if not modes or self.model_mode not in modes:
+            return None
+        return self._combine_active(modes[self.model_mode])
 
     def setup_figure(self):
         """Create figure with appropriate layout."""
@@ -594,20 +485,58 @@ class StateVisualizer:
             else:
                 ax_p.set_ylim(param_data.min() - 0.1, param_data.max() + 0.1)
 
-        # ---- Sliding-window cost strip (above the controls) ----
-        # Narrowed to leave room on the right for the cost-component checkboxes.
-        self.ax_cost = self.fig.add_axes([0.08, 0.165, 0.70, 0.10])
+    def setup_cost_figure(self):
+        """Diagnostics window:
+        row 0 = sliding-window cost (mode-aware)
+        row 1 = per-step one-step difference (always one-step)
+        row 2 = M-step lookahead error (mode-aware)  [only if computed]
+        right = cost-component checkboxes, shared by all subplots.
+        """
+        have_m = self._has_m_step
+        n_rows = 3 if have_m else 2
+
+        self.fig_diag = plt.figure(figsize=(11, 9 if have_m else 7))
+        try:
+            self.fig_diag.canvas.manager.set_window_title('Cost / lookahead diagnostics')
+        except Exception:
+            pass
+
+        gs = self.fig_diag.add_gridspec(
+            n_rows, 1, left=0.08, right=0.80, top=0.95, bottom=0.07, hspace=0.40
+        )
+        self.ax_cost = self.fig_diag.add_subplot(gs[0])
+        self.ax_onestep = self.fig_diag.add_subplot(gs[1], sharex=self.ax_cost)
+        self.ax_mstep = (self.fig_diag.add_subplot(gs[2], sharex=self.ax_cost)
+                         if have_m else None)
+
         self.ax_cost.set_title(f'Sliding-window model cost (P={self.window_P})',
                                fontsize=10, fontweight='bold', loc='left')
-        self.ax_cost.set_xlabel('Time (s)', fontsize=9)
         self.ax_cost.set_ylabel('Windowed cost', fontsize=9)
         self.ax_cost.grid(True, alpha=0.3)
         self.ax_cost.tick_params(labelsize=8)
+
+        self.ax_onestep.set_title('One-step prediction difference (per step)',
+                                  fontsize=10, fontweight='bold', loc='left')
+        self.ax_onestep.set_ylabel('Per-step cost', fontsize=9)
+        self.ax_onestep.grid(True, alpha=0.3)
+        self.ax_onestep.tick_params(labelsize=8)
+
+        if self.ax_mstep is not None:
+            self.ax_mstep.set_title(
+                f'M-step lookahead error (M={self.m_step_M}, mode-aware)',
+                fontsize=10, fontweight='bold', loc='left')
+            self.ax_mstep.set_ylabel('Horizon cost', fontsize=9)
+            self.ax_mstep.grid(True, alpha=0.3)
+            self.ax_mstep.tick_params(labelsize=8)
+
+        # X label only on the bottom-most subplot.
+        bottom_ax = self.ax_mstep if self.ax_mstep is not None else self.ax_onestep
+        bottom_ax.set_xlabel('Time (s)', fontsize=9)
+
         if self.cost_time is not None and len(self.cost_time) > 1:
             self.ax_cost.set_xlim(self.cost_time[0], self.cost_time[-1])
 
-        # ---- Cost-component checkboxes (which state dims feed the total) ----
-        self.ax_cost_dims = self.fig.add_axes([0.81, 0.165, 0.15, 0.10])
+        self.ax_cost_dims = self.fig_diag.add_axes([0.82, 0.40, 0.16, 0.30])
         self.ax_cost_dims.set_title('Cost terms', fontsize=8, fontweight='bold')
         self.ax_cost_dims.axis('off')
 
@@ -652,7 +581,8 @@ class StateVisualizer:
         # ---- Model-rollout artists (LLA + general fixed models) ----
         self.lla_trail = None
         self.lla_point = None
-        self.model_artists = {}   # name -> {'trail':.., 'point':.., 'color':..}
+        self.lla_heading = None
+        self.model_artists = {}   # name -> {'trail':.., 'point':.., 'color':.., 'heading':..}
 
         legend_elements = []
 
@@ -678,6 +608,9 @@ class StateVisualizer:
                                            linewidth=1.8, zorder=3)
             self.lla_point, = self.ax.plot([], [], 'o', color='orange', mec='k',
                                            markersize=9, zorder=6)
+            # Predicted-orientation bar (like the black heading bar, in orange).
+            self.lla_heading, = self.ax.plot([], [], '-', color='orange',
+                                             linewidth=2, zorder=6)
             legend_elements.append(Line2D([0], [0], color='orange', marker='o', lw=1.8,
                                           label='LLA (per-step params)'))
 
@@ -687,7 +620,10 @@ class StateVisualizer:
             color = cmap(i % 10)
             trail, = self.ax.plot([], [], '-', color=color, alpha=0.45, linewidth=1.3, zorder=2)
             point, = self.ax.plot([], [], 's', color=color, mec='k', markersize=7, zorder=5)
-            self.model_artists[name] = {"trail": trail, "point": point, "color": color}
+            # Predicted-orientation bar (like the black heading bar, in model color).
+            heading, = self.ax.plot([], [], '-', color=color, linewidth=2, zorder=5)
+            self.model_artists[name] = {"trail": trail, "point": point,
+                                        "color": color, "heading": heading}
             legend_elements.append(Line2D([0], [0], color=color, marker='s', lw=1.3, label=str(name)))
 
         # ---- "Last P points" evaluation-window artists ----
@@ -735,18 +671,29 @@ class StateVisualizer:
         self._setup_cost_artists()
 
     def _setup_cost_artists(self):
-        """Create the per-model lines, the moving cursor, value dots, and the
-        shaded trailing-window region on the sliding-window cost subplot."""
         self.cost_line_lla = None
         self.cost_dot_lla = None
         self.cost_lines_gen = {}
         self.cost_dots_gen = {}
+        self.os_line_lla = None
+        self.os_dot_lla = None
+        self.os_lines_gen = {}
+        self.os_dots_gen = {}
+        self.ms_line_lla = None
+        self.ms_dot_lla = None
+        self.ms_lines_gen = {}
+        self.ms_dots_gen = {}
 
         if self.lla_traj is not None:
             self.cost_line_lla, = self.ax_cost.plot([], [], '-', color='orange',
                                                     linewidth=1.6, label='LLA')
             self.cost_dot_lla, = self.ax_cost.plot([], [], 'o', color='orange',
                                                    mec='k', markersize=6, zorder=5)
+        if self.lla_one_step_traj is not None:
+            self.os_line_lla, = self.ax_onestep.plot([], [], '-', color='orange',
+                                                     linewidth=1.6, label='LLA')
+            self.os_dot_lla, = self.ax_onestep.plot([], [], 'o', color='orange',
+                                                    mec='k', markersize=6, zorder=5)
 
         for name in self.general_order:
             color = self.model_artists[name]["color"]
@@ -755,21 +702,50 @@ class StateVisualizer:
             self.cost_lines_gen[name] = line
             self.cost_dots_gen[name] = dot
 
-        # Shaded region marking the trailing P-sample evaluation window that
-        # feeds the windowed cost currently under the cursor. Drawn as a
-        # zero-width axvspan that gets resized in _update_cost_cursor; sits
-        # behind the lines/cursor (low zorder) and uses navy to match the
-        # "Eval window" trajectory overlay.
-        self.cost_window_span = self.ax_cost.axvspan(
-            0, 0, color='navy', alpha=0.12, zorder=1, linewidth=0
-        )
+            oline, = self.ax_onestep.plot([], [], '-', color=color, linewidth=1.4, label=str(name))
+            odot, = self.ax_onestep.plot([], [], 's', color=color, mec='k', markersize=5, zorder=5)
+            self.os_lines_gen[name] = oline
+            self.os_dots_gen[name] = odot
+
+        # ---- M-step lookahead lines/dots (only if computed) ----
+        if getattr(self, "ax_mstep", None) is not None:
+            if self.lla_m_step_components:
+                self.ms_line_lla, = self.ax_mstep.plot([], [], '-', color='orange',
+                                                       linewidth=1.6, label='LLA')
+                self.ms_dot_lla, = self.ax_mstep.plot([], [], 'o', color='orange',
+                                                      mec='k', markersize=6, zorder=5)
+            for name in self.general_order:
+                if name not in self.gen_m_step_components:
+                    continue
+                color = self.model_artists[name]["color"]
+                mline, = self.ax_mstep.plot([], [], '-', color=color,
+                                            linewidth=1.4, label=str(name))
+                mdot, = self.ax_mstep.plot([], [], 's', color=color, mec='k',
+                                           markersize=5, zorder=5)
+                self.ms_lines_gen[name] = mline
+                self.ms_dots_gen[name] = mdot
+
+        # Red shaded trailing-window span on the one-step subplot, marking the
+        # same trailing P-sample window under the cursor.
+        self.cost_window_span = self.ax_onestep.axvspan(
+            0, 0, color='red', alpha=0.12, zorder=1, linewidth=0)
 
         self.cost_cursor = self.ax_cost.axvline(x=0, color='red', linestyle='--',
                                                 linewidth=1.2, alpha=0.7, zorder=3)
+        self.onestep_cursor = self.ax_onestep.axvline(x=0, color='red', linestyle='--',
+                                                      linewidth=1.2, alpha=0.7, zorder=3)
+        self.mstep_cursor = None
+        if getattr(self, "ax_mstep", None) is not None:
+            self.mstep_cursor = self.ax_mstep.axvline(
+                x=0, color='red', linestyle='--', linewidth=1.2, alpha=0.7, zorder=3)
 
         if self.cost_line_lla is not None or self.cost_lines_gen:
             ncol = min(4, 1 + len(self.general_order))
             self.ax_cost.legend(loc='upper left', fontsize=7, ncol=ncol)
+            self.ax_onestep.legend(loc='upper left', fontsize=7, ncol=ncol)
+            if (getattr(self, "ax_mstep", None) is not None
+                    and (self.ms_line_lla is not None or self.ms_lines_gen)):
+                self.ax_mstep.legend(loc='upper left', fontsize=7, ncol=ncol)
 
         self._setup_cost_dim_checkboxes()
         self._refresh_cost_lines()
@@ -796,43 +772,70 @@ class StateVisualizer:
         self.active_cost_dims[i] = not self.active_cost_dims[i]
         self._refresh_cost_lines()
         self._update_cost_cursor(self.current_frame)
-        self.fig.canvas.draw_idle()
+        if getattr(self, "fig_diag", None) is not None:
+            self.fig_diag.canvas.draw_idle()
 
     def _refresh_cost_lines(self):
-        """Set cost-line data for the current mode and honour visibility toggles,
-        then rescale the y-axis. Both LLA and general models use self.model_mode."""
         if getattr(self, "ax_cost", None) is None or self.cost_time is None:
             return
 
+        # --- windowed cost (mode-aware) ---
         if self.cost_line_lla is not None:
             curve = self._lla_cost_curve()
             if self.show_lla and curve is not None:
                 self.cost_line_lla.set_data(self.cost_time, curve)
             else:
                 self.cost_line_lla.set_data([], [])
-
         for name, line in self.cost_lines_gen.items():
             if self.show_general:
                 line.set_data(self.cost_time, self._gen_cost_curve(name))
             else:
                 line.set_data([], [])
-
         self.ax_cost.relim()
         self.ax_cost.autoscale_view(scalex=False, scaley=True)
 
+        # --- one-step difference (always one-step traj) ---
+        if self.os_line_lla is not None:
+            curve = self._lla_onestep_curve()
+            if self.show_lla and curve is not None:
+                self.os_line_lla.set_data(self.cost_time, curve)
+            else:
+                self.os_line_lla.set_data([], [])
+        for name, line in self.os_lines_gen.items():
+            if self.show_general:
+                line.set_data(self.cost_time, self._gen_onestep_curve(name))
+            else:
+                line.set_data([], [])
+        self.ax_onestep.relim()
+        self.ax_onestep.autoscale_view(scalex=False, scaley=True)
+
+        # --- M-step lookahead (mode-aware) ---
+        if getattr(self, "ax_mstep", None) is not None:
+            if self.ms_line_lla is not None:
+                curve = self._lla_m_step_curve()
+                if self.show_m_step and self.show_lla and curve is not None:
+                    self.ms_line_lla.set_data(self.cost_time, curve)
+                else:
+                    self.ms_line_lla.set_data([], [])
+            for name, line in self.ms_lines_gen.items():
+                curve = self._gen_m_step_curve(name)
+                if self.show_m_step and self.show_general and curve is not None:
+                    line.set_data(self.cost_time, curve)
+                else:
+                    line.set_data([], [])
+            self.ax_mstep.relim()
+            self.ax_mstep.autoscale_view(scalex=False, scaley=True)
+
     def _update_cost_cursor(self, frame_idx):
-        """Move the cost-plot cursor, the shaded trailing-window span, and the
-        value dots to the current frame."""
         if getattr(self, "ax_cost", None) is None or self.cost_time is None:
             return
         ridx = min(frame_idx, self.rollout_len - 1)
         ct = float(self.time[ridx])
+
         self.cost_cursor.set_xdata([ct, ct])
 
-        # Shade [t - P + 1, t] in time, matching the sliding window that
-        # produced the windowed-cost value currently under the cursor.
-        # axvspan returns a Rectangle (x in data coords, y in axes fraction),
-        # so resize via set_x/set_width rather than mutating polygon vertices.
+        # Shade [t - P + 1, t] in time on the one-step subplot, matching the
+        # sliding window that produced the windowed-cost value under the cursor.
         rs = max(0, ridx - self.window_P + 1)
         t_start = float(self.time[rs])
         self.cost_window_span.set_x(t_start)
@@ -844,12 +847,41 @@ class StateVisualizer:
                 self.cost_dot_lla.set_data([ct], [curve[ridx]])
             else:
                 self.cost_dot_lla.set_data([], [])
-
         for name, dot in self.cost_dots_gen.items():
             if self.show_general:
                 dot.set_data([ct], [self._gen_cost_curve(name)[ridx]])
             else:
                 dot.set_data([], [])
+
+        # one-step subplot
+        self.onestep_cursor.set_xdata([ct, ct])
+        if self.os_dot_lla is not None:
+            curve = self._lla_onestep_curve()
+            if self.show_lla and curve is not None:
+                self.os_dot_lla.set_data([ct], [curve[ridx]])
+            else:
+                self.os_dot_lla.set_data([], [])
+        for name, dot in self.os_dots_gen.items():
+            if self.show_general:
+                dot.set_data([ct], [self._gen_onestep_curve(name)[ridx]])
+            else:
+                dot.set_data([], [])
+
+        # M-step subplot
+        if getattr(self, "ax_mstep", None) is not None and self.mstep_cursor is not None:
+            self.mstep_cursor.set_xdata([ct, ct])
+            if self.ms_dot_lla is not None:
+                curve = self._lla_m_step_curve()
+                if self.show_m_step and self.show_lla and curve is not None:
+                    self.ms_dot_lla.set_data([ct], [curve[ridx]])
+                else:
+                    self.ms_dot_lla.set_data([], [])
+            for name, dot in self.ms_dots_gen.items():
+                curve = self._gen_m_step_curve(name)
+                if self.show_m_step and self.show_general and curve is not None:
+                    dot.set_data([ct], [curve[ridx]])
+                else:
+                    dot.set_data([], [])
 
     @staticmethod
     def _as_points(arr):
@@ -943,6 +975,12 @@ class StateVisualizer:
             return None
         return None if self.full_open_loop else self.ol_reset_interval
 
+    def _set_heading_bar(self, art, x, y, theta, length=0.5):
+        """Draw a short orientation bar from (x, y) along theta, mirroring the
+        black current-position heading bar but for a predicted model state."""
+        art.set_data([x, x + length * np.cos(theta)],
+                     [y, y + length * np.sin(theta)])
+
     def _update_model_overlays(self, frame_idx):
         """Update LLA + general model rollout markers/trails for this frame.
         Both LLA and general models respect self.model_mode."""
@@ -950,9 +988,12 @@ class StateVisualizer:
             if self.lla_point is not None:
                 self.lla_trail.set_data([], [])
                 self.lla_point.set_data([], [])
+                if self.lla_heading is not None:
+                    self.lla_heading.set_data([], [])
             for a in self.model_artists.values():
                 a["trail"].set_data([], [])
                 a["point"].set_data([], [])
+                a["heading"].set_data([], [])
             return
 
         ridx = min(frame_idx, self.rollout_len - 1)
@@ -965,9 +1006,14 @@ class StateVisualizer:
                 xs, ys = self._break_segments(traj[:r + 1], 0, self._lla_interval())
                 self.lla_trail.set_data(xs, ys)
                 self.lla_point.set_data([traj[r, 0]], [traj[r, 1]])
+                if self.lla_heading is not None:
+                    self._set_heading_bar(self.lla_heading,
+                                          traj[r, 0], traj[r, 1], traj[r, 2])
             else:
                 self.lla_trail.set_data([], [])
                 self.lla_point.set_data([], [])
+                if self.lla_heading is not None:
+                    self.lla_heading.set_data([], [])
 
         # ---- General fixed-parameter models ----
         for name, a in self.model_artists.items():
@@ -977,9 +1023,11 @@ class StateVisualizer:
                 xs, ys = self._break_segments(traj[:r + 1], 0, self._gen_interval())
                 a["trail"].set_data(xs, ys)
                 a["point"].set_data([traj[r, 0]], [traj[r, 1]])
+                self._set_heading_bar(a["heading"], traj[r, 0], traj[r, 1], traj[r, 2])
             else:
                 a["trail"].set_data([], [])
                 a["point"].set_data([], [])
+                a["heading"].set_data([], [])
 
     def _update_window_overlays(self, frame_idx):
         """Highlight the last P samples (the model evaluation window).
@@ -1082,7 +1130,7 @@ class StateVisualizer:
 
         dx_arrow = self.dx[frame_idx] * np.cos(self.theta[frame_idx])
         dy_arrow = self.dx[frame_idx] * np.sin(self.theta[frame_idx])
-        if abs(self.dx[frame_idx]) > 0.01:
+        if self.show_velocity and abs(self.dx[frame_idx]) > 0.01:
             self.x_vel_arrow = FancyArrow(
                 self.x[frame_idx], self.y[frame_idx],
                 dx_arrow, dy_arrow,
@@ -1091,7 +1139,7 @@ class StateVisualizer:
             )
             self.ax.add_patch(self.x_vel_arrow)
 
-        if abs(self.dy[frame_idx]) > 0.01:
+        if self.show_velocity and abs(self.dy[frame_idx]) > 0.01:
             self.y_vel_arrow = FancyArrow(
                 self.x[frame_idx], self.y[frame_idx],
                 self.dy[frame_idx] * -np.sin(self.theta[frame_idx]),
@@ -1101,7 +1149,7 @@ class StateVisualizer:
             )
             self.ax.add_patch(self.y_vel_arrow)
 
-        if abs(self.accel[frame_idx]) > 0.01:
+        if self.show_velocity and abs(self.accel[frame_idx]) > 0.01:
             self.accel_arrow = FancyArrow(
                 self.x[frame_idx], self.y[frame_idx],
                 self.accel[frame_idx] * np.cos(self.theta[frame_idx]),
@@ -1141,9 +1189,12 @@ class StateVisualizer:
         self._update_cost_cursor(frame_idx)
 
         self.fig.canvas.draw_idle()
+        if getattr(self, "fig_diag", None) is not None:
+            self.fig_diag.canvas.draw_idle()
 
     def setup_controls(self):
         """Create interactive controls."""
+        plt.figure(self.fig.number)      # ensure controls land on the main window
         bottom_margin = 0.08
 
         ax_slider = plt.axes([0.2, bottom_margin + 0.02, 0.6, 0.02])
@@ -1166,12 +1217,11 @@ class StateVisualizer:
         self.btn_rollout.on_clicked(self.toggle_rollout)
         self.show_rollout = True
 
-        ax_speed = plt.axes([0.46, bottom_margin - 0.03, 0.2, 0.02])
-        self.speed_slider = Slider(
-            ax_speed, 'Speed', 50, 1000,
-            valinit=200, valstep=50
-        )
-        self.speed_slider.on_changed(self.on_speed_change)
+        # State-indicator (velocity/accel arrows) show/hide. Independent of the
+        # MPC-rollout toggle above.
+        ax_vel = plt.axes([0.52, bottom_margin - 0.03, 0.13, 0.03])
+        self.btn_velocity = Button(ax_vel, 'Velocity: ON')
+        self.btn_velocity.on_clicked(self.toggle_velocity)
 
         # --- Model-rollout controls ---
         ax_lla = plt.axes([0.83, bottom_margin - 0.03, 0.13, 0.03])
@@ -1187,20 +1237,26 @@ class StateVisualizer:
         self.btn_mode = Button(ax_mode, mode_label)
         self.btn_mode.on_clicked(self.toggle_mode)
 
+        # M-step show/hide (only if computed).
+        if self._has_m_step:
+            ax_mstep_btn = plt.axes([0.55, bottom_margin - 0.07, 0.12, 0.03])
+            self.btn_m_step = Button(ax_mstep_btn, 'M-step: ON')
+            self.btn_m_step.on_clicked(self.toggle_m_step)
+
         self.timer = self.fig.canvas.new_timer(interval=50)
         self.timer.add_callback(self.animate_step)
 
-    def on_speed_change(self, val):
-        """Update playback speed dynamically."""
-        if self.playing:
-            interval = int(1000 / val)
-            self.timer.stop()
-            self.timer = self.fig.canvas.new_timer(interval=interval)
-            self.timer.add_callback(self.animate_step)
-            self.timer.start()
-
     def on_slider_change(self, val):
         self.update_frame(val)
+
+    def toggle_velocity(self, event):
+        """Show/hide the velocity/accel state-indicator arrows (independent of
+        the MPC-rollout toggle). Arrows are cleared each frame and simply not
+        re-added while off, so this just redraws the current frame."""
+        self.show_velocity = not self.show_velocity
+        self.btn_velocity.label.set_text(
+            'Velocity: ON' if self.show_velocity else 'Velocity: OFF')
+        self.update_frame(self.current_frame)
 
     def toggle_play(self, event):
         self.playing = not self.playing
@@ -1243,15 +1299,20 @@ class StateVisualizer:
         self._refresh_cost_lines()
         self.update_frame(self.current_frame)
 
+    def toggle_m_step(self, event):
+        """Show/hide the M-step lookahead curves (computation already done)."""
+        self.show_m_step = not self.show_m_step
+        self.btn_m_step.label.set_text(
+            'M-step: ON' if self.show_m_step else 'M-step: OFF')
+        self._refresh_cost_lines()
+        self.update_frame(self.current_frame)
+
     def animate_step(self):
         if self.playing:
             next_frame = self.current_frame + 1
             if next_frame >= self.n_frames:
                 next_frame = 0
             self.slider.set_val(next_frame)
-
-            interval = int(1000 / self.speed_slider.val)
-            self.timer.interval = interval
 
     def reset(self, event):
         self.playing = False
@@ -1267,8 +1328,7 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    # filepath = os.path.join(dir_path, 'cbfj.npz') # good one for now 1 step
-    filepath = os.path.join(dir_path, 'cbfi.npz')
+    filepath = os.path.join(dir_path, 'cbfj.npz')
 
     ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square2slow.npz')
 
@@ -1294,144 +1354,78 @@ def main():
     ]
     r_car = 0.04
 
-    
-    
     general_models = {
         "nominal": {
             'Bf': 6.5, 'Br': 6.5, 'Cf': 1.4, 'Cr': 1.4,
             'Df': 17.0, 'Dr': 17.0, 'Cro': 0.0, 'Cd': 0.0,
             'Ce': 10.0, 'Cm': 0.0,
         },
-        # rank 1  |  model index 1833  |  selected 67x (3.3%)
-        # "model_1833": {
-        #     'Bf': 12.000000,  # std=0.0000
-        #     'Cf': 1.000000,  # std=0.0000
-        #     'Df': 1.700000,  # std=0.0000
-        #     'Br': 1.100000,  # std=0.0000
-        #     'Cr': 22.000000,  # std=0.0000
-        #     'Dr': 2.000000,  # std=0.0000
-        #     'Cro': 0.000000,  # std=0.0000
-        #     'Cd': 0.000000,  # std=0.0000
-        #     'Ce': 10.000000,  # std=0.0000
-        #     'Cm': 0.000000,  # std=0.0000
-        # },
-        # # rank 2  |  model index 1  |  selected 64x (3.2%)
-        # "model_1": {
-        #     'Bf': 1.000000,  # std=0.0000
-        #     'Cf': 1.000000,  # std=0.0000
-        #     'Df': 1.100000,  # std=0.0000
-        #     'Br': 1.100000,  # std=0.0000
-        #     'Cr': 2.000000,  # std=0.0000
-        #     'Dr': 2.000000,  # std=0.0000
-        #     'Cro': 0.000000,  # std=0.0000
-        #     'Cd': 0.000000,  # std=0.0000
-        #     'Ce': 10.000000,  # std=0.0000
-        #     'Cm': 0.000000,  # std=0.0000
-        # },
-        # # rank 3  |  model index 1741  |  selected 55x (2.7%)
-        # "model_1741": {
-        #     'Bf': 12.000000,  # std=0.0000
-        #     'Cf': 1.000000,  # std=0.0000
-        #     'Df': 1.100000,  # std=0.0000
-        #     'Br': 1.100000,  # std=0.0000
-        #     'Cr': 32.000000,  # std=0.0000
-        #     'Dr': 2.000000,  # std=0.0000
-        #     'Cro': 0.000000,  # std=0.0000
-        #     'Cd': 0.000000,  # std=0.0000
-        #     'Ce': 10.000000,  # std=0.0000
-        #     'Cm': 0.000000,  # std=0.0000
-        # },
-        # # rank 4  |  model index 1789  |  selected 53x (2.6%)
-        # "model_1789": {
-        #     'Bf': 12.000000,  # std=0.0000
-        #     'Cf': 1.000000,  # std=0.0000
-        #     'Df': 1.400000,  # std=0.0000
-        #     'Br': 1.100000,  # std=0.0000
-        #     'Cr': 32.000000,  # std=0.0000
-        #     'Dr': 2.000000,  # std=0.0000
-        #     'Cro': 0.000000,  # std=0.0000
-        #     'Cd': 0.000000,  # std=0.0000
-        #     'Ce': 10.000000,  # std=0.0000
-        #     'Cm': 0.000000,  # std=0.0000
-        # },
-        # # rank 5  |  model index 1790  |  selected 52x (2.6%)
-        # "model_1790": {
-        #     'Bf': 12.000000,  # std=0.0000
-        #     'Cf': 1.000000,  # std=0.0000
-        #     'Df': 1.400000,  # std=0.0000
-        #     'Br': 1.100000,  # std=0.0000
-        #     'Cr': 32.000000,  # std=0.0000
-        #     'Dr': 12.000000,  # std=0.0000
-        #     'Cro': 0.000000,  # std=0.0000
-        #     'Cd': 0.000000,  # std=0.0000
-        #     'Ce': 10.000000,  # std=0.0000
-        #     'Cm': 0.000000,  # std=0.0000
-        # },
-        # # rank 6  |  model index 109  |  selected 49x (2.4%)
-        # "model_109": {
-        #     'Bf': 1.000000,  # std=0.0000
-        #     'Cf': 1.000000,  # std=0.0000
-        #     'Df': 1.700000,  # std=0.0000
-        #     'Br': 1.100000,  # std=0.0000
-        #     'Cr': 32.000000,  # std=0.0000
-        #     'Dr': 2.000000,  # std=0.0000
-        #     'Cro': 0.000000,  # std=0.0000
-        #     'Cd': 0.000000,  # std=0.0000
-        #     'Ce': 10.000000,  # std=0.0000
-        #     'Cm': 0.000000,  # std=0.0000
-        # },
-        # # rank 7  |  model index 9  |  selected 46x (2.3%)
-        # "model_9": {
-        #     'Bf': 1.000000,  # std=0.0000
-        #     'Cf': 1.000000,  # std=0.0000
-        #     'Df': 1.100000,  # std=0.0000
-        #     'Br': 1.100000,  # std=0.0000
-        #     'Cr': 22.000000,  # std=0.0000
-        #     'Dr': 2.000000,  # std=0.0000
-        #     'Cro': 0.000000,  # std=0.0000
-        #     'Cd': 0.000000,  # std=0.0000
-        #     'Ce': 10.000000,  # std=0.0000
-        #     'Cm': 0.000000,  # std=0.0000
-        # },
-        # # rank 8  |  model index 1791  |  selected 44x (2.2%)
-        # "model_1791": {
-        #     'Bf': 12.000000,  # std=0.0000
-        #     'Cf': 1.000000,  # std=0.0000
-        #     'Df': 1.400000,  # std=0.0000
-        #     'Br': 1.100000,  # std=0.0000
-        #     'Cr': 32.000000,  # std=0.0000
-        #     'Dr': 22.000000,  # std=0.0000
-        #     'Cro': 0.000000,  # std=0.0000
-        #     'Cd': 0.000000,  # std=0.0000
-        #     'Ce': 10.000000,  # std=0.0000
-        #     'Cm': 0.000000,  # std=0.0000
-        # },
-        # # rank 9  |  model index 13  |  selected 42x (2.1%)
-        # "model_13": {
-        #     'Bf': 1.000000,  # std=0.0000
-        #     'Cf': 1.000000,  # std=0.0000
-        #     'Df': 1.100000,  # std=0.0000
-        #     'Br': 1.100000,  # std=0.0000
-        #     'Cr': 32.000000,  # std=0.0000
-        #     'Dr': 2.000000,  # std=0.0000
-        #     'Cro': 0.000000,  # std=0.0000
-        #     'Cd': 0.000000,  # std=0.0000
-        #     'Ce': 10.000000,  # std=0.0000
-        #     'Cm': 0.000000,  # std=0.0000
-        # },
-        # # rank 10  |  model index 1806  |  selected 38x (1.9%)
-        # "model_1806": {
-        #     'Bf': 12.000000,  # std=0.0000
-        #     'Cf': 1.000000,  # std=0.0000
-        #     'Df': 1.400000,  # std=0.0000
-        #     'Br': 1.400000,  # std=0.0000
-        #     'Cr': 32.000000,  # std=0.0000
-        #     'Dr': 12.000000,  # std=0.0000
-        #     'Cro': 0.000000,  # std=0.0000
-        #     'Cd': 0.000000,  # std=0.0000
-        #     'Ce': 10.000000,  # std=0.0000
-        #     'Cm': 0.000000,  # std=0.0000
-        # },
+        # rank 1  |  model index 3012  |  selected 213x (10.5%)
+        "model_3012": {
+            'Bf': 6.500000,  # std=0.0000
+            'Br': 6.500000,  # std=0.0000
+            'Cf': 1.700000,  # std=0.0000
+            'Cr': 1.100000,  # std=0.0000
+            'Df': 5.333333,  # std=0.0000
+            'Dr': 5.333333,  # std=0.0000
+            'Cro': 0.000000,  # std=0.0000
+            'Cd': 0.000000,  # std=0.0000
+            'Ce': 10.000000,  # std=0.0000
+            'Cm': 0.000000,  # std=0.0000
+        },
+        # rank 2  |  model index 3002  |  selected 153x (7.5%)
+        "model_3002": {
+            'Bf': 6.500000,  # std=0.0000
+            'Br': 6.500000,  # std=0.0000
+            'Cf': 1.700000,  # std=0.0000
+            'Cr': 1.100000,  # std=0.0000
+            'Df': 2.000000,  # std=0.0000
+            'Dr': 5.333333,  # std=0.0000
+            'Cro': 0.000000,  # std=0.0000
+            'Cd': 0.000000,  # std=0.0000
+            'Ce': 10.000000,  # std=0.0000
+            'Cm': 0.000000,  # std=0.0000
+        },
+        # rank 3  |  model index 23  |  selected 135x (6.6%)
+        "model_23": {
+            'Bf': 6.500000,  # std=0.0000
+            'Br': 6.500000,  # std=0.0000
+            'Cf': 1.100000,  # std=0.0000
+            'Cr': 1.100000,  # std=0.0000
+            'Df': 8.666667,  # std=0.0000
+            'Dr': 8.666667,  # std=0.0000
+            'Cro': 0.000000,  # std=0.0000
+            'Cd': 0.000000,  # std=0.0000
+            'Ce': 10.000000,  # std=0.0000
+            'Cm': 0.000000,  # std=0.0000
+        },
+        # rank 4  |  model index 3502  |  selected 99x (4.9%)
+        "model_3502": {
+            'Bf': 6.500000,  # std=0.0000
+            'Br': 6.500000,  # std=0.0000
+            'Cf': 1.700000,  # std=0.0000
+            'Cr': 1.700000,  # std=0.0000
+            'Df': 2.000000,  # std=0.0000
+            'Dr': 5.333333,  # std=0.0000
+            'Cro': 0.000000,  # std=0.0000
+            'Cd': 0.000000,  # std=0.0000
+            'Ce': 10.000000,  # std=0.0000
+            'Cm': 0.000000,  # std=0.0000
+        },
+        # rank 5  |  model index 3112  |  selected 80x (3.9%)
+        "model_3112": {
+            'Bf': 6.500000,  # std=0.0000
+            'Br': 6.500000,  # std=0.0000
+            'Cf': 1.700000,  # std=0.0000
+            'Cr': 1.220000,  # std=0.0000
+            'Df': 5.333333,  # std=0.0000
+            'Dr': 5.333333,  # std=0.0000
+            'Cro': 0.000000,  # std=0.0000
+            'Cd': 0.000000,  # std=0.0000
+            'Ce': 10.000000,  # std=0.0000
+            'Cm': 0.000000,  # std=0.0000
+        },
+        # Add more fixed-param models here (see commented examples in your notes).
     }
 
     visualizer = StateVisualizer(
@@ -1447,8 +1441,10 @@ def main():
         dt=1.0 / 25.0,
         ol_reset_interval=5,
         full_open_loop=False,
-        window_P=40,
-        cost_form= np.array([0.0, 0.0, 20.0, 0.0, 1.0, 0.01])
+        window_P=20,
+        cost_form=np.array([0.0, 0.0, 20.0, 0.0, 10.0, 0.1]),
+        compute_m_step=True,    # set False to skip the slow M-step computation
+        m_step_M=10,
     )
     visualizer.show()
 
