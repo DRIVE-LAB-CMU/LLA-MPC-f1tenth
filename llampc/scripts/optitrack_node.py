@@ -100,7 +100,7 @@ class OptitrackSubscriber(Node):
 
     def topic_callback(self, msg):
         timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        position = np.array([ -msg.pose.position.y, msg.pose.position.x, msg.pose.position.z])
+        position = np.array([msg.pose.position.x, msg.pose.position.y, msg.pose.position.z])
         
         q_orig = np.array([
             msg.pose.orientation.x,
