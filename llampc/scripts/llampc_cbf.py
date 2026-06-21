@@ -201,8 +201,8 @@ class MPCNode(Node):
         discretization_dict = {
             'Bf': 1,   # 15% variation
             'Br': 1,   # 15% variation
-            'Cf': 6,   # 15% variation
-            'Cr': 6,   # 15% variation
+            'Cf': 7,   # 15% variation
+            'Cr': 7,   # 15% variation
             'Df': 10,   # 15% variation
             'Dr': 10,   # 15% variation
             'Cro':1, # 15% variation
