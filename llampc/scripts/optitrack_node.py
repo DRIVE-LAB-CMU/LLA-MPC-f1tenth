@@ -120,10 +120,9 @@ class OptitrackSubscriber(Node):
         ])
 
         # Transform rotation matrix
-        R_new = P @ R_orig @ P.T
-
-        # Convert back to quaternion
+        R_new = P @ R_orig          # not P @ R_orig @ P.T
         quaternion = rot_to_quat(R_new)
+
         
         self.optitrack_position = position
         self.optitrack_quaternion = quaternion
