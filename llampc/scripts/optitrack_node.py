@@ -5,7 +5,8 @@ import sys, os
 
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, TransformStamped
+from geometry_msgs.msg import PoseStamped, TransformStamped
+from nav_msgs.msg import Odometry
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy
 from tf2_ros import TransformBroadcaster
 
@@ -60,8 +61,8 @@ class OptitrackSubscriber(Node):
         if not rclpy.ok():
             rclpy.init()
         super().__init__('optitrack_bridge_sub')
-        
-        self.declare_parameter('topic', '/vrpn_mocap/f1tenth/pose')
+
+        self.declare_parameter('topic', '/f1tenth/pose')
         topic = self.get_parameter('topic').get_parameter_value().string_value
 
         qos = QoSProfile(depth=10, reliability=QoSReliabilityPolicy.BEST_EFFORT)
@@ -72,36 +73,36 @@ class OptitrackSubscriber(Node):
             topic,
             self.topic_callback,
             qos)
-            
+
         # ==========================================================
-        # NEW: Publisher for the EKF (PoseWithCovarianceStamped)
+        # Publisher for the EKF (nav_msgs/Odometry: pose + twist)
         # ==========================================================
-        self.ekf_pose_pub = self.create_publisher(
-            PoseWithCovarianceStamped, 
-            '/optitrack/pose_cov', 
+        self.ekf_odom_pub = self.create_publisher(
+            Odometry,
+            '/optitrack/odom',
             10
         )
-        
+
         self.optitrack_position = np.zeros(3)
         self.optitrack_quaternion = np.zeros(4)
         self.optitrack_linear_velocity_world = np.zeros(3)
         self.optitrack_linear_velocity = np.zeros(3)
         self.optitrack_angular_velocity_world = np.zeros(3)
         self.optitrack_angular_velocity = np.zeros(3)
-        
+
         self.velocity_filter_alpha = velocity_filter_alpha
         self.history_size = history_size
-        
+
         self.position_history = []
         self.quaternion_history = []
         self.timestamp_history = []
-        
+
         self.br = TransformBroadcaster(self)
 
     def topic_callback(self, msg):
         timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         position = np.array([-msg.pose.position.x, -msg.pose.position.y, msg.pose.position.z])
-        
+
         q_orig = np.array([
             msg.pose.orientation.x,
             msg.pose.orientation.y,
@@ -123,50 +124,82 @@ class OptitrackSubscriber(Node):
         R_new = P @ R_orig          # not P @ R_orig @ P.T
         quaternion = rot_to_quat(R_new)
 
-        
+
         self.optitrack_position = position
         self.optitrack_quaternion = quaternion
-        
+
         self.position_history.append(position)
         self.quaternion_history.append(quaternion)
         self.timestamp_history.append(timestamp)
-        
+
         if len(self.position_history) > self.history_size:
             self.position_history.pop(0)
             self.quaternion_history.pop(0)
             self.timestamp_history.pop(0)
-        
+
         if len(self.position_history) >= 2:
             self.calculate_velocities()
-            
+
         # ==========================================================
-        # NEW: Convert and Publish PoseWithCovarianceStamped for EKF
+        # Build and publish nav_msgs/Odometry for the EKF
+        #   header.frame_id  -> frame the POSE is in   (map)
+        #   child_frame_id   -> frame the TWIST is in  (base_link)
         # ==========================================================
-        ekf_msg = PoseWithCovarianceStamped()
-        ekf_msg.header = msg.header
-        ekf_msg.header.frame_id = 'map' # Standard frame for absolute pose
-        ekf_msg.pose.pose.position.x = position[0]
-        ekf_msg.pose.pose.position.y = position[1]
-        ekf_msg.pose.pose.position.z = position[2]
-        ekf_msg.pose.pose.orientation.x = quaternion[0]
-        ekf_msg.pose.pose.orientation.y = quaternion[1]
-        ekf_msg.pose.pose.orientation.z = quaternion[2]
-        ekf_msg.pose.pose.orientation.w = quaternion[3]
-        
-        # Create a 6x6 covariance matrix (x, y, z, roll, pitch, yaw)
-        # We give it a very small variance (1e-4) because Optitrack is highly accurate
-        cov = np.zeros(36)
-        cov[0]  = 1e-4 # X variance
-        cov[7]  = 1e-4 # Y variance
-        cov[14] = 1e-4 # Z variance
-        cov[21] = 1e-4 # Roll variance
-        cov[28] = 1e-4 # Pitch variance
-        cov[35] = 1e-4 # Yaw variance
-        ekf_msg.pose.covariance = cov.tolist()
-        
-        self.ekf_pose_pub.publish(ekf_msg)
+        odom_msg = Odometry()
+        odom_msg.header = msg.header
+        odom_msg.header.frame_id = 'map'        # pose frame
+        odom_msg.child_frame_id = 'base_link'   # twist (body) frame
+
+        # ---- Pose (world) ----
+        odom_msg.pose.pose.position.x = position[0]
+        odom_msg.pose.pose.position.y = position[1]
+        odom_msg.pose.pose.position.z = position[2]
+        odom_msg.pose.pose.orientation.x = quaternion[0]
+        odom_msg.pose.pose.orientation.y = quaternion[1]
+        odom_msg.pose.pose.orientation.z = quaternion[2]
+        odom_msg.pose.pose.orientation.w = quaternion[3]
+
+        # Pose covariance (6x6: x, y, z, roll, pitch, yaw)
+        # Small variance (1e-4) because Optitrack is highly accurate
+        pcov = np.zeros(36)
+        pcov[0]  = 1e-4  # X variance
+        pcov[7]  = 1e-4  # Y variance
+        pcov[14] = 1e-4  # Z variance
+        pcov[21] = 1e-4  # Roll variance
+        pcov[28] = 1e-4  # Pitch variance
+        pcov[35] = 1e-4  # Yaw variance
+        odom_msg.pose.covariance = pcov.tolist()
+
         # ==========================================================
-            
+        # ---- Twist (body frame) -- DISABLED FOR NOW ----
+        # Finite-difference velocity from mocap. Rotate world->body
+        # before publishing because robot_localization treats twist
+        # as base_link-frame. Uncomment to enable, and turn on the
+        # corresponding Vx/Vy/Vyaw slots in odom0_config.
+        # ==========================================================
+        # R_body = quat_to_rot(quaternion)            # body->world
+        # v_body = R_body.T @ self.optitrack_linear_velocity_world
+        # w_body = R_body.T @ self.optitrack_angular_velocity_world
+        #
+        # odom_msg.twist.twist.linear.x  = v_body[0]
+        # odom_msg.twist.twist.linear.y  = v_body[1]
+        # odom_msg.twist.twist.linear.z  = v_body[2]
+        # odom_msg.twist.twist.angular.x = w_body[0]
+        # odom_msg.twist.twist.angular.y = w_body[1]
+        # odom_msg.twist.twist.angular.z = w_body[2]
+        #
+        # tcov = np.zeros(36)
+        # tcov[0]  = 1e-2  # Vx variance  (finite-diff is noisy)
+        # tcov[7]  = 1e-2  # Vy variance
+        # tcov[14] = 1e-2  # Vz variance
+        # tcov[21] = 1e-2  # Vroll variance
+        # tcov[28] = 1e-2  # Vpitch variance
+        # tcov[35] = 1e-2  # Vyaw variance
+        # odom_msg.twist.covariance = tcov.tolist()
+        # ==========================================================
+
+        self.ekf_odom_pub.publish(odom_msg)
+
         # Broadcast TF
         t = TransformStamped()
         t.header.stamp = self.get_clock().now().to_msg()
@@ -180,7 +213,7 @@ class OptitrackSubscriber(Node):
         t.transform.rotation.z = quaternion[2]
         t.transform.rotation.w = quaternion[3]
         self.br.sendTransform(t)
-            
+
         self.get_logger().info(
             f"pos=({self.optitrack_position[0]:.3f}, {self.optitrack_position[1]:.3f}, {self.optitrack_position[2]:.3f})"
         )
@@ -188,35 +221,35 @@ class OptitrackSubscriber(Node):
     def calculate_velocities(self):
         p1, p0 = self.position_history[-2], self.position_history[-1]
         t1, t0 = self.timestamp_history[-2], self.timestamp_history[-1]
-        
+
         dt = t0 - t1
         if dt > 0:
             raw_linear_vel = (p0 - p1) / dt
             self.optitrack_linear_velocity_world = raw_linear_vel.copy()
-            self.optitrack_linear_velocity = raw_linear_vel 
-        
-        q1, q0 = self.quaternion_history[-2], self.quaternion_history[-1] 
-        
+            self.optitrack_linear_velocity = raw_linear_vel
+
+        q1, q0 = self.quaternion_history[-2], self.quaternion_history[-1]
+
         if dt > 0:
             q1_scipy = np.array([q1[3], q1[0], q1[1], q1[2]])
             q0_scipy = np.array([q0[3], q0[0], q0[1], q0[2]])
-            
+
             q1_conj = q1_scipy.copy()
             q1_conj[1:] = -q1_conj[1:]
-            
+
             q_diff = self.quaternion_multiply(q0_scipy, q1_conj)
             raw_angular_vel = 2.0 * q_diff[1:] / dt
-            
+
             self.optitrack_angular_velocity_world = raw_angular_vel
-            self.optitrack_angular_velocity = raw_angular_vel 
-            
+            self.optitrack_angular_velocity = raw_angular_vel
+
     def get_optitrack_angular_velocity_world(self): return self.optitrack_angular_velocity_world
     def get_optitrack_angular_velocity(self): return self.optitrack_angular_velocity
     def get_optitrack_linear_velocity_world(self): return self.optitrack_linear_velocity_world
     def get_optitrack_position(self): return self.optitrack_position
     def get_optitrack_quaternion(self): return self.optitrack_quaternion
     def get_optitrack_linear_velocity(self): return self.optitrack_linear_velocity
-    
+
     def quaternion_multiply(self, q1, q2):
         w1, x1, y1, z1 = q1
         w2, x2, y2, z2 = q2
@@ -225,9 +258,9 @@ class OptitrackSubscriber(Node):
         y = w1*y2 - x1*z2 + y1*w2 + z1*x2
         z = w1*z2 + x1*y2 - y1*x2 + z1*w2
         return np.array([w, x, y, z])
-    
-    
-    
+
+
+
 
 def main(args=None):
     rclpy.init(args=args)

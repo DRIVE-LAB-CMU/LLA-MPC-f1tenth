@@ -1328,7 +1328,7 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'cbfm.npz')
+    filepath = os.path.join(dir_path, 'cbfr.npz')
 
     ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square2slow.npz')
 
@@ -1376,8 +1376,8 @@ def main():
         ol_reset_interval=5,
         full_open_loop=False,
         window_P=20,
-        cost_form=np.array([0.0, 0.0, 20.0, 0.0, 10.0, 0.01]),
-        compute_m_step=False,    # set False to skip the slow M-step computation
+        cost_form=np.array([0.0, 0.0, 20.0, 5.0, 10.0, 0.01]),
+        compute_m_step=True,    # set False to skip the slow M-step computation
         m_step_M=10,
     )
     visualizer.show()
