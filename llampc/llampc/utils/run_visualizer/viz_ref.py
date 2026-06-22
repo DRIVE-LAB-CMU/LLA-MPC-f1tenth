@@ -1328,7 +1328,7 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'cbfj.npz')
+    filepath = os.path.join(dir_path, 'cbfm.npz')
 
     ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square2slow.npz')
 
@@ -1360,72 +1360,6 @@ def main():
             'Df': 17.0, 'Dr': 17.0, 'Cro': 0.0, 'Cd': 0.0,
             'Ce': 10.0, 'Cm': 0.0,
         },
-        # rank 1  |  model index 3012  |  selected 213x (10.5%)
-        "model_3012": {
-            'Bf': 6.500000,  # std=0.0000
-            'Br': 6.500000,  # std=0.0000
-            'Cf': 1.700000,  # std=0.0000
-            'Cr': 1.100000,  # std=0.0000
-            'Df': 5.333333,  # std=0.0000
-            'Dr': 5.333333,  # std=0.0000
-            'Cro': 0.000000,  # std=0.0000
-            'Cd': 0.000000,  # std=0.0000
-            'Ce': 10.000000,  # std=0.0000
-            'Cm': 0.000000,  # std=0.0000
-        },
-        # rank 2  |  model index 3002  |  selected 153x (7.5%)
-        "model_3002": {
-            'Bf': 6.500000,  # std=0.0000
-            'Br': 6.500000,  # std=0.0000
-            'Cf': 1.700000,  # std=0.0000
-            'Cr': 1.100000,  # std=0.0000
-            'Df': 2.000000,  # std=0.0000
-            'Dr': 5.333333,  # std=0.0000
-            'Cro': 0.000000,  # std=0.0000
-            'Cd': 0.000000,  # std=0.0000
-            'Ce': 10.000000,  # std=0.0000
-            'Cm': 0.000000,  # std=0.0000
-        },
-        # rank 3  |  model index 23  |  selected 135x (6.6%)
-        "model_23": {
-            'Bf': 6.500000,  # std=0.0000
-            'Br': 6.500000,  # std=0.0000
-            'Cf': 1.100000,  # std=0.0000
-            'Cr': 1.100000,  # std=0.0000
-            'Df': 8.666667,  # std=0.0000
-            'Dr': 8.666667,  # std=0.0000
-            'Cro': 0.000000,  # std=0.0000
-            'Cd': 0.000000,  # std=0.0000
-            'Ce': 10.000000,  # std=0.0000
-            'Cm': 0.000000,  # std=0.0000
-        },
-        # rank 4  |  model index 3502  |  selected 99x (4.9%)
-        "model_3502": {
-            'Bf': 6.500000,  # std=0.0000
-            'Br': 6.500000,  # std=0.0000
-            'Cf': 1.700000,  # std=0.0000
-            'Cr': 1.700000,  # std=0.0000
-            'Df': 2.000000,  # std=0.0000
-            'Dr': 5.333333,  # std=0.0000
-            'Cro': 0.000000,  # std=0.0000
-            'Cd': 0.000000,  # std=0.0000
-            'Ce': 10.000000,  # std=0.0000
-            'Cm': 0.000000,  # std=0.0000
-        },
-        # rank 5  |  model index 3112  |  selected 80x (3.9%)
-        "model_3112": {
-            'Bf': 6.500000,  # std=0.0000
-            'Br': 6.500000,  # std=0.0000
-            'Cf': 1.700000,  # std=0.0000
-            'Cr': 1.220000,  # std=0.0000
-            'Df': 5.333333,  # std=0.0000
-            'Dr': 5.333333,  # std=0.0000
-            'Cro': 0.000000,  # std=0.0000
-            'Cd': 0.000000,  # std=0.0000
-            'Ce': 10.000000,  # std=0.0000
-            'Cm': 0.000000,  # std=0.0000
-        },
-        # Add more fixed-param models here (see commented examples in your notes).
     }
 
     visualizer = StateVisualizer(
@@ -1442,7 +1376,7 @@ def main():
         ol_reset_interval=5,
         full_open_loop=False,
         window_P=20,
-        cost_form=np.array([0.0, 0.0, 20.0, 0.0, 10.0, 0.1]),
+        cost_form=np.array([0.0, 0.0, 20.0, 0.0, 10.0, 0.01]),
         compute_m_step=False,    # set False to skip the slow M-step computation
         m_step_M=10,
     )

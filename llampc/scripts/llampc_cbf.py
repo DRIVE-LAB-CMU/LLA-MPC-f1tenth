@@ -753,6 +753,9 @@ class MPCNode(Node):
         self.count = (self.count + 1) % self.time_window
         self.time_history[:self.checkpoints-1, self.count] = np.array(self.checkpoint[1:]-self.checkpoint[:-1])
         self.time_history[-1, self.count] = (self.checkpoint[-1] - self.checkpoint[0])
+        
+        if(self.count == 0):
+            print(np.max(self.time_history*1e-6, axis = 1))
 
 
     def publish_ref_trajectory(self, ref_trajectory):
