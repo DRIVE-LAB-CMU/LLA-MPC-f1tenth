@@ -177,25 +177,25 @@ class OptitrackSubscriber(Node):
         # as base_link-frame. Uncomment to enable, and turn on the
         # corresponding Vx/Vy/Vyaw slots in odom0_config.
         # ==========================================================
-        # R_body = quat_to_rot(quaternion)            # body->world
-        # v_body = R_body.T @ self.optitrack_linear_velocity_world
-        # w_body = R_body.T @ self.optitrack_angular_velocity_world
-        #
-        # odom_msg.twist.twist.linear.x  = v_body[0]
-        # odom_msg.twist.twist.linear.y  = v_body[1]
-        # odom_msg.twist.twist.linear.z  = v_body[2]
-        # odom_msg.twist.twist.angular.x = w_body[0]
-        # odom_msg.twist.twist.angular.y = w_body[1]
-        # odom_msg.twist.twist.angular.z = w_body[2]
-        #
-        # tcov = np.zeros(36)
-        # tcov[0]  = 1e-2  # Vx variance  (finite-diff is noisy)
-        # tcov[7]  = 1e-2  # Vy variance
-        # tcov[14] = 1e-2  # Vz variance
-        # tcov[21] = 1e-2  # Vroll variance
-        # tcov[28] = 1e-2  # Vpitch variance
-        # tcov[35] = 1e-2  # Vyaw variance
-        # odom_msg.twist.covariance = tcov.tolist()
+        R_body = quat_to_rot(quaternion)            # body->world
+        v_body = R_body.T @ self.optitrack_linear_velocity_world
+        w_body = R_body.T @ self.optitrack_angular_velocity_world
+        
+        odom_msg.twist.twist.linear.x  = v_body[0]
+        odom_msg.twist.twist.linear.y  = v_body[1]
+        odom_msg.twist.twist.linear.z  = v_body[2]
+        odom_msg.twist.twist.angular.x = w_body[0]
+        odom_msg.twist.twist.angular.y = w_body[1]
+        odom_msg.twist.twist.angular.z = w_body[2]
+        
+        tcov = np.zeros(36)
+        tcov[0]  = 1e-2  # Vx variance  (finite-diff is noisy)
+        tcov[7]  = 1e-2  # Vy variance
+        tcov[14] = 1e-2  # Vz variance
+        tcov[21] = 1e-2  # Vroll variance
+        tcov[28] = 1e-2  # Vpitch variance
+        tcov[35] = 1e-2  # Vyaw variance
+        odom_msg.twist.covariance = tcov.tolist()
         # ==========================================================
 
         self.ekf_odom_pub.publish(odom_msg)
