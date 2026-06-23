@@ -162,9 +162,9 @@ class OptitrackSubscriber(Node):
         # Pose covariance (6x6: x, y, z, roll, pitch, yaw)
         # Small variance (1e-4) because Optitrack is highly accurate
         pcov = np.zeros(36)
-        pcov[0]  = 1e-4  # X variance
-        pcov[7]  = 1e-4  # Y variance
-        pcov[14] = 1e-4  # Z variance
+        pcov[0]  = 1e-6  # X variance
+        pcov[7]  = 1e-6  # Y variance
+        pcov[14] = 1e-6  # Z variance
         pcov[21] = 1e-4  # Roll variance
         pcov[28] = 1e-4  # Pitch variance
         pcov[35] = 1e-4  # Yaw variance
