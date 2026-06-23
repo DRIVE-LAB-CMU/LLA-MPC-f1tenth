@@ -28,7 +28,7 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(natnet_launch_file),
         launch_arguments={
             'serverIP': '172.26.119.139',   # Host PC IP (Local Interface in Motive)
-            'clientIP': '172.26.119.xxx',   # <-- IP of THIS PC (where you launch)
+            'clientIP': '172.26.112.71',   # <-- IP of THIS PC (where you launch)
             'serverType': 'unicast',        # 'multicast' or 'unicast'
         }.items()
     )
