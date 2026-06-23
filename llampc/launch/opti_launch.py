@@ -30,6 +30,7 @@ def generate_launch_description():
             'serverIP': '172.26.119.139',   # Host PC IP (Local Interface in Motive)
             'clientIP': '172.26.112.71',   # <-- IP of THIS PC (where you launch)
             'serverType': 'unicast',        # 'multicast' or 'unicast'
+            'pub_rigid_body': 'true', 
         }.items()
     )
 
