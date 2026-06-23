@@ -40,6 +40,7 @@ import argparse
 import threading
 from collections import deque
 
+import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
@@ -57,7 +58,25 @@ DEFAULT_ODOM_TOPIC = '/optitrack/odom'
 DEFAULT_EKF_TOPIC = '/odometry/filtered'
 WINDOW_SEC = 10.0          # rolling time window shown on the x-axis
 MAX_SAMPLES = 5000         # hard cap on buffered samples (memory guard)
-APPLY_BRIDGE_TRANSFORM = False  # pose-mode only: mirror the bridge x/y negation
+
+# Channels treated as "velocity" for outlier-robust autoscaling.
+VELOCITY_KEYS = {'vx', 'vy', 'omega'}
+# When robust autoscale is on, y-limits use this percentile band instead of
+# min/max, so extreme finite-difference spikes don't blow up the axis.
+ROBUST_PCT = 2.0           # -> 2nd..98th percentile
+
+# pose-mode only: apply the SAME frame transform the optitrack bridge applies
+# before it publishes /optitrack/odom to the EKF. Must stay True so the RAW
+# (pose) line and the EKF line live in the same 'map' frame and actually overlay.
+APPLY_BRIDGE_TRANSFORM = True
+
+# Axis-permutation matrix, copied verbatim from the bridge (optitrack_node.py).
+# x_new = -y_old, y_new = x_old, z_new = z_old.
+_BRIDGE_P = np.array([
+    [0, -1, 0],
+    [1,  0, 0],
+    [0,  0, 1],
+])
 
 
 def yaw_from_quat(x, y, z, w):
@@ -71,6 +90,31 @@ def angle_diff(a, b):
     """Smallest signed difference a - b, wrapped to (-pi, pi]."""
     d = a - b
     return math.atan2(math.sin(d), math.cos(d))
+
+
+def quat_to_rot(q):
+    """Quaternion (x, y, z, w) -> 3x3 rotation matrix. Matches the bridge."""
+    x, y, z, w = q
+    return np.array([
+        [1 - 2*(y*y + z*z),     2*(x*y - z*w),     2*(x*z + y*w)],
+        [    2*(x*y + z*w), 1 - 2*(x*x + z*z),     2*(y*z - x*w)],
+        [    2*(x*z - y*w),     2*(y*z + x*w), 1 - 2*(x*x + y*y)],
+    ])
+
+
+def bridge_transform(raw_pos, raw_quat):
+    """Replicate the bridge's pose remap exactly.
+
+    raw_pos  : (px, py, pz) from the incoming PoseStamped
+    raw_quat : (x, y, z, w) from the incoming PoseStamped
+    returns  : (pos_xyz in 'map', theta) so the RAW line matches /optitrack/odom.
+    """
+    # Position: negate x and y, keep z (bridge: [-x, -y, z]).
+    pos = np.array([-raw_pos[0], -raw_pos[1], raw_pos[2]])
+    # Orientation: R_new = P @ R_orig, then take yaw from the resulting rotation.
+    R_new = _BRIDGE_P @ quat_to_rot(raw_quat)
+    theta = math.atan2(R_new[1, 0], R_new[0, 0])
+    return pos, theta
 
 
 class _Series:
@@ -150,24 +194,31 @@ class ComparePlotter(Node):
             t0 = self._t0
         return t, t - t0
 
-    # ---- RAW pose mode: finite-difference velocity (WORLD frame) ------------
+    # ---- RAW pose mode: finite-difference velocity (transformed WORLD frame) ----
     def cb_raw_pose(self, msg):
         t_abs, t_rel = self._rel_time(msg.header.stamp)
 
-        px = msg.pose.position.x
-        py = msg.pose.position.y
-        if APPLY_BRIDGE_TRANSFORM:
-            px, py = -px, -py
+        raw_pos = (msg.pose.position.x, msg.pose.position.y, msg.pose.position.z)
+        raw_quat = (msg.pose.orientation.x, msg.pose.orientation.y,
+                    msg.pose.orientation.z, msg.pose.orientation.w)
 
-        theta = yaw_from_quat(
-            msg.pose.orientation.x, msg.pose.orientation.y,
-            msg.pose.orientation.z, msg.pose.orientation.w)
+        if APPLY_BRIDGE_TRANSFORM:
+            # Same remap the bridge applies before /optitrack/odom -> EKF, so the
+            # RAW line is in 'map' and overlays the EKF line.
+            pos, theta = bridge_transform(raw_pos, raw_quat)
+            px, py = pos[0], pos[1]
+        else:
+            px, py = raw_pos[0], raw_pos[1]
+            theta = yaw_from_quat(*raw_quat)
 
         vx = vy = om = 0.0
         if self._prev is not None:
             pt, ppx, ppy, pth = self._prev
             dt = t_abs - pt
             if dt > 1e-9:
+                # Finite-difference velocity in the (transformed) WORLD frame --
+                # this matches the bridge's optitrack_linear_velocity_world, which
+                # is what it would rotate into body frame for the EKF twist.
                 vx = (px - ppx) / dt
                 vy = (py - ppy) / dt
                 om = angle_diff(theta, pth) / dt
@@ -217,12 +268,19 @@ def main():
                         help='RAW topic (defaults per source).')
     parser.add_argument('--ekf-topic', default=DEFAULT_EKF_TOPIC,
                         help='EKF Odometry topic (default /odometry/filtered).')
+    parser.add_argument('--robust-scale', action='store_true',
+                        help='Ignore extreme velocity outliers when autoscaling '
+                             'the vx/vy/omega y-axes (data is still plotted, just '
+                             'not allowed to blow up the axis limits).')
+    parser.add_argument('--robust-pct', type=float, default=ROBUST_PCT,
+                        help='Percentile band for --robust-scale (default %(default)s '
+                             '-> uses the p..(100-p) range). Lower = tighter clip.')
     args = parser.parse_args()
 
     raw_topic = args.topic or (DEFAULT_ODOM_TOPIC if args.source == 'odom'
                                else DEFAULT_POSE_TOPIC)
 
-    raw_vframe = 'body' if args.source == 'odom' else 'world'
+    raw_vframe = 'body' if args.source == 'odom' else 'map-world'
     ekf_vframe = 'body'
 
     rclpy.init()
@@ -286,7 +344,15 @@ def main():
             vis = [val for ti, val in zip(raw['t'], raw[key]) if ti >= t_min]
             vis += [val for ti, val in zip(ekf['t'], ekf[key]) if ti >= t_min]
             if vis:
-                lo, hi = min(vis), max(vis)
+                if args.robust_scale and key in VELOCITY_KEYS and len(vis) >= 5:
+                    # Robust autoscale: clamp limits to a percentile band so a few
+                    # extreme finite-difference spikes don't dominate the axis.
+                    # The spikes are still drawn -- they just run off the top/bottom.
+                    p = max(0.0, min(49.0, args.robust_pct))
+                    lo = float(np.percentile(vis, p))
+                    hi = float(np.percentile(vis, 100.0 - p))
+                else:
+                    lo, hi = min(vis), max(vis)
                 pad = 0.1 * (hi - lo) if hi > lo else 0.5
                 ax.set_ylim(lo - pad, hi + pad)
         return all_lns
