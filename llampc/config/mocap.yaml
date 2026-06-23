@@ -4,6 +4,26 @@ ekf_filter_node:
     two_d_mode: true          # Essential for ground vehicles (locks Z, Roll, Pitch to 0)
     publish_tf: true          # EKF publishes odom -> base_link
     print_diagnostics: true
+    predict_to_current_time: true
+
+
+                              # [x   y   z    roll pitch yaw  vx   vy   vz   vroll vpitch vyaw  ax   ay   az]
+    process_noise_covariance: [0.05, 0,   0,   0,   0,   0,    0,    0,   0,   0,    0,    0,    0,   0,   0,
+                               0,   0.05, 0,   0,   0,   0,    0,    0,   0,   0,    0,    0,    0,   0,   0,
+                               0,   0,   0.06, 0,   0,   0,    0,    0,   0,   0,    0,    0,    0,   0,   0,
+                               0,   0,   0,   0.03, 0,   0,    0,    0,   0,   0,    0,    0,    0,   0,   0,
+                               0,   0,   0,   0,   0.03, 0,    0,    0,   0,   0,    0,    0,    0,   0,   0,
+                               0,   0,   0,   0,   0,   0.06,  0,    0,   0,   0,    0,    0,    0,   0,   0,
+                               0,   0,   0,   0,   0,   0,    0.15,  0,   0,   0,    0,    0,    0,   0,   0,
+                               0,   0,   0,   0,   0,   0,    0,    0.15,0,   0,    0,    0,    0,   0,   0,
+                               0,   0,   0,   0,   0,   0,    0,    0,   0.04,0,    0,    0,    0,   0,   0,
+                               0,   0,   0,   0,   0,   0,    0,    0,   0,   0.01, 0,    0,    0,   0,   0,
+                               0,   0,   0,   0,   0,   0,    0,    0,   0,   0,    0.01, 0,    0,   0,   0,
+                               0,   0,   0,   0,   0,   0,    0,    0,   0,   0,    0,    0.025, 0,   0,   0,
+                               0,   0,   0,   0,   0,   0,    0,    0,   0,   0,    0,    0,    0.01,0,   0,
+                               0,   0,   0,   0,   0,   0,    0,    0,   0,   0,    0,    0,    0,   0.01,0,
+                               0,   0,   0,   0,   0,   0,    0,    0,   0,   0,    0,    0,    0,   0,   0.015]
+
 
     map_frame: map
     odom_frame: odom
@@ -21,7 +41,7 @@ ekf_filter_node:
                   false, false, false]
     odom0_differential: false
 
-    
+
     # ---------------------------------------------------------
     # INPUT 2: Cleaned VESC IMU (Drift & Momentum)
     # ---------------------------------------------------------
