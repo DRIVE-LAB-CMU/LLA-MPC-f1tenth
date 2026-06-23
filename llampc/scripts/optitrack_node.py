@@ -1,241 +1,273 @@
 #!/usr/bin/env python3
-"""
-Live diagnostic plotter for the mocap pipeline. Two source modes:
-
-  --source pose  (default)
-      Subscribe to a geometry_msgs/PoseStamped (e.g. /f1tenth/pose) and compute
-      finite-difference velocities ourselves. vx/vy are WORLD frame. This shows
-      the raw mocap stream and the raw 1/dt noise -- good for judging jitter.
-
-  --source odom
-      Subscribe to a nav_msgs/Odometry (e.g. /optitrack/odom) and read the pose
-      AND the velocities straight out of the message. The vx/vy/omega plotted
-      here are exactly what your bridge computed and published in twist.twist
-      (BODY frame), not a re-derivation. If the bridge's twist block is still
-      commented out those fields are zero, so the velocity plots read flat 0 --
-      which is the signal that your twist isn't being published yet.
-
-Usage:
-    python3 pose_fd_plotter.py                          # pose mode, /f1tenth/pose
-    python3 pose_fd_plotter.py --source odom            # odom mode, /optitrack/odom
-    python3 pose_fd_plotter.py --source odom --topic /optitrack/odom
-    python3 pose_fd_plotter.py --source pose --topic /some/other/pose
-
-Notes:
-  * pose-mode velocities are WORLD frame; odom-mode velocities are whatever the
-    bridge published (BODY frame). Axis labels update to reflect this.
-  * dt / time axis use header.stamp (sensor time) in both modes.
-"""
-
-import sys
-import math
-import argparse
-import threading
-from collections import deque
+import numpy as np
+import time
+import sys, os
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, TransformStamped
 from nav_msgs.msg import Odometry
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy
+from tf2_ros import TransformBroadcaster
 
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
-
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
-DEFAULT_POSE_TOPIC = '/f1tenth/pose'
-DEFAULT_ODOM_TOPIC = '/optitrack/odom'
-WINDOW_SEC = 10.0          # rolling time window shown on the x-axis
-MAX_SAMPLES = 5000         # hard cap on buffered samples (memory guard)
-APPLY_BRIDGE_TRANSFORM = False  # pose-mode only: mirror the bridge x/y negation
+sys.path.append(os.path.join(os.path.dirname(__file__)))
 
 
-def yaw_from_quat(x, y, z, w):
-    """Extract yaw (rotation about z) from a quaternion. Valid for 2D heading."""
-    siny_cosp = 2.0 * (w * z + x * y)
-    cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
-    return math.atan2(siny_cosp, cosy_cosp)
+def quat_to_rot(q):
+    x, y, z, w = q
+
+    return np.array([
+        [1 - 2*(y*y + z*z),     2*(x*y - z*w),     2*(x*z + y*w)],
+        [    2*(x*y + z*w), 1 - 2*(x*x + z*z),     2*(y*z - x*w)],
+        [    2*(x*z - y*w),     2*(y*z + x*w), 1 - 2*(x*x + y*y)]
+    ])
 
 
-def angle_diff(a, b):
-    """Smallest signed difference a - b, wrapped to (-pi, pi]."""
-    d = a - b
-    return math.atan2(math.sin(d), math.cos(d))
+def rot_to_quat(R):
+    trace = np.trace(R)
 
+    if trace > 0:
+        s = 0.5 / np.sqrt(trace + 1.0)
+        w = 0.25 / s
+        x = (R[2,1] - R[1,2]) * s
+        y = (R[0,2] - R[2,0]) * s
+        z = (R[1,0] - R[0,1]) * s
+    else:
+        if R[0,0] > R[1,1] and R[0,0] > R[2,2]:
+            s = 2.0 * np.sqrt(1.0 + R[0,0] - R[1,1] - R[2,2])
+            w = (R[2,1] - R[1,2]) / s
+            x = 0.25 * s
+            y = (R[0,1] + R[1,0]) / s
+            z = (R[0,2] + R[2,0]) / s
 
-class PipelinePlotter(Node):
-    def __init__(self, source, topic):
-        super().__init__('pose_fd_plotter')
-        self.source = source
+        elif R[1,1] > R[2,2]:
+            s = 2.0 * np.sqrt(1.0 + R[1,1] - R[0,0] - R[2,2])
+            w = (R[0,2] - R[2,0]) / s
+            x = (R[0,1] + R[1,0]) / s
+            y = 0.25 * s
+            z = (R[1,2] + R[2,1]) / s
 
-        # Shared rolling buffers (written in ROS thread, read in plot thread).
-        self.lock = threading.Lock()
-        self.t = deque(maxlen=MAX_SAMPLES)
-        self.x = deque(maxlen=MAX_SAMPLES)
-        self.y = deque(maxlen=MAX_SAMPLES)
-        self.th = deque(maxlen=MAX_SAMPLES)
-        self.vx = deque(maxlen=MAX_SAMPLES)
-        self.vy = deque(maxlen=MAX_SAMPLES)
-        self.om = deque(maxlen=MAX_SAMPLES)
-
-        self._prev = None   # (t, x, y, theta) -- pose mode finite differencing
-        self._t0 = None     # first timestamp, for a relative time axis
-
-        if source == 'odom':
-            # Bridge publishes Odometry with default (RELIABLE) QoS.
-            qos = QoSProfile(depth=10,
-                             reliability=QoSReliabilityPolicy.RELIABLE,
-                             history=QoSHistoryPolicy.KEEP_LAST)
-            self.sub = self.create_subscription(Odometry, topic, self.cb_odom, qos)
         else:
-            # Mocap driver publishes PoseStamped BEST_EFFORT.
-            qos = QoSProfile(depth=10,
-                             reliability=QoSReliabilityPolicy.BEST_EFFORT,
-                             history=QoSHistoryPolicy.KEEP_LAST)
-            self.sub = self.create_subscription(PoseStamped, topic, self.cb_pose, qos)
+            s = 2.0 * np.sqrt(1.0 + R[2,2] - R[0,0] - R[1,1])
+            w = (R[1,0] - R[0,1]) / s
+            x = (R[0,2] + R[2,0]) / s
+            y = (R[1,2] + R[2,1]) / s
+            z = 0.25 * s
+
+    return np.array([x, y, z, w])
+
+class OptitrackSubscriber(Node):
+    def __init__(self, velocity_filter_alpha=0.5, history_size=5):
+        if not rclpy.ok():
+            rclpy.init()
+        super().__init__('optitrack_bridge_sub')
+
+        self.declare_parameter('topic', '/f1tenth/pose')
+        topic = self.get_parameter('topic').get_parameter_value().string_value
+
+        qos = QoSProfile(depth=10, reliability=QoSReliabilityPolicy.BEST_EFFORT)
+
+        self.get_logger().info(f'Subscribing to {topic} with BEST_EFFORT reliability')
+        self.suber = self.create_subscription(
+            PoseStamped,
+            topic,
+            self.topic_callback,
+            qos)
+
+        # ==========================================================
+        # Publisher for the EKF (nav_msgs/Odometry: pose + twist)
+        # ==========================================================
+        self.ekf_odom_pub = self.create_publisher(
+            Odometry,
+            '/optitrack/odom',
+            10
+        )
+
+        self.optitrack_position = np.zeros(3)
+        self.optitrack_quaternion = np.zeros(4)
+        self.optitrack_linear_velocity_world = np.zeros(3)
+        self.optitrack_linear_velocity = np.zeros(3)
+        self.optitrack_angular_velocity_world = np.zeros(3)
+        self.optitrack_angular_velocity = np.zeros(3)
+
+        self.velocity_filter_alpha = velocity_filter_alpha
+        self.history_size = history_size
+
+        self.position_history = []
+        self.quaternion_history = []
+        self.timestamp_history = []
+
+        self.br = TransformBroadcaster(self)
+
+    def topic_callback(self, msg):
+        timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        position = np.array([-msg.pose.position.x, -msg.pose.position.y, msg.pose.position.z])
+
+        q_orig = np.array([
+            msg.pose.orientation.x,
+            msg.pose.orientation.y,
+            msg.pose.orientation.z,
+            msg.pose.orientation.w
+        ])
+
+        # Convert quaternion -> rotation matrix
+        R_orig = quat_to_rot(q_orig)
+
+        # Axis permutation matrix
+        P = np.array([
+            [0, -1, 0],  # x_new = z_old
+            [1, 0, 0],  # y_new = x_old
+            [0, 0, 1]   # z_new = y_old
+        ])
+
+        # Transform rotation matrix
+        R_new = P @ R_orig          # not P @ R_orig @ P.T
+        quaternion = rot_to_quat(R_new)
+
+
+        self.optitrack_position = position
+        self.optitrack_quaternion = quaternion
+
+        self.position_history.append(position)
+        self.quaternion_history.append(quaternion)
+        self.timestamp_history.append(timestamp)
+
+        if len(self.position_history) > self.history_size:
+            self.position_history.pop(0)
+            self.quaternion_history.pop(0)
+            self.timestamp_history.pop(0)
+
+        if len(self.position_history) >= 2:
+            self.calculate_velocities()
+
+        # ==========================================================
+        # Build and publish nav_msgs/Odometry for the EKF
+        #   header.frame_id  -> frame the POSE is in   (map)
+        #   child_frame_id   -> frame the TWIST is in  (base_link)
+        # ==========================================================
+        odom_msg = Odometry()
+        odom_msg.header = msg.header
+        odom_msg.header.frame_id = 'map'        # pose frame
+        odom_msg.child_frame_id = 'base_link'   # twist (body) frame
+
+        # ---- Pose (world) ----
+        odom_msg.pose.pose.position.x = position[0]
+        odom_msg.pose.pose.position.y = position[1]
+        odom_msg.pose.pose.position.z = position[2]
+        odom_msg.pose.pose.orientation.x = quaternion[0]
+        odom_msg.pose.pose.orientation.y = quaternion[1]
+        odom_msg.pose.pose.orientation.z = quaternion[2]
+        odom_msg.pose.pose.orientation.w = quaternion[3]
+
+        # Pose covariance (6x6: x, y, z, roll, pitch, yaw)
+        # Small variance (1e-4) because Optitrack is highly accurate
+        pcov = np.zeros(36)
+        pcov[0]  = 1e-4  # X variance
+        pcov[7]  = 1e-4  # Y variance
+        pcov[14] = 1e-4  # Z variance
+        pcov[21] = 1e-4  # Roll variance
+        pcov[28] = 1e-4  # Pitch variance
+        pcov[35] = 1e-4  # Yaw variance
+        odom_msg.pose.covariance = pcov.tolist()
+
+        # ==========================================================
+        # ---- Twist (body frame) -- DISABLED FOR NOW ----
+        # Finite-difference velocity from mocap. Rotate world->body
+        # before publishing because robot_localization treats twist
+        # as base_link-frame. Uncomment to enable, and turn on the
+        # corresponding Vx/Vy/Vyaw slots in odom0_config.
+        # ==========================================================
+        # R_body = quat_to_rot(quaternion)            # body->world
+        # v_body = R_body.T @ self.optitrack_linear_velocity_world
+        # w_body = R_body.T @ self.optitrack_angular_velocity_world
+        #
+        # odom_msg.twist.twist.linear.x  = v_body[0]
+        # odom_msg.twist.twist.linear.y  = v_body[1]
+        # odom_msg.twist.twist.linear.z  = v_body[2]
+        # odom_msg.twist.twist.angular.x = w_body[0]
+        # odom_msg.twist.twist.angular.y = w_body[1]
+        # odom_msg.twist.twist.angular.z = w_body[2]
+        #
+        # tcov = np.zeros(36)
+        # tcov[0]  = 1e-2  # Vx variance  (finite-diff is noisy)
+        # tcov[7]  = 1e-2  # Vy variance
+        # tcov[14] = 1e-2  # Vz variance
+        # tcov[21] = 1e-2  # Vroll variance
+        # tcov[28] = 1e-2  # Vpitch variance
+        # tcov[35] = 1e-2  # Vyaw variance
+        # odom_msg.twist.covariance = tcov.tolist()
+        # ==========================================================
+
+        self.ekf_odom_pub.publish(odom_msg)
+
+        # Broadcast TF
+        t = TransformStamped()
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = 'map' # Match the EKF world_frame
+        t.child_frame_id = 'base_link'
+        t.transform.translation.x = position[0]
+        t.transform.translation.y = position[1]
+        t.transform.translation.z = position[2]
+        t.transform.rotation.x = quaternion[0]
+        t.transform.rotation.y = quaternion[1]
+        t.transform.rotation.z = quaternion[2]
+        t.transform.rotation.w = quaternion[3]
+        self.br.sendTransform(t)
 
         self.get_logger().info(
-            f'[{source}] subscribing to {topic}. Close the plot window to quit.')
+            f"pos=({self.optitrack_position[0]:.3f}, {self.optitrack_position[1]:.3f}, {self.optitrack_position[2]:.3f})"
+        )
 
-    # ---- helpers -----------------------------------------------------------
-    def _rel_time(self, stamp):
-        t = stamp.sec + stamp.nanosec * 1e-9
-        if self._t0 is None:
-            self._t0 = t
-        return t, t - self._t0
+    def calculate_velocities(self):
+        p1, p0 = self.position_history[-2], self.position_history[-1]
+        t1, t0 = self.timestamp_history[-2], self.timestamp_history[-1]
 
-    def _store(self, t_rel, x, y, th, vx, vy, om):
-        with self.lock:
-            self.t.append(t_rel)
-            self.x.append(x)
-            self.y.append(y)
-            self.th.append(th)
-            self.vx.append(vx)
-            self.vy.append(vy)
-            self.om.append(om)
+        dt = t0 - t1
+        if dt > 0:
+            raw_linear_vel = (p0 - p1) / dt
+            self.optitrack_linear_velocity_world = raw_linear_vel.copy()
+            self.optitrack_linear_velocity = raw_linear_vel
 
-    # ---- pose mode: compute finite-difference velocity (WORLD frame) -------
-    def cb_pose(self, msg):
-        t_abs, t_rel = self._rel_time(msg.header.stamp)
+        q1, q0 = self.quaternion_history[-2], self.quaternion_history[-1]
 
-        px = msg.pose.position.x
-        py = msg.pose.position.y
-        if APPLY_BRIDGE_TRANSFORM:
-            px, py = -px, -py
+        if dt > 0:
+            q1_scipy = np.array([q1[3], q1[0], q1[1], q1[2]])
+            q0_scipy = np.array([q0[3], q0[0], q0[1], q0[2]])
 
-        theta = yaw_from_quat(
-            msg.pose.orientation.x, msg.pose.orientation.y,
-            msg.pose.orientation.z, msg.pose.orientation.w)
+            q1_conj = q1_scipy.copy()
+            q1_conj[1:] = -q1_conj[1:]
 
-        vx = vy = om = 0.0
-        if self._prev is not None:
-            pt, ppx, ppy, pth = self._prev
-            dt = t_abs - pt
-            if dt > 1e-9:
-                vx = (px - ppx) / dt
-                vy = (py - ppy) / dt
-                om = angle_diff(theta, pth) / dt
-            else:
-                self._prev = (t_abs, px, py, theta)
-                return
-        self._prev = (t_abs, px, py, theta)
+            q_diff = self.quaternion_multiply(q0_scipy, q1_conj)
+            raw_angular_vel = 2.0 * q_diff[1:] / dt
 
-        self._store(t_rel, px, py, theta, vx, vy, om)
+            self.optitrack_angular_velocity_world = raw_angular_vel
+            self.optitrack_angular_velocity = raw_angular_vel
 
-    # ---- odom mode: read pose + bridge-computed twist directly -------------
-    def cb_odom(self, msg):
-        _, t_rel = self._rel_time(msg.header.stamp)
+    def get_optitrack_angular_velocity_world(self): return self.optitrack_angular_velocity_world
+    def get_optitrack_angular_velocity(self): return self.optitrack_angular_velocity
+    def get_optitrack_linear_velocity_world(self): return self.optitrack_linear_velocity_world
+    def get_optitrack_position(self): return self.optitrack_position
+    def get_optitrack_quaternion(self): return self.optitrack_quaternion
+    def get_optitrack_linear_velocity(self): return self.optitrack_linear_velocity
 
-        p = msg.pose.pose
-        theta = yaw_from_quat(p.orientation.x, p.orientation.y,
-                              p.orientation.z, p.orientation.w)
-
-        # Velocities are taken verbatim from the message -- these are the values
-        # your bridge calculated and published (zero if the twist block is still
-        # commented out).
-        v = msg.twist.twist
-        self._store(t_rel, p.position.x, p.position.y, theta,
-                    v.linear.x, v.linear.y, v.angular.z)
-
-    def snapshot(self):
-        with self.lock:
-            return (list(self.t), list(self.x), list(self.y), list(self.th),
-                    list(self.vx), list(self.vy), list(self.om))
+    def quaternion_multiply(self, q1, q2):
+        w1, x1, y1, z1 = q1
+        w2, x2, y2, z2 = q2
+        w = w1*w2 - x1*x2 - y1*y2 - z1*z2
+        x = w1*x2 + x1*w2 + y1*z2 - z1*y2
+        y = w1*y2 - x1*z2 + y1*w2 + z1*x2
+        z = w1*z2 + x1*y2 - y1*x2 + z1*w2
+        return np.array([w, x, y, z])
 
 
-def main():
-    parser = argparse.ArgumentParser(description='Live mocap pipeline plotter.')
-    parser.add_argument('--source', choices=['pose', 'odom'], default='pose',
-                        help="'pose' = PoseStamped + finite difference (world); "
-                             "'odom' = Odometry, read bridge twist (body).")
-    parser.add_argument('--topic', default=None,
-                        help='Override topic (defaults per source).')
-    args = parser.parse_args()
 
-    topic = args.topic or (DEFAULT_ODOM_TOPIC if args.source == 'odom'
-                           else DEFAULT_POSE_TOPIC)
 
-    # Velocity-frame label changes with the source.
-    vframe = 'body' if args.source == 'odom' else 'world'
-
-    rclpy.init()
-    node = PipelinePlotter(args.source, topic)
-
-    spin_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
-    spin_thread.start()
-
-    fig, axes = plt.subplots(2, 3, figsize=(13, 7))
-    fig.suptitle(f'Mocap diagnostics  —  [{args.source}]  {topic}')
-
-    specs = [
-        (axes[0, 0], 'x', 'x [m]', 'tab:blue'),
-        (axes[0, 1], 'y', 'y [m]', 'tab:blue'),
-        (axes[0, 2], 'theta', 'theta [rad]', 'tab:blue'),
-        (axes[1, 0], 'vx', f'vx [m/s]  ({vframe})', 'tab:red'),
-        (axes[1, 1], 'vy', f'vy [m/s]  ({vframe})', 'tab:red'),
-        (axes[1, 2], 'omega', 'omega [rad/s]', 'tab:red'),
-    ]
-    lines = {}
-    for ax, key, label, color in specs:
-        (ln,) = ax.plot([], [], color=color, linewidth=1.0)
-        ax.set_title(label)
-        ax.set_xlabel('t [s]')
-        ax.grid(True, alpha=0.3)
-        lines[key] = (ax, ln)
-
-    def update(_frame):
-        t, x, y, th, vx, vy, om = node.snapshot()
-        if not t:
-            return [ln for _, ln in lines.values()]
-
-        t_now = t[-1]
-        t_min = t_now - WINDOW_SEC
-        data = {'x': x, 'y': y, 'theta': th, 'vx': vx, 'vy': vy, 'omega': om}
-
-        for key, (ax, ln) in lines.items():
-            ln.set_data(t, data[key])
-            ax.set_xlim(max(0.0, t_min), max(WINDOW_SEC, t_now))
-            vis = [val for ti, val in zip(t, data[key]) if ti >= t_min]
-            if vis:
-                lo, hi = min(vis), max(vis)
-                pad = 0.1 * (hi - lo) if hi > lo else 0.5
-                ax.set_ylim(lo - pad, hi + pad)
-        return [ln for _, ln in lines.values()]
-
-    _anim = FuncAnimation(fig, update, interval=50, blit=False,
-                          cache_frame_data=False)
-
-    try:
-        plt.tight_layout()
-        plt.show()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        rclpy.shutdown()
-        spin_thread.join(timeout=1.0)
-
+def main(args=None):
+    rclpy.init(args=args)
+    node = OptitrackSubscriber()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

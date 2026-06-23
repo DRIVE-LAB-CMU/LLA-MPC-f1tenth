@@ -1,32 +1,35 @@
 #!/usr/bin/env python3
 """
-Live diagnostic plotter for /f1tenth/pose.
+Live diagnostic plotter for the mocap pipeline. Two source modes:
 
-Subscribes to a geometry_msgs/PoseStamped topic, computes finite-difference
-velocities (vx, vy in the WORLD frame, omega about z), and live-plots both the
-pose (x, y, theta) and the velocities (vx, vy, omega) in a rolling time window.
+  --source pose  (default)
+      Subscribe to a geometry_msgs/PoseStamped (e.g. /f1tenth/pose) and compute
+      finite-difference velocities ourselves. vx/vy are WORLD frame. This shows
+      the raw mocap stream and the raw 1/dt noise -- good for judging jitter.
 
-This is meant for eyeballing the raw mocap stream -- rate, jitter, and how noisy
-the finite-difference velocity actually is -- before deciding whether to feed any
-of it to the EKF. It deliberately does NO smoothing, so what you see is the raw
-1/dt amplification.
+  --source odom
+      Subscribe to a nav_msgs/Odometry (e.g. /optitrack/odom) and read the pose
+      AND the velocities straight out of the message. The vx/vy/omega plotted
+      here are exactly what your bridge computed and published in twist.twist
+      (BODY frame), not a re-derivation. If the bridge's twist block is still
+      commented out those fields are zero, so the velocity plots read flat 0 --
+      which is the signal that your twist isn't being published yet.
 
 Usage:
-    python3 pose_fd_plotter.py                 # defaults to /f1tenth/pose
-    python3 pose_fd_plotter.py /some/other/pose
+    python3 pose_fd_plotter.py                          # pose mode, /f1tenth/pose
+    python3 pose_fd_plotter.py --source odom            # odom mode, /optitrack/odom
+    python3 pose_fd_plotter.py --source odom --topic /optitrack/odom
+    python3 pose_fd_plotter.py --source pose --topic /some/other/pose
 
 Notes:
-  * Velocities are in the WORLD frame (consecutive map-frame positions
-    differenced). robot_localization wants body-frame twist, so this is for
-    *diagnosis*, not a drop-in twist source. See APPLY_BRIDGE_TRANSFORM below if
-    you want the plotted pose to match your bridge's negated/permuted convention.
-  * dt comes from msg.header.stamp (sensor time), matching your bridge. If you
-    see spiky velocity with smooth position, look at the dt subplot-equivalent:
-    irregular spacing is the usual culprit.
+  * pose-mode velocities are WORLD frame; odom-mode velocities are whatever the
+    bridge published (BODY frame). Axis labels update to reflect this.
+  * dt / time axis use header.stamp (sensor time) in both modes.
 """
 
 import sys
 import math
+import argparse
 import threading
 from collections import deque
 
@@ -34,6 +37,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 from geometry_msgs.msg import PoseStamped
+from nav_msgs.msg import Odometry
 
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
@@ -41,10 +45,11 @@ from matplotlib.animation import FuncAnimation
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-DEFAULT_TOPIC = '/f1tenth/pose'
+DEFAULT_POSE_TOPIC = '/f1tenth/pose'
+DEFAULT_ODOM_TOPIC = '/optitrack/odom'
 WINDOW_SEC = 10.0          # rolling time window shown on the x-axis
 MAX_SAMPLES = 5000         # hard cap on buffered samples (memory guard)
-APPLY_BRIDGE_TRANSFORM = False  # set True to mirror your bridge's x/y negation
+APPLY_BRIDGE_TRANSFORM = False  # pose-mode only: mirror the bridge x/y negation
 
 
 def yaw_from_quat(x, y, z, w):
@@ -60,21 +65,10 @@ def angle_diff(a, b):
     return math.atan2(math.sin(d), math.cos(d))
 
 
-class PoseFDPlotter(Node):
-    def __init__(self, topic):
+class PipelinePlotter(Node):
+    def __init__(self, source, topic):
         super().__init__('pose_fd_plotter')
-
-        # Match the mocap driver / your bridge: BEST_EFFORT, shallow queue.
-        qos = QoSProfile(
-            depth=10,
-            reliability=QoSReliabilityPolicy.BEST_EFFORT,
-            history=QoSHistoryPolicy.KEEP_LAST,
-        )
-
-        self.sub = self.create_subscription(
-            PoseStamped, topic, self.cb, qos)
-        self.get_logger().info(
-            f'Subscribing to {topic} (BEST_EFFORT). Close the plot window to quit.')
+        self.source = source
 
         # Shared rolling buffers (written in ROS thread, read in plot thread).
         self.lock = threading.Lock()
@@ -86,79 +80,121 @@ class PoseFDPlotter(Node):
         self.vy = deque(maxlen=MAX_SAMPLES)
         self.om = deque(maxlen=MAX_SAMPLES)
 
-        # Previous-sample state for finite differencing.
-        self._prev = None   # (t, x, y, theta)
+        self._prev = None   # (t, x, y, theta) -- pose mode finite differencing
         self._t0 = None     # first timestamp, for a relative time axis
 
-    def cb(self, msg):
-        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        if source == 'odom':
+            # Bridge publishes Odometry with default (RELIABLE) QoS.
+            qos = QoSProfile(depth=10,
+                             reliability=QoSReliabilityPolicy.RELIABLE,
+                             history=QoSHistoryPolicy.KEEP_LAST)
+            self.sub = self.create_subscription(Odometry, topic, self.cb_odom, qos)
+        else:
+            # Mocap driver publishes PoseStamped BEST_EFFORT.
+            qos = QoSProfile(depth=10,
+                             reliability=QoSReliabilityPolicy.BEST_EFFORT,
+                             history=QoSHistoryPolicy.KEEP_LAST)
+            self.sub = self.create_subscription(PoseStamped, topic, self.cb_pose, qos)
+
+        self.get_logger().info(
+            f'[{source}] subscribing to {topic}. Close the plot window to quit.')
+
+    # ---- helpers -----------------------------------------------------------
+    def _rel_time(self, stamp):
+        t = stamp.sec + stamp.nanosec * 1e-9
+        if self._t0 is None:
+            self._t0 = t
+        return t, t - self._t0
+
+    def _store(self, t_rel, x, y, th, vx, vy, om):
+        with self.lock:
+            self.t.append(t_rel)
+            self.x.append(x)
+            self.y.append(y)
+            self.th.append(th)
+            self.vx.append(vx)
+            self.vy.append(vy)
+            self.om.append(om)
+
+    # ---- pose mode: compute finite-difference velocity (WORLD frame) -------
+    def cb_pose(self, msg):
+        t_abs, t_rel = self._rel_time(msg.header.stamp)
 
         px = msg.pose.position.x
         py = msg.pose.position.y
         if APPLY_BRIDGE_TRANSFORM:
-            px = -px
-            py = -py
+            px, py = -px, -py
 
         theta = yaw_from_quat(
-            msg.pose.orientation.x,
-            msg.pose.orientation.y,
-            msg.pose.orientation.z,
-            msg.pose.orientation.w,
-        )
-
-        if self._t0 is None:
-            self._t0 = t
-        t_rel = t - self._t0
+            msg.pose.orientation.x, msg.pose.orientation.y,
+            msg.pose.orientation.z, msg.pose.orientation.w)
 
         vx = vy = om = 0.0
         if self._prev is not None:
             pt, ppx, ppy, pth = self._prev
-            dt = t - pt
+            dt = t_abs - pt
             if dt > 1e-9:
                 vx = (px - ppx) / dt
                 vy = (py - ppy) / dt
                 om = angle_diff(theta, pth) / dt
             else:
-                # Duplicate/zero-dt sample: reuse nothing, skip velocity update.
-                self._prev = (t, px, py, theta)
+                self._prev = (t_abs, px, py, theta)
                 return
-        self._prev = (t, px, py, theta)
+        self._prev = (t_abs, px, py, theta)
 
-        with self.lock:
-            self.t.append(t_rel)
-            self.x.append(px)
-            self.y.append(py)
-            self.th.append(theta)
-            self.vx.append(vx)
-            self.vy.append(vy)
-            self.om.append(om)
+        self._store(t_rel, px, py, theta, vx, vy, om)
+
+    # ---- odom mode: read pose + bridge-computed twist directly -------------
+    def cb_odom(self, msg):
+        _, t_rel = self._rel_time(msg.header.stamp)
+
+        p = msg.pose.pose
+        theta = yaw_from_quat(p.orientation.x, p.orientation.y,
+                              p.orientation.z, p.orientation.w)
+
+        # Velocities are taken verbatim from the message -- these are the values
+        # your bridge calculated and published (zero if the twist block is still
+        # commented out).
+        v = msg.twist.twist
+        self._store(t_rel, p.position.x, p.position.y, theta,
+                    v.linear.x, v.linear.y, v.angular.z)
 
     def snapshot(self):
-        """Return a consistent copy of all buffers for plotting."""
         with self.lock:
             return (list(self.t), list(self.x), list(self.y), list(self.th),
                     list(self.vx), list(self.vy), list(self.om))
 
 
 def main():
-    topic = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_TOPIC
+    parser = argparse.ArgumentParser(description='Live mocap pipeline plotter.')
+    parser.add_argument('--source', choices=['pose', 'odom'], default='pose',
+                        help="'pose' = PoseStamped + finite difference (world); "
+                             "'odom' = Odometry, read bridge twist (body).")
+    parser.add_argument('--topic', default=None,
+                        help='Override topic (defaults per source).')
+    args = parser.parse_args()
+
+    topic = args.topic or (DEFAULT_ODOM_TOPIC if args.source == 'odom'
+                           else DEFAULT_POSE_TOPIC)
+
+    # Velocity-frame label changes with the source.
+    vframe = 'body' if args.source == 'odom' else 'world'
 
     rclpy.init()
-    node = PoseFDPlotter(topic)
+    node = PipelinePlotter(args.source, topic)
 
-    # Spin ROS in a background thread so matplotlib owns the main thread.
     spin_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
     spin_thread.start()
 
     fig, axes = plt.subplots(2, 3, figsize=(13, 7))
-    fig.suptitle(f'Finite-difference diagnostics  —  {topic}')
+    fig.suptitle(f'Mocap diagnostics  —  [{args.source}]  {topic}')
 
     specs = [
         (axes[0, 0], 'x', 'x [m]', 'tab:blue'),
         (axes[0, 1], 'y', 'y [m]', 'tab:blue'),
         (axes[0, 2], 'theta', 'theta [rad]', 'tab:blue'),
-        (axes[1, 0], 'vx', 'vx [m/s]  (world)', 'tab:red'),
-        (axes[1, 1], 'vy', 'vy [m/s]  (world)', 'tab:red'),
+        (axes[1, 0], 'vx', f'vx [m/s]  ({vframe})', 'tab:red'),
+        (axes[1, 1], 'vy', f'vy [m/s]  ({vframe})', 'tab:red'),
         (axes[1, 2], 'omega', 'omega [rad/s]', 'tab:red'),
     ]
     lines = {}
@@ -181,21 +217,19 @@ def main():
         for key, (ax, ln) in lines.items():
             ln.set_data(t, data[key])
             ax.set_xlim(max(0.0, t_min), max(WINDOW_SEC, t_now))
-            # Autoscale y to the visible window only.
-            vis = [v for ti, v in zip(t, data[key]) if ti >= t_min]
+            vis = [val for ti, val in zip(t, data[key]) if ti >= t_min]
             if vis:
                 lo, hi = min(vis), max(vis)
                 pad = 0.1 * (hi - lo) if hi > lo else 0.5
                 ax.set_ylim(lo - pad, hi + pad)
         return [ln for _, ln in lines.values()]
 
-    # Keep a reference so the animation isn't garbage-collected.
     _anim = FuncAnimation(fig, update, interval=50, blit=False,
                           cache_frame_data=False)
 
     try:
         plt.tight_layout()
-        plt.show()   # blocks until the window is closed
+        plt.show()
     except KeyboardInterrupt:
         pass
     finally:
