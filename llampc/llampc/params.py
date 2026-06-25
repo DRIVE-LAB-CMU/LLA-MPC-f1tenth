@@ -65,7 +65,7 @@ def F110():
         'Cr': Cr,
         'Csf': Csf,
         'Csr': Csr,
-        'hcog': hcog,
+        'h': hcog,
         'mu': mu,
         'min_v': min_v,
         'max_v': max_v,
