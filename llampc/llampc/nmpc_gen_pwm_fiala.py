@@ -129,12 +129,12 @@ def create_ocp(model, params_car, steps, horizon):
     w_steer_v = 0.01
     
       
-    Q_flat = [w_x, w_y, w_theta, w_vel, 0, 0, 0,0, w_pwm, w_steer]
+    Q_flat = [w_x, w_y, w_theta, w_vel, 0, 0, w_pwm, w_steer]
     R_flat = [w_slew, w_steer_v]
 
     Q = np.diag(Q_flat) # nx, for trajectory deviation 6x6
     R = np.diag(R_flat)  # nu, for control smoothness 2x2
-    Qf = np.diag([w_xe, w_ye, 0, 0, 0, 0, 0,0, 0])  # Now size 8x8
+    Qf = np.diag([w_xe, w_ye, 0, 0, 0, 0, 0, 0, 0])  # Now size 8x8
 
     ocp.cost.W = np.diag(np.concatenate((Q_flat, R_flat))) #nx, nu, nu, 10x10
     ocp.cost.W_e = Qf
@@ -143,8 +143,8 @@ def create_ocp(model, params_car, steps, horizon):
     x = model.x
     u = model.u
 
-    ny = nx + nu# running dimensions
-    ny_e = nx #terminal dimension
+    ny = 10 # running dimensions
+    ny_e = 8 #terminal dimension
 
     ocp.dims.ny = ny
     ocp.dims.ny_e = ny_e
@@ -163,8 +163,8 @@ def create_ocp(model, params_car, steps, horizon):
         x[3] - x_ref[3],   # vx
         x[4] - x_ref[4],   # vy
         x[5] - x_ref[5],   # omega
-        x[6],   # pwm
-        x[7],   # steer
+        x[8],   # pwm
+        x[9],   # steer
         u
     )
     ocp.model.cost_y_expr_e = ca.vertcat(
@@ -174,8 +174,8 @@ def create_ocp(model, params_car, steps, horizon):
         x[3] - x_ref[3],   # vx
         x[4] - x_ref[4],   # vy
         x[5] - x_ref[5],   # omega
-        x[6],   # pwm
-        x[7],   # steer
+        x[8],   # pwm
+        x[9],   # steer
     )
     
     ocp.model.p = model.p  # Combine with existing parameters
