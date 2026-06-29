@@ -13,7 +13,7 @@ def export_model(params_car, exact = False):
 
     model.name = "f1tenth"
 
-    x = ca.SX.sym('x', 5) # state: x, y, phi,  vx, delta
+    x = ca.SX.sym('x', 8) # state: x, y, phi,  vx, delta
     u = ca.SX.sym('u', 2) # control rate: accel, steer rate
     p = ca.SX.sym('p', 12)
 
