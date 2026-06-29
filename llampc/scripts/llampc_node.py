@@ -93,7 +93,7 @@ class MPCNode(Node):
 
         self.cmd_pub = self.create_publisher(
             AckermannDriveStamped,
-            '/mpc_drive',
+            '/mpc/drive',
             10
         )
 
@@ -850,7 +850,7 @@ class MPCNode(Node):
         old = self.last_drive_command[0] + accel * self.dt
         
         # Convert acceleration to speed command (simple integration)
-        desired_speed = max(0.0, new_int)
+        desired_speed = new_int
 
         drive_msg.drive.speed = desired_speed
         drive_msg.drive.steering_angle = steer
