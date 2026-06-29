@@ -69,6 +69,7 @@ install(PROGRAMS
   scripts/llampc_node_ipopt.py
   scripts/llampc_cbf.py
   scripts/dfz_observer.py
+  scripts/drive_relay.py
   DESTINATION lib/${PROJECT_NAME}
 )
 if(BUILD_TESTING)
