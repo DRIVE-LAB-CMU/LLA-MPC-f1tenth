@@ -4,9 +4,7 @@
             xsi:schemaLocation="https://cdds.io/config https://raw.githubusercontent.com/eclipse-cyclonedds/cyclonedds/master/etc/cyclonedds.xsd">
   <Domain Id="any">
     <General>
-      <Interfaces>
-        <NetworkInterface name="wlp0s20f3" priority="default" multicast="false"/>
-      </Interfaces>
+      <NetworkInterfaceAddress>172.26.100.199</NetworkInterfaceAddress>
       <AllowMulticast>false</AllowMulticast>
     </General>
 
