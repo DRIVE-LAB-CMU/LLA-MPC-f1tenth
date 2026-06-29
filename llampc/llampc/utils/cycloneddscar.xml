@@ -4,8 +4,6 @@
             xsi:schemaLocation="https://cdds.io/config https://raw.githubusercontent.com/eclipse-cyclonedds/cyclonedds/master/etc/cyclonedds.xsd">
   <Domain Id="any">
     <General>
-      <!-- Pin to the WiFi interface so DDS doesn't try docker0/lo/eth. -->
-      <!-- Use the interface NAME (e.g. wlan0) or the machine's own IP. -->
       <Interfaces>
         <NetworkInterface name="wlan0" priority="default" multicast="false"/>
       </Interfaces>
@@ -13,26 +11,16 @@
     </General>
 
     <Discovery>
-      <!-- No multicast discovery; list every machine's IP explicitly. -->
       <ParticipantIndex>auto</ParticipantIndex>
       <Peers>
-        <Peer Address="192.168.1.10"/>   <!-- car -->
-        <Peer Address="192.168.1.20"/>   <!-- laptop -->
-      </Peers>
-      <!-- Faster re-discovery after a dropout on a flaky link. -->
+        <Peer Address="172.26.112.71"/>   <Peer Address="172.26.100.199"/>  </Peers>
       <MaxAutoParticipantIndex>20</MaxAutoParticipantIndex>
     </Discovery>
 
     <Internal>
-      <!-- Don't let one congested writer stall others. -->
       <Watermarks>
         <WhcHigh>500kB</WhcHigh>
       </Watermarks>
     </Internal>
   </Domain>
 </CycloneDDS>
-
-
-<!-- export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-export CYCLONEDDS_URI=file:///path/to/cyclonedds.xml
-export ROS_DOMAIN_ID=0          # same number on both -->
