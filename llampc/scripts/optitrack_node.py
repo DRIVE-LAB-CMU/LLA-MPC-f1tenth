@@ -1,77 +1,25 @@
 #!/usr/bin/env python3
-import os
-from ament_index_python.packages import get_package_share_directory
-from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
-from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch_ros.actions import Node
+import numpy as np
+import time
+import sys, os
+
 import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import PoseStamped, TransformStamped
+from nav_msgs.msg import Odometry
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy
+from tf2_ros import TransformBroadcaster
 
-def generate_launch_description():
-    f1tenth_launch_dir = os.path.join(get_package_share_directory('f1tenth_stack'), 'launch')
-    f1tenth_launch_file = os.path.join(f1tenth_launch_dir, 'bringup_launch.py')
+sys.path.append(os.path.join(os.path.dirname(__file__)))
 
-    natnet_launch_file = os.path.join(
-        get_package_share_directory('natnet_ros2'), 'launch', 'natnet_ros2.launch.py'
-    )
 
-    llampc_config_dir = os.path.join(get_package_share_directory('llampc'), 'config')
-    ekf_config_path = os.path.join(llampc_config_dir, 'mocap.yaml')
+def quat_to_rot(q):
+    x, y, z, w = q
 
-    natnet_mocap_action = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(natnet_launch_file),
-        launch_arguments={
-            'serverIP': '172.26.119.139',
-            'clientIP': '172.26.112.71',
-            'serverType': 'unicast',
-            'pub_rigid_body': 'true',
-        }.items()
-    )
-
-    mocap_topic_la = DeclareLaunchArgument(
-        'mocap_topic',
-        default_value='/f1tenth/pose',
-        description='NatNet rigid-body pose topic name'
-    )
-
-    f1tenth_stack_action = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(f1tenth_launch_file)
-    )
-
-    zupt_node = Node(
-        package='llampc',
-        executable='imu_zupt_prep.py',
-        name='zupt_node',
-        output='screen'
-    )
-
-    ekf_node = Node(
-        package='robot_localization',
-        executable='ekf_node',
-        name='ekf_filter_node',
-        output='screen',
-        parameters=[ekf_config_path],
-        remappings=[
-            ('/set_pose', '/initialpose')
-        ]
-    )
-
-    optitrack_node = Node(
-        package='llampc',
-        executable='optitrack_node.py',
-        name='optitrack_subscriber',
-        output='screen',
-        parameters=[{'topic': LaunchConfiguration('mocap_topic')}]
-    )
-
-    return LaunchDescription([
-        natnet_mocap_action,
-        mocap_topic_la,
-        f1tenth_stack_action,
-        zupt_node,
-        ekf_node,
-        optitrack_node
+    return np.array([
+        [1 - 2*(y*y + z*z),     2*(x*y - z*w),     2*(x*z + y*w)],
+        [    2*(x*y + z*w), 1 - 2*(x*x + z*z),     2*(y*z - x*w)],
+        [    2*(x*z - y*w),     2*(y*z + x*w), 1 - 2*(x*x + y*y)]
     ])
 
 
@@ -256,8 +204,7 @@ class OptitrackSubscriber(Node):
         # tcov[35] = 1e-2  # Vyaw variance
         # odom_msg.twist.covariance = tcov.tolist()
         # ==========================================================
-
-
+        
         # if len(self.position_history) >= 2:
         #     if self.position_history[-1] == self.position_history[-2] and \
         #         self.quaternion_history[-1] == self.quaternion_history[-2]:
