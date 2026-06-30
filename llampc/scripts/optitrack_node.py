@@ -6,6 +6,7 @@ from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
+import rclpy
 
 def generate_launch_description():
     f1tenth_launch_dir = os.path.join(get_package_share_directory('f1tenth_stack'), 'launch')
@@ -256,7 +257,7 @@ class OptitrackSubscriber(Node):
         # odom_msg.twist.covariance = tcov.tolist()
         # ==========================================================
 
-        
+
         # if len(self.position_history) >= 2:
         #     if self.position_history[-1] == self.position_history[-2] and \
         #         self.quaternion_history[-1] == self.quaternion_history[-2]:
