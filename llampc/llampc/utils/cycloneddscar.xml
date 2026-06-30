@@ -6,12 +6,23 @@
     <General>
       <NetworkInterfaceAddress>172.26.112.71</NetworkInterfaceAddress>
       <AllowMulticast>false</AllowMulticast>
+      
+      <ThreadProperties>
+        <Thread name="ev">
+          <Scheduling>
+            <Priority>99</Priority>
+            <Class>realtime</Class>
+          </Scheduling>
+        </Thread>
+      </ThreadProperties>
     </General>
 
     <Discovery>
       <ParticipantIndex>auto</ParticipantIndex>
       <Peers>
-        <Peer Address="172.26.112.71"/>   <Peer Address="172.26.100.199"/>  </Peers>
+        <Peer Address="172.26.112.71"/>
+        <Peer Address="172.26.100.199"/>
+      </Peers>
       <MaxAutoParticipantIndex>20</MaxAutoParticipantIndex>
     </Discovery>
 
@@ -19,6 +30,8 @@
       <Watermarks>
         <WhcHigh>500kB</WhcHigh>
       </Watermarks>
+      <MinimumRetransmitTime>5ms</MinimumRetransmitTime>
+      <NackDelay>2ms</NackDelay>
     </Internal>
   </Domain>
 </CycloneDDS>
