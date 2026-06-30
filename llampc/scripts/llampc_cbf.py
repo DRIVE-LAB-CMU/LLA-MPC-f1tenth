@@ -195,14 +195,14 @@ class MPCNode(Node):
                 'Cm': 0.0,  # motor speed saturation
             }
 
-        cost_weights = np.array([0.0, 0.0, 20.0, 0.0, 10.0, 0.01])# x, y, theta, vx, vy, omega
+        cost_weights = np.array([0.0, 0.0, 20.0, 5.0, 10.0, 0.01])# x, y, theta, vx, vy, omega
 
         # grid discretization
         discretization_dict = {
-            'Bf': 7,   # 15% variation
-            'Br': 7,   # 15% variation
-            'Cf': 1,   # 15% variation
-            'Cr': 1,   # 15% variation
+            'Bf': 1,   # 15% variation
+            'Br': 1,   # 15% variation
+            'Cf': 7,   # 15% variation
+            'Cr': 7,   # 15% variation
             'Df': 10,   # 15% variation
             'Dr': 10,   # 15% variation
             'Cro':1, # 15% variation
@@ -212,7 +212,7 @@ class MPCNode(Node):
         }
         param_dict = get_param_dict_grid(mean_dict, variation_dict,
                                          discretization=discretization_dict, ground_truth=True,
-                                         noadapt=True)
+                                         noadapt=False)
         num_models = len(param_dict['Bf'])
 
         self.get_logger().info("Dynamics bank starting")

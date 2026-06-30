@@ -93,7 +93,7 @@ class MPCNode(Node):
 
         self.cmd_pub = self.create_publisher(
             AckermannDriveStamped,
-            '/mpc/drive',
+            '/drive',
             10
         )
 
