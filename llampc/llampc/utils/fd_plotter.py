@@ -10,7 +10,9 @@ Source modes (the RAW line):
 
   --source pose  (default)
       Subscribe to a geometry_msgs/PoseStamped (e.g. /f1tenth/pose) and compute
-      finite-difference velocities ourselves. RAW vx/vy are WORLD frame.
+      finite-difference velocities ourselves. RAW vx/vy are BODY frame
+      (vx = longitudinal/forward, vy = lateral), obtained by rotating the
+      finite-differenced map-frame velocity by -theta.
 
   --source odom
       Subscribe to a nav_msgs/Odometry (e.g. /optitrack/odom) and read pose +
@@ -28,9 +30,9 @@ Usage:
     python3 ekf_compare_plotter.py --source odom --topic /optitrack/odom
 
 Notes:
-  * Frames can differ between the two lines: in pose mode RAW velocity is WORLD
-    while EKF velocity is BODY, so vx/vy traces will only agree when the body
-    is axis-aligned with the world. theta / x / y are directly comparable.
+  * Both lines are now BODY frame (vx = longitudinal, vy = lateral), so vx/vy
+    traces should track each other directly regardless of heading. theta / x / y
+    are directly comparable too.
   * Both lines share ONE relative time axis built from header.stamp, so the
     first message (from either source) defines t=0.
 """
@@ -117,6 +119,21 @@ def bridge_transform(raw_pos, raw_quat):
     return pos, theta
 
 
+def world_to_body(vx_world, vy_world, theta):
+    """Rotate a map/world-frame velocity vector into the robot's body frame.
+
+    Standard world<-body relationship is world_vel = R(theta) @ body_vel, with
+    R(theta) = [[cos, -sin], [sin, cos]] rotating body->world. Body-frame
+    velocity is therefore R(theta)^T @ world_vel:
+        vx_body =  cos(theta) * vx_world + sin(theta) * vy_world   (longitudinal)
+        vy_body = -sin(theta) * vx_world + cos(theta) * vy_world   (lateral)
+    """
+    c, s = math.cos(theta), math.sin(theta)
+    vx_body = c * vx_world + s * vy_world
+    vy_body = -s * vx_world + c * vy_world
+    return vx_body, vy_body
+
+
 class _Series:
     """One rolling time-series bundle (t, x, y, theta, vx, vy, omega)."""
 
@@ -194,7 +211,7 @@ class ComparePlotter(Node):
             t0 = self._t0
         return t, t - t0
 
-    # ---- RAW pose mode: finite-difference velocity (transformed WORLD frame) ----
+    # ---- RAW pose mode: finite-difference velocity, rotated into BODY frame ----
     def cb_raw_pose(self, msg):
         t_abs, t_rel = self._rel_time(msg.header.stamp)
 
@@ -216,12 +233,15 @@ class ComparePlotter(Node):
             pt, ppx, ppy, pth = self._prev
             dt = t_abs - pt
             if dt > 1e-9:
-                # Finite-difference velocity in the (transformed) WORLD frame --
-                # this matches the bridge's optitrack_linear_velocity_world, which
-                # is what it would rotate into body frame for the EKF twist.
-                vx = (px - ppx) / dt
-                vy = (py - ppy) / dt
+                # Finite-difference velocity in the (transformed) map/world
+                # frame, then rotate into BODY frame (vx=longitudinal,
+                # vy=lateral) using the current heading, so this matches the
+                # EKF's twist convention instead of only agreeing when
+                # theta ~= 0.
+                vx_world = (px - ppx) / dt
+                vy_world = (py - ppy) / dt
                 om = angle_diff(theta, pth) / dt
+                vx, vy = world_to_body(vx_world, vy_world, theta)
             else:
                 self._prev = (t_abs, px, py, theta)
                 return
@@ -262,8 +282,8 @@ def main():
         description='Live raw-vs-EKF comparison plotter.')
     parser.add_argument('--source', choices=['pose', 'odom'], default='pose',
                         help="RAW source: 'pose' = PoseStamped + finite diff "
-                             "(world vel); 'odom' = Odometry, twist from msg "
-                             "(body vel).")
+                             "(rotated into body vel); 'odom' = Odometry, "
+                             "twist from msg (body vel).")
     parser.add_argument('--topic', default=None,
                         help='RAW topic (defaults per source).')
     parser.add_argument('--ekf-topic', default=DEFAULT_EKF_TOPIC,
@@ -280,7 +300,7 @@ def main():
     raw_topic = args.topic or (DEFAULT_ODOM_TOPIC if args.source == 'odom'
                                else DEFAULT_POSE_TOPIC)
 
-    raw_vframe = 'body' if args.source == 'odom' else 'map-world'
+    raw_vframe = 'body'
     ekf_vframe = 'body'
 
     rclpy.init()

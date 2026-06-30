@@ -9,19 +9,51 @@ Run as a script. Rollout backend lives in rollouts.py; if it is unavailable the
 visualizer falls back to precomputed npz arrays or the recorded run only.
 """
 import os
-# Force Linux window backends to scale UI elements correctly
-os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
-os.environ["GDK_SCALE"] = "1.5"  # For GTK-based desktop environments
+# Force Linux window backends to scale UI elements correctly.
+# NOTE: GDK_SCALE only accepts integers (GTK silently ignores/rejects
+# fractional values like "1.5"), so it was previously a no-op. Qt's
+# AUTO_SCREEN_SCALE_FACTOR is the one safe "just do the right thing" knob;
+# we compute an explicit fractional factor for Qt/GTK below instead of
+# guessing a hard-coded value.
+os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "1")
+os.environ.pop("GDK_SCALE", None)
+
+
+def _detect_dpi_scale(base_dpi=96.0):
+    """Best-effort screen-DPI probe so fonts/figures scale on HiDPI displays.
+
+    Falls back to 1.0 (no scaling) if no display toolkit is available, e.g.
+    headless/CI environments, rather than silently doing nothing like the
+    previous env-var-only approach.
+    """
+    try:
+        import tkinter as tk
+        root = tk.Tk()
+        root.withdraw()
+        dpi = root.winfo_fpixels('1i')
+        root.destroy()
+        if dpi and dpi > 0:
+            return max(1.0, dpi / base_dpi)
+    except Exception:
+        pass
+    return 1.0
+
+
+_DPI_SCALE = _detect_dpi_scale()
+# Qt reads fractional scaling from this var (GTK has no equivalent fractional
+# knob, so on GTK backends we rely on the rcParams scaling below instead).
+os.environ.setdefault("QT_SCALE_FACTOR", f"{_DPI_SCALE:.2f}")
 
 import matplotlib.pyplot as plt
-# Set readable base sizes for high-res monitors
+# Set readable base sizes for high-res monitors; scaled by the detected DPI
+# factor instead of a fixed guess, so they actually grow on HiDPI screens.
 plt.rcParams.update({
-    'font.size': 13,
-    'axes.labelsize': 14,
-    'axes.titlesize': 14,
-    'xtick.labelsize': 11,
-    'ytick.labelsize': 11,
-    'legend.fontsize': 10,
+    'font.size': 13 * _DPI_SCALE,
+    'axes.labelsize': 14 * _DPI_SCALE,
+    'axes.titlesize': 14 * _DPI_SCALE,
+    'xtick.labelsize': 11 * _DPI_SCALE,
+    'ytick.labelsize': 11 * _DPI_SCALE,
+    'legend.fontsize': 10 * _DPI_SCALE,
     'lines.linewidth': 2.0
 })
 
@@ -791,6 +823,45 @@ class StateVisualizer:
         if getattr(self, "fig_diag", None) is not None:
             self.fig_diag.canvas.draw_idle()
 
+    @staticmethod
+    def _autoscale_axis_y(ax, lines, pad_frac=0.08, floor_zero=True):
+        """Manually rescale an axis's y-limits from a set of Line2D artists.
+
+        ax.relim()/autoscale_view() can silently fail to grow the view when
+        a line's data contains NaNs, or when it's transiently empty (e.g.
+        right after a model is toggled off), leaving stale/cramped limits.
+        This walks the actual y-data, ignoring NaNs and empty series, and
+        sets explicit limits with a fractional margin so curves never get
+        clipped at the top after new data comes in.
+        """
+        vals = []
+        for line in lines:
+            if line is None:
+                continue
+            y = np.asarray(line.get_ydata(), dtype=float)
+            if y.size == 0:
+                continue
+            y = y[np.isfinite(y)]
+            if y.size == 0:
+                continue
+            vals.append(y)
+
+        if not vals:
+            return
+
+        all_y = np.concatenate(vals)
+        ymin, ymax = float(all_y.min()), float(all_y.max())
+        if floor_zero:
+            ymin = min(ymin, 0.0)
+
+        span = ymax - ymin
+        if span <= 0:
+            pad = max(abs(ymax), 1.0) * pad_frac
+        else:
+            pad = span * pad_frac
+
+        ax.set_ylim(ymin - (0 if floor_zero else pad), ymax + pad)
+
     def _refresh_cost_lines(self):
         if getattr(self, "ax_cost", None) is None or self.cost_time is None:
             return
@@ -807,8 +878,10 @@ class StateVisualizer:
                 line.set_data(self.cost_time, self._gen_cost_curve(name))
             else:
                 line.set_data([], [])
-        self.ax_cost.relim()
-        self.ax_cost.autoscale_view(scalex=False, scaley=True)
+        self._autoscale_axis_y(
+            self.ax_cost,
+            [self.cost_line_lla, *self.cost_lines_gen.values()]
+        )
 
         # --- one-step difference (always one-step traj) ---
         if self.os_line_lla is not None:
@@ -822,8 +895,10 @@ class StateVisualizer:
                 line.set_data(self.cost_time, self._gen_onestep_curve(name))
             else:
                 line.set_data([], [])
-        self.ax_onestep.relim()
-        self.ax_onestep.autoscale_view(scalex=False, scaley=True)
+        self._autoscale_axis_y(
+            self.ax_onestep,
+            [self.os_line_lla, *self.os_lines_gen.values()]
+        )
 
         # --- M-step lookahead (mode-aware) ---
         if getattr(self, "ax_mstep", None) is not None:
@@ -839,8 +914,10 @@ class StateVisualizer:
                     line.set_data(self.cost_time, curve)
                 else:
                     line.set_data([], [])
-            self.ax_mstep.relim()
-            self.ax_mstep.autoscale_view(scalex=False, scaley=True)
+            self._autoscale_axis_y(
+                self.ax_mstep,
+                [self.ms_line_lla, *self.ms_lines_gen.values()]
+            )
 
     def _update_cost_cursor(self, frame_idx):
         if getattr(self, "ax_cost", None) is None or self.cost_time is None:
@@ -1089,6 +1166,62 @@ class StateVisualizer:
             else:
                 art.set_data([], [])
 
+    def _maybe_expand_trajectory_view(self):
+        """Grow (never shrink) the main trajectory axis limits to fit whatever
+        model overlay is currently visible.
+
+        setup_figure() only sizes the initial view from the LLA open-loop
+        trajectory and each general model's one-step trajectory
+        (_iter_limit_trajs). It does not account for the LLA one-step
+        trajectory or the general models' open-loop trajectories, so
+        switching model_mode (or toggling LLA's one-step view) can push
+        points outside the fixed initial bounds with no way back into view.
+        This checks the actually-visible trail/point artists each frame and
+        expands the view (only ever outward) to keep them on screen.
+        """
+        xs_all, ys_all = [], []
+
+        for art in (self.lla_trail, self.lla_point, self.window_lla):
+            if art is None:
+                continue
+            xd = np.asarray(art.get_xdata(), dtype=float)
+            yd = np.asarray(art.get_ydata(), dtype=float)
+            mask = np.isfinite(xd) & np.isfinite(yd)
+            if mask.any():
+                xs_all.append(xd[mask])
+                ys_all.append(yd[mask])
+
+        for a in self.model_artists.values():
+            for art in (a["trail"], a["point"]):
+                xd = np.asarray(art.get_xdata(), dtype=float)
+                yd = np.asarray(art.get_ydata(), dtype=float)
+                mask = np.isfinite(xd) & np.isfinite(yd)
+                if mask.any():
+                    xs_all.append(xd[mask])
+                    ys_all.append(yd[mask])
+
+        if not xs_all:
+            return
+
+        data_xmin = float(np.min(np.concatenate(xs_all)))
+        data_xmax = float(np.max(np.concatenate(xs_all)))
+        data_ymin = float(np.min(np.concatenate(ys_all)))
+        data_ymax = float(np.max(np.concatenate(ys_all)))
+
+        cur_xmin, cur_xmax = self.ax.get_xlim()
+        cur_ymin, cur_ymax = self.ax.get_ylim()
+
+        pad = max(0.5, 0.1 * max(data_xmax - data_xmin, data_ymax - data_ymin, 1.0))
+
+        new_xmin = min(cur_xmin, data_xmin - pad)
+        new_xmax = max(cur_xmax, data_xmax + pad)
+        new_ymin = min(cur_ymin, data_ymin - pad)
+        new_ymax = max(cur_ymax, data_ymax + pad)
+
+        if (new_xmin, new_xmax, new_ymin, new_ymax) != (cur_xmin, cur_xmax, cur_ymin, cur_ymax):
+            self.ax.set_xlim(new_xmin, new_xmax)
+            self.ax.set_ylim(new_ymin, new_ymax)
+
     def update_frame(self, frame_idx):
         """Update visualization for given frame."""
         frame_idx = int(frame_idx)
@@ -1099,6 +1232,9 @@ class StateVisualizer:
 
         # Model rollouts (LLA + general fixed models)
         self._update_model_overlays(frame_idx)
+        # Grow (never shrink) the view if the active overlay falls outside
+        # the initial fixed bounds (e.g. after switching model_mode).
+        self._maybe_expand_trajectory_view()
         # Last-P evaluation window on the true path + model rollouts
         self._update_window_overlays(frame_idx)
 
