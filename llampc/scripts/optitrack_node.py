@@ -63,7 +63,7 @@ class OptitrackSubscriber(Node):
         super().__init__('optitrack_bridge_sub')
 
         self.declare_parameter('mocap_topic', '/f1tenth/pose')
-        mocap_topic = self.get_parameter('topic').get_parameter_value().string_value
+        mocap_topic = self.get_parameter('mocap_topic').get_parameter_value().string_value
 
         qos = QoSProfile(depth=10, reliability=QoSReliabilityPolicy.BEST_EFFORT)
 
