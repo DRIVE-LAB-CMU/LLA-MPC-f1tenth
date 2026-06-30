@@ -1,57 +1,49 @@
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument
+from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, RegisterEventHandler
+from launch.event_handlers import OnProcessExit
 from launch.substitutions import LaunchConfiguration
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 
 def generate_launch_description():
-    # Path to f1tenth_stack launch file
     f1tenth_launch_dir = os.path.join(get_package_share_directory('f1tenth_stack'), 'launch')
     f1tenth_launch_file = os.path.join(f1tenth_launch_dir, 'bringup_launch.py')
 
-    # Path to natnet_ros2 launch file
     natnet_launch_file = os.path.join(
         get_package_share_directory('natnet_ros2'), 'launch', 'natnet_ros2.launch.py'
     )
 
-    # Path to your ekf.yaml config file in the llampc package
     llampc_config_dir = os.path.join(get_package_share_directory('llampc'), 'config')
     ekf_config_path = os.path.join(llampc_config_dir, 'mocap.yaml')
 
     # =================================================================
-    # 1. Mocap (NatNet) action
+    # 1. Mocap (NatNet) action — wrapped so we can respawn it on crash
     # =================================================================
+    def make_natnet_action():
+        return IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(natnet_launch_file),
+            launch_arguments={
+                'serverIP': '172.26.119.139',
+                'clientIP': '172.26.112.71',
+                'serverType': 'unicast',
+                'pub_rigid_body': 'true',
+            }.items()
+        )
 
-    natnet_mocap_action = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(natnet_launch_file),
-        launch_arguments={
-            'serverIP': '172.26.119.139',   # Host PC IP (Local Interface in Motive)
-            'clientIP': '172.26.112.71',   # <-- IP of THIS PC (where you launch)
-            'serverType': 'unicast',        # 'multicast' or 'unicast'
-            'pub_rigid_body': 'true', 
-        }.items()
-    )
+    natnet_mocap_action = make_natnet_action()
 
-    # Argument for the mocap pose topic.
-    # natnet_ros2 publishes per-rigid-body topics: /natnet_ros2/<body_name>/pose
     mocap_topic_la = DeclareLaunchArgument(
         'mocap_topic',
         default_value='/f1tenth/pose',
         description='NatNet rigid-body pose topic name'
     )
 
-    # =================================================================
-    # 2. Create Launch Actions
-    # =================================================================
-
-    # Action to launch the f1tenth stack
     f1tenth_stack_action = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(f1tenth_launch_file)
     )
 
-    # Action to run your ZUPT script
     zupt_node = Node(
         package='llampc',
         executable='imu_zupt_prep.py',
@@ -59,7 +51,6 @@ def generate_launch_description():
         output='screen'
     )
 
-    # Action to run robot_localization EKF with your yaml file
     ekf_node = Node(
         package='robot_localization',
         executable='ekf_node',
@@ -67,11 +58,10 @@ def generate_launch_description():
         output='screen',
         parameters=[ekf_config_path],
         remappings=[
-            ('/set_pose', '/initialpose')  # Routes RViz directly into the EKF's reset switch
+            ('/set_pose', '/initialpose')
         ]
     )
 
-    # Action to run your Optitrack subscriber script
     optitrack_node = Node(
         package='llampc',
         executable='optitrack_node.py',
@@ -81,11 +71,18 @@ def generate_launch_description():
     )
 
     # =================================================================
-    # 3. Return the LaunchDescription
+    # Respawn handler: if natnet_ros2's process dies, relaunch it
     # =================================================================
+    natnet_respawn_handler = RegisterEventHandler(
+        OnProcessExit(
+            target_action=natnet_mocap_action,
+            on_exit=[make_natnet_action()]
+        )
+    )
 
     return LaunchDescription([
         natnet_mocap_action,
+        natnet_respawn_handler,
         mocap_topic_la,
         f1tenth_stack_action,
         zupt_node,
