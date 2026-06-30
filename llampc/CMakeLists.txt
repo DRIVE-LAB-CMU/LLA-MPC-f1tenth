@@ -70,6 +70,8 @@ install(PROGRAMS
   scripts/llampc_cbf.py
   scripts/dfz_observer.py
   scripts/drive_relay.py
+  scripts/desktop_ping.py
+  scripts/car_pong.py
   DESTINATION lib/${PROJECT_NAME}
 )
 if(BUILD_TESTING)
