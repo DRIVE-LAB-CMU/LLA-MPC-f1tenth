@@ -75,7 +75,7 @@ class OptitrackSubscriber(Node):
             qos)
         
         self.ekf_sub = self.create_subscription(
-            PoseStamped,
+            Odometry,
             '/odometry/filtered',
             self.ekf_callback,
             qos)

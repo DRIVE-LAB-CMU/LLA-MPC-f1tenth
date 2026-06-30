@@ -8,6 +8,22 @@ Two windows:
 Run as a script. Rollout backend lives in rollouts.py; if it is unavailable the
 visualizer falls back to precomputed npz arrays or the recorded run only.
 """
+import os
+# Force Linux window backends to scale UI elements correctly
+os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
+os.environ["GDK_SCALE"] = "1.5"  # For GTK-based desktop environments
+
+import matplotlib.pyplot as plt
+# Set readable base sizes for high-res monitors
+plt.rcParams.update({
+    'font.size': 13,
+    'axes.labelsize': 14,
+    'axes.titlesize': 14,
+    'xtick.labelsize': 11,
+    'ytick.labelsize': 11,
+    'legend.fontsize': 10,
+    'lines.linewidth': 2.0
+})
 
 import os
 import sys
@@ -1377,7 +1393,7 @@ def main():
         full_open_loop=False,
         window_P=20,
         cost_form=np.array([0.0, 0.0, 20.0, 5.0, 10.0, 0.01]),
-        compute_m_step=True,    # set False to skip the slow M-step computation
+        compute_m_step=False,    # set False to skip the slow M-step computation
         m_step_M=10,
     )
     visualizer.show()
