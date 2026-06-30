@@ -204,12 +204,12 @@ class OptitrackSubscriber(Node):
         # tcov[35] = 1e-2  # Vyaw variance
         # odom_msg.twist.covariance = tcov.tolist()
         # ==========================================================
-        if len(self.position_history) >= 2:
-            if self.position_history[-1] == self.position_history[-2] and \
-                self.quaternion_history[-1] == self.quaternion_history[-2]:
+        # if len(self.position_history) >= 2:
+        #     if self.position_history[-1] == self.position_history[-2] and \
+        #         self.quaternion_history[-1] == self.quaternion_history[-2]:
 
-                if self.ekf_abs_linear_velocity > 0.4 or self.ekf_ang_velocity > 5:
-                    return
+        #         if self.ekf_abs_linear_velocity > 0.4 or self.ekf_ang_velocity > 5:
+        #             return
 
         self.ekf_odom_pub.publish(odom_msg)
 

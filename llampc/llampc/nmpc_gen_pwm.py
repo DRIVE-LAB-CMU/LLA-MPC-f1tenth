@@ -118,13 +118,13 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.cost.cost_type = 'NONLINEAR_LS'
     ocp.cost.cost_type_e = 'NONLINEAR_LS'
 
-    w_x = 4.0
-    w_y = 4.0
+    w_x = 2.0
+    w_y = 2.0
     w_xe = 0.0
     w_ye = 0.0
     w_theta = 0
     w_vel = 0
-    w_pwm = 2
+    w_pwm = 10
     w_steer = 0.1
     w_slew = 0.0
     w_steer_v = 0.01
@@ -245,9 +245,9 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.solver_options.sim_method_num_stages = 4
     
     # DROPPED FROM 10 to 2 (This makes the solver ~5x faster)
-    ocp.solver_options.sim_method_num_steps = 10
+    ocp.solver_options.sim_method_num_steps = 20
 
-    ocp.solver_options.nlp_solver_type = 'SQP'
+    ocp.solver_options.nlp_solver_type = 'SQP_RTI'
     ocp.solver_options.nlp_solver_max_iter = 10  # 2-3 iterations
     ocp.solver_options.globalization = 'FIXED_STEP'
     ocp.solver_options.print_level = 0
