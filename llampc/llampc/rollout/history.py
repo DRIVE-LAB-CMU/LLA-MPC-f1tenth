@@ -40,6 +40,7 @@ def _step_bank(last_predicted_states, cost_history, running_cost, queue_index, x
     best_model = jnp.argmin(running_cost)
 
 
+
     return cost, cost_history, running_cost, best_model
 
 @jax.jit
@@ -122,6 +123,7 @@ class LBHistory:
         t0 = time.perf_counter_ns()
         gpu_x = jax.device_put(jnp.array(x_t, dtype = 'float32'), device = gpu)
         t1 = time.perf_counter_ns()
+
         cost, self.cost_history, self.running_cost, self.current_best_model = _step_bank(
             self.last_predicted_states,
             self.cost_history,
@@ -130,6 +132,7 @@ class LBHistory:
             gpu_x,
             self.cost_weights
         )
+        print(self.current_best_model)
         # Advance queue_index
         self.queue_index = (self.queue_index + 1) % self.history_length
         t2 = time.perf_counter_ns()

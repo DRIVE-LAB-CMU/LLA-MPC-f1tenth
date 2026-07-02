@@ -109,6 +109,44 @@ class Track:
         
         # print(f"new xy: {optxy}")
         return optxy, optidx
+
+
+    def project_fast_vectorized(self, x, y, raceline):
+        """ Finds projection for (x,y) on a raceline using pure vectorization.
+        """
+        # Origin points (A) and destination points (B) for all segments
+        A = raceline[:, :-1]  # Shape: (2, n_waypoints - 1)
+        B = raceline[:, 1:]   # Shape: (2, n_waypoints - 1)
+        
+        # Target point P reshaped for broadcasting
+        P = np.array([[x], [y]])  # Shape: (2, 1)
+        
+        # Vectors
+        AB = B - A  # Vector from A to B
+        AP = P - A  # Vector from A to P
+        
+        # Project AP onto AB using dot products (sum along axis 0)
+        # t represents the fraction along the segment where the projection lands
+        num = np.sum(AP * AB, axis=0)
+        denom = np.sum(AB * AB, axis=0)
+        
+        # Avoid division by zero if two sequential waypoints are identical
+        denom = np.where(denom == 0, 1e-6, denom)
+        
+        # Clamp t to [0.0, 1.0] to ensure the projection stays ON the segment
+        t = np.clip(num / denom, 0.0, 1.0)
+        
+        # Compute the actual projection coordinates for all segments
+        all_proj = A + t * AB  # Shape: (2, n_waypoints - 1)
+        
+        # Compute squared distances from P to all projection points
+        dists_sq = np.sum((P - all_proj) ** 2, axis=0)
+        
+        # Find the segment with the minimum distance
+        optidx = np.argmin(dists_sq)
+        optxy = all_proj[:, optidx]
+        
+        return optxy, optidx
     
     def plot_raceline(self):
         """ plot center, inner and outer track lines

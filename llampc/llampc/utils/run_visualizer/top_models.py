@@ -14,7 +14,7 @@ from collections import Counter
 # ---------------------------------------------------------------------------
 # Configuration — edit these before running
 # ---------------------------------------------------------------------------
-NPZ_PATH   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cbfj.npz")
+NPZ_PATH   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lla8.npz")
 TOP_N      = 5            # how many top models to report
 USE_MEDIAN = False        # True = use median params, False = use mean
 

@@ -98,7 +98,7 @@ def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1., wr
         search_indices = (search_indices + 1) % num_pts
         search_window = raceline[:, search_indices]
     
-    xy, idx_rel = track.project_fast(x=x0[0], y=x0[1], raceline=search_window)
+    xy, idx_rel = track.project_fast_vectorized(x=x0[0], y=x0[1], raceline=search_window)
     new_projidx = search_indices[idx_rel]
 
     dist_start = track.spline.s[new_projidx]

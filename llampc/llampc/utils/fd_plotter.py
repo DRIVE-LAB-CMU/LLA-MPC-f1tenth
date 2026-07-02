@@ -52,6 +52,9 @@ from nav_msgs.msg import Odometry
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
+import signal
+import sys
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
@@ -275,44 +278,77 @@ class ComparePlotter(Node):
     def snapshot(self):
         with self.lock:
             return self.raw.snapshot(), self.ekf.snapshot()
-
+    
+def save_npz(path, raw, ekf, meta):
+    """Dump raw + ekf snapshots (and run metadata) into a single npz file."""
+    def arrs(series, prefix):
+        return {f'{prefix}_{k}': np.asarray(v, dtype=float)
+                for k, v in series.items()}
+    payload = {}
+    payload.update(arrs(raw, 'raw'))
+    payload.update(arrs(ekf, 'ekf'))
+    payload['meta'] = np.array(list(meta.items()), dtype=object)
+    np.savez(path, **payload)
+    print(f'[ekf_compare_plotter] Saved {len(raw["t"])} raw / '
+        f'{len(ekf["t"])} ekf samples -> {path}')
 
 def main():
     parser = argparse.ArgumentParser(
         description='Live raw-vs-EKF comparison plotter.')
     parser.add_argument('--source', choices=['pose', 'odom'], default='pose',
-                        help="RAW source: 'pose' = PoseStamped + finite diff "
-                             "(rotated into body vel); 'odom' = Odometry, "
-                             "twist from msg (body vel).")
+                         help="RAW source: 'pose' = PoseStamped + finite diff "
+                              "(rotated into body vel); 'odom' = Odometry, "
+                              "twist from msg (body vel).")
     parser.add_argument('--topic', default=None,
-                        help='RAW topic (defaults per source).')
+                         help='RAW topic (defaults per source).')
     parser.add_argument('--ekf-topic', default=DEFAULT_EKF_TOPIC,
-                        help='EKF Odometry topic (default /odometry/filtered).')
+                         help='EKF Odometry topic (default /odometry/filtered).')
     parser.add_argument('--robust-scale', action='store_true',
-                        help='Ignore extreme velocity outliers when autoscaling '
-                             'the vx/vy/omega y-axes (data is still plotted, just '
-                             'not allowed to blow up the axis limits).')
+                         help='Ignore extreme velocity outliers when autoscaling '
+                              'the vx/vy/omega y-axes (data is still plotted, just '
+                              'not allowed to blow up the axis limits).')
     parser.add_argument('--robust-pct', type=float, default=ROBUST_PCT,
-                        help='Percentile band for --robust-scale (default %(default)s '
-                             '-> uses the p..(100-p) range). Lower = tighter clip.')
+                         help='Percentile band for --robust-scale (default %(default)s '
+                              '-> uses the p..(100-p) range). Lower = tighter clip.')
+    parser.add_argument('--output', default='ekf_compare_data.npz',
+                         help='Where to save raw/ekf finite-difference data '
+                              'on exit (default %(default)s).')
     args = parser.parse_args()
 
     raw_topic = args.topic or (DEFAULT_ODOM_TOPIC if args.source == 'odom'
-                               else DEFAULT_POSE_TOPIC)
-
+                                else DEFAULT_POSE_TOPIC)
     raw_vframe = 'body'
     ekf_vframe = 'body'
 
     rclpy.init()
     node = ComparePlotter(args.source, raw_topic, args.ekf_topic)
-
     spin_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
     spin_thread.start()
+
+    # Guard so we only write the npz once, however we exit.
+    save_lock = threading.Lock()
+    saved = {'done': False}
+
+    def do_save():
+        with save_lock:
+            if saved['done']:
+                return
+            saved['done'] = True
+            raw, ekf = node.snapshot()
+            save_npz(args.output, raw, ekf,
+                      {'source': args.source, 'raw_topic': raw_topic,
+                       'ekf_topic': args.ekf_topic})
+
+    def handle_sigint(signum, frame):
+        # Runs even if matplotlib's event loop is blocking plt.show().
+        do_save()
+        plt.close('all')
+
+    signal.signal(signal.SIGINT, handle_sigint)
 
     fig, axes = plt.subplots(2, 3, figsize=(13, 7))
     fig.suptitle(f'RAW [{args.source}] {raw_topic}   vs   EKF {args.ekf_topic}')
 
-    # Velocity titles flag the frame of each line so mismatches aren't surprising.
     vlabel = lambda comp: f'{comp} [m/s]  (raw:{raw_vframe}, ekf:{ekf_vframe})'
     specs = [
         (axes[0, 0], 'x', 'x [m]'),
@@ -322,19 +358,17 @@ def main():
         (axes[1, 1], 'vy', vlabel('vy')),
         (axes[1, 2], 'omega', 'omega [rad/s]'),
     ]
-
     lines = {}
     for ax, key, label in specs:
         (ln_raw,) = ax.plot([], [], color='tab:blue', linewidth=1.0,
-                            label='raw')
+                             label='raw')
         (ln_ekf,) = ax.plot([], [], color='tab:orange', linewidth=1.2,
-                            linestyle='--', label='ekf')
+                             linestyle='--', label='ekf')
         ax.set_title(label, fontsize=9)
         ax.set_xlabel('t [s]')
         ax.grid(True, alpha=0.3)
         lines[key] = (ax, ln_raw, ln_ekf)
 
-    # Single shared legend.
     handles = [lines['x'][1], lines['x'][2]]
     fig.legend(handles, ['raw', 'ekf'], loc='upper right')
 
@@ -344,7 +378,6 @@ def main():
         for _, lr, le in lines.values():
             all_lns.extend((lr, le))
 
-        # Time window driven by the latest sample across both series.
         latest = []
         if raw['t']:
             latest.append(raw['t'][-1])
@@ -352,6 +385,7 @@ def main():
             latest.append(ekf['t'][-1])
         if not latest:
             return all_lns
+
         t_now = max(latest)
         t_min = t_now - WINDOW_SEC
 
@@ -360,14 +394,10 @@ def main():
             ln_ekf.set_data(ekf['t'], ekf[key])
             ax.set_xlim(max(0.0, t_min), max(WINDOW_SEC, t_now))
 
-            # y-limits span the visible window of BOTH lines.
             vis = [val for ti, val in zip(raw['t'], raw[key]) if ti >= t_min]
             vis += [val for ti, val in zip(ekf['t'], ekf[key]) if ti >= t_min]
             if vis:
                 if args.robust_scale and key in VELOCITY_KEYS and len(vis) >= 5:
-                    # Robust autoscale: clamp limits to a percentile band so a few
-                    # extreme finite-difference spikes don't dominate the axis.
-                    # The spikes are still drawn -- they just run off the top/bottom.
                     p = max(0.0, min(49.0, args.robust_pct))
                     lo = float(np.percentile(vis, p))
                     hi = float(np.percentile(vis, 100.0 - p))
@@ -378,7 +408,7 @@ def main():
         return all_lns
 
     _anim = FuncAnimation(fig, update, interval=50, blit=False,
-                          cache_frame_data=False)
+                           cache_frame_data=False)
 
     try:
         plt.tight_layout()
@@ -386,6 +416,9 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        # Covers window close / normal return; do_save() is a no-op if the
+        # SIGINT handler already saved.
+        do_save()
         rclpy.shutdown()
         spin_thread.join(timeout=1.0)
 

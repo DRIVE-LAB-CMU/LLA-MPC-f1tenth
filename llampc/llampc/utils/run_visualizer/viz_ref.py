@@ -44,6 +44,9 @@ _DPI_SCALE = _detect_dpi_scale()
 # knob, so on GTK backends we rely on the rcParams scaling below instead).
 os.environ.setdefault("QT_SCALE_FACTOR", f"{_DPI_SCALE:.2f}")
 
+import matplotlib
+matplotlib.use('QtAgg')
+
 import matplotlib.pyplot as plt
 # Set readable base sizes for high-res monitors; scaled by the detected DPI
 # factor instead of a fixed guess, so they actually grow on HiDPI screens.
@@ -1480,7 +1483,7 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'cbfr.npz')
+    filepath = os.path.join(dir_path, 'lla13.npz')
 
     ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square2slow.npz')
 
@@ -1497,13 +1500,16 @@ def main():
         9: 'Cm',
         10: 'Roll',
         11: 'Pitch'
+
     }
 
-    obstacles = [
-        (np.array([1.75, -1.0]), 0.75),
-        # (np.array([-1, 1.7]), 0.5),
-        (np.array([0.5, 0.5]), 0.5)
-    ]
+    obstacles = []
+
+    # obstacles = [
+    #     (np.array([1.75, -1.0]), 0.75),
+    #     # (np.array([-1, 1.7]), 0.5),
+    #     (np.array([0.5, 0.5]), 0.5)
+    # ]
     r_car = 0.04
 
     general_models = {
@@ -1527,7 +1533,7 @@ def main():
         dt=1.0 / 25.0,
         ol_reset_interval=5,
         full_open_loop=False,
-        window_P=20,
+        window_P=40,
         cost_form=np.array([0.0, 0.0, 20.0, 5.0, 10.0, 0.01]),
         compute_m_step=False,    # set False to skip the slow M-step computation
         m_step_M=10,

@@ -114,6 +114,12 @@ def export_model(params_car, exact = False):
     model.x = x
     model.u = u
     model.p = ca.vertcat(p, x_ref)
+    model.a_long_expr = dx3
+
+    xdot = ca.SX.sym('xdot', 8) 
+
+    model.f_impl_expr = xdot - f_expl   # <-- add this
+    model.xdot = xdot                    # <-- add this
 
     return model
 
@@ -236,7 +242,7 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.solver_options.qp_solver = 'PARTIAL_CONDENSING_HPIPM'
     ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'
 
-    ocp.solver_options.integrator_type = 'ERK'
+    ocp.solver_options.integrator_type = 'IRK'
     ocp.solver_options.sim_method_num_stages = 4
     # ocp.solver_options.regularize_method = 'CONVEXIFY' 
     

@@ -13,11 +13,11 @@ def export_model(params_car, exact = False):
 
     model.name = "f1tenth"
 
-    x = ca.MX.sym('x', 8) # state: x, y, phi, vx, vy, omega, acceleration, delta
-    u = ca.MX.sym('u', 2) # control rate: jerk, steer rate
-    p = ca.MX.sym('p', 12)
+    x = ca.SX.sym('x', 8) # state: x, y, phi, vx, vy, omega, acceleration, delta
+    u = ca.SX.sym('u', 2) # control rate: jerk, steer rate
+    p = ca.SX.sym('p', 12)
     #parameters: Bf, Br, Cf, Cr, Df, Dr, Cro, Cd, Ce, Cm, roll, pitch
-    x_ref = ca.MX.sym('x_ref', 8)
+    x_ref = ca.SX.sym('x_ref', 8)
     
 
     mass = params_car['mass']
@@ -96,6 +96,11 @@ def export_model(params_car, exact = False):
     model.p = ca.vertcat(p, x_ref)
     model.a_long_expr = dx3
 
+    xdot = ca.SX.sym('xdot', 8) 
+
+    model.f_impl_expr = xdot - f_expl   # <-- add this
+    model.xdot = xdot                    # <-- add this
+
 
     return model
 
@@ -124,10 +129,10 @@ def create_ocp(model, params_car, steps, horizon):
     w_ye = 0.0
     w_theta = 0
     w_vel = 0
-    w_pwm = 10
-    w_steer = 0.1
+    w_pwm = 5
+    w_steer = 0.01
     w_slew = 0.0
-    w_steer_v = 0.01
+    w_steer_v = 0.001
     
     w_a_long = 0.001
       
@@ -241,15 +246,15 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.solver_options.qp_solver = 'PARTIAL_CONDENSING_HPIPM'
     ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'
 
-    ocp.solver_options.integrator_type = 'ERK'
+    ocp.solver_options.integrator_type = 'IRK'
     ocp.solver_options.sim_method_num_stages = 4
     
     # DROPPED FROM 10 to 2 (This makes the solver ~5x faster)
-    ocp.solver_options.sim_method_num_steps = 20
+    # ocp.solver_options.sim_method_num_steps = 8
 
-    ocp.solver_options.nlp_solver_type = 'SQP_RTI'
-    ocp.solver_options.nlp_solver_max_iter = 10  # 2-3 iterations
-    ocp.solver_options.globalization = 'FIXED_STEP'
+    ocp.solver_options.nlp_solver_type = 'SQP'
+    # ocp.solver_options.nlp_solver_max_iter = 10  # 2-3 iterations
+    # ocp.solver_options.globalization = 'FIXED_STEP'
     ocp.solver_options.print_level = 0
     ocp.solver_options.qp_solver_warm_start = 1    
     
@@ -262,119 +267,6 @@ def create_ocp(model, params_car, steps, horizon):
     return ocp
 
 
-def create_ipopt_solver(model, params_car, steps, horizon):
-    N  = steps
-    dt = horizon / N
-
-    x      = model.x
-    u      = model.u
-    p_sym  = model.p
-    f_expr = model.f_expl_expr
-
-    f_func      = ca.Function('f',      [x, u, p_sym], [f_expr])
-    a_long_func = ca.Function('a_long', [x, u, p_sym], [model.a_long_expr])
-
-    w_x       = 4.0
-    w_y       = 4.0
-    w_theta   = 0.0
-    w_vel     = 0.0
-    w_pwm     = 2.0
-    w_steer   = 0.1
-    w_a_long  = 0.001
-    w_slew    = 0.0
-    w_steer_v = 0.01
-
-    Q = np.array([w_x, w_y, w_theta, w_vel, 0, 0, w_pwm, w_steer])
-    R = np.array([w_slew, w_steer_v])
-
-    X_vars = ca.MX.sym('X', 8, N + 1)
-    U_vars = ca.MX.sym('U', 2, N)
-    p_tire = ca.MX.sym('p_tire', 12)
-    X_ref  = ca.MX.sym('Xref',  8, N + 1)
-
-    obj = 0
-    g, g_lb, g_ub = [], [], []
-
-    for k in range(N):
-        xk   = X_vars[:, k]
-        uk   = U_vars[:, k]
-        xref = X_ref[:, k]
-        p_k  = ca.vertcat(p_tire, xref)
-
-        err  = xk - xref
-        obj += ca.dot(err, err * Q)
-        obj += ca.dot(uk, uk * R)
-        obj += w_a_long * a_long_func(xk, uk, p_k)**2
-
-        M      = 1
-        dt_sub = dt / M
-        xk_int = xk
-        for _ in range(M):
-            k1 = f_func(xk_int,               uk, p_k)
-            k2 = f_func(xk_int + dt_sub/2*k1, uk, p_k)
-            k3 = f_func(xk_int + dt_sub/2*k2, uk, p_k)
-            k4 = f_func(xk_int + dt_sub  *k3, uk, p_k)
-            xk_int = xk_int + dt_sub/6 * (k1 + 2*k2 + 2*k3 + k4)
-
-        g.append(X_vars[:, k + 1] - xk_int)
-        g_lb.extend([0.0] * 8)
-        g_ub.extend([0.0] * 8)
-
-    lbx_list, ubx_list = [], []
-    for _ in range(N + 1):
-        lbx_list.extend([-ca.inf, -ca.inf, -ca.inf,
-                          -0.5, -4.0, -2*np.pi, -0.1,
-                          params_car['min_steer']])
-        ubx_list.extend([ ca.inf,  ca.inf,  ca.inf,
-                          params_car['max_v'], 4.0, 2*np.pi, 0.5,
-                          params_car['max_steer']])
-    for _ in range(N):
-        lbx_list.extend([-0.05, -params_car['max_steer_vel']])
-        ubx_list.extend([ 0.20,  params_car['max_steer_vel']])
-
-    lbx = np.array(lbx_list)
-    ubx = np.array(ubx_list)
-
-    all_vars   = ca.vertcat(ca.reshape(X_vars, -1, 1),
-                            ca.reshape(U_vars, -1, 1))
-    all_params = ca.vertcat(p_tire, ca.reshape(X_ref, -1, 1))
-
-    nlp = {'x': all_vars, 'f': obj, 'g': ca.vertcat(*g), 'p': all_params}
-
-    solver = ca.nlpsol('ipopt_mpc', 'ipopt', nlp, {
-        'ipopt.max_iter':              500,
-        'ipopt.tol':                   1e-4,
-        'ipopt.acceptable_tol':        1e-3,
-        'ipopt.acceptable_iter':       5,
-        'ipopt.hessian_approximation': 'limited-memory',
-        'ipopt.print_level':           0,
-        'print_time':                  0,
-    })
-
-    def solve(x0_state: np.ndarray,
-          p_tire_val: np.ndarray,
-          x_ref_traj: np.ndarray) -> dict:
-    
-        p_val = np.concatenate([p_tire_val, x_ref_traj.flatten(order='F')])
-        
-        lbx[:8] = x0_state
-        ubx[:8] = x0_state
-
-        sol = solver(lbx=lbx, ubx=ubx, lbg=g_lb, ubg=g_ub, p=p_val)
-
-        res      = sol['x'].full().flatten()
-        nx_total = 8 * (N + 1)
-        X_sol    = res[:nx_total].reshape(8, N + 1, order='F')
-        U_sol    = res[nx_total:].reshape(2, N,     order='F')
-
-        return {
-            'u':      U_sol[:, 0],
-            'X':      X_sol,
-            'U':      U_sol,
-            'status': solver.stats()['return_status'],
-        }
-        
-    return solve
 
 def get_solver_directory(solver_config = "default"):
     # package_dir = Path(get_package_share_directory('llampc'))
