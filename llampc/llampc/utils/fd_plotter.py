@@ -291,7 +291,6 @@ def save_npz(path, raw, ekf, meta):
     np.savez(path, **payload)
     print(f'[ekf_compare_plotter] Saved {len(raw["t"])} raw / '
         f'{len(ekf["t"])} ekf samples -> {path}')
-
 def main():
     parser = argparse.ArgumentParser(
         description='Live raw-vs-EKF comparison plotter.')
@@ -325,9 +324,10 @@ def main():
     spin_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
     spin_thread.start()
 
-    # Guard so we only write the npz once, however we exit.
+    # --- exit handling: signal handler only *flags*, never touches Tk/mpl ---
     save_lock = threading.Lock()
     saved = {'done': False}
+    stop_requested = threading.Event()
 
     def do_save():
         with save_lock:
@@ -340,9 +340,13 @@ def main():
                        'ekf_topic': args.ekf_topic})
 
     def handle_sigint(signum, frame):
-        # Runs even if matplotlib's event loop is blocking plt.show().
-        do_save()
-        plt.close('all')
+        # Do NOT call any matplotlib/Tk function here. Signal handlers can
+        # fire in the middle of a Tk callback (e.g. idle_draw), and touching
+        # the GUI from here races with Tk's own event loop and corrupts its
+        # internal Photoimage state (-> "invalid command name pyimageN").
+        # Just set a flag; the animation timer (running inside Tk's mainloop)
+        # picks it up and does the real work safely.
+        stop_requested.set()
 
     signal.signal(signal.SIGINT, handle_sigint)
 
@@ -373,6 +377,12 @@ def main():
     fig.legend(handles, ['raw', 'ekf'], loc='upper right')
 
     def update(_frame):
+        # Handle a pending Ctrl+C first, safely, from inside Tk's own loop.
+        if stop_requested.is_set():
+            do_save()
+            plt.close(fig)
+            return []
+
         raw, ekf = node.snapshot()
         all_lns = []
         for _, lr, le in lines.values():
@@ -416,11 +426,11 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        # Covers window close / normal return; do_save() is a no-op if the
-        # SIGINT handler already saved.
+        # Covers window close / normal return; no-op if update() already saved.
         do_save()
         rclpy.shutdown()
         spin_thread.join(timeout=1.0)
+
 
 
 if __name__ == '__main__':
