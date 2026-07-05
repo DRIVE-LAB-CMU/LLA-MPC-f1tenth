@@ -79,6 +79,39 @@ class LBHistory:
         self.buffer_size = np.zeros(control_size) if buffer_size is None else buffer_size
         self.buffer = [deque() for _ in range(control_size)]
 
+
+    def predict_states_lateral(self, x_t, u_t, reset = True):
+        """Batched version of _integrate"""
+    
+        t0 = time.perf_counter_ns()
+        # buffered_u_t = u_t
+
+        buffered_u_t = np.zeros_like(u_t)
+        for i in range(self.control_size):
+            self.buffer[i].append(u_t[i])
+            if(len(self.buffer[i]) > self.buffer_size[i]):
+                buffered_u_t[i] = self.buffer[i].popleft()
+        
+        t1 = time.perf_counter_ns()
+        known_params = self.dynamics_bank.get_known_params()
+        
+        t2 = time.perf_counter_ns()
+        if(reset):
+            self.last_predicted_states = self.integrator(
+                known_params,
+                x_t,
+                buffered_u_t)
+        else:
+
+            self.last_predicted_states = self.last_predicted_states.at[:, 3].set(x_t[3])
+            self.last_predicted_states = self.integrator(
+                known_params,
+                self.last_predicted_states,
+                buffered_u_t)
+            
+            
+            
+
     def predict_states(self, x_t, u_t, reset = True):
         """Batched version of _integrate"""
     

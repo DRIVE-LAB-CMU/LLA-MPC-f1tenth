@@ -17,8 +17,6 @@ jax.config.update('jax_persistent_cache_min_compile_time_secs', 0)
 # jax.config.update("jax_log_compiles", True)
 import jax.numpy as jnp
 
-
-
 from llampc.nmpc_gen_pwm import setup_mpc
 from llampc.params import F110, F110_sim, get_param_dict_random, get_param_dict_grid, param_validate_ptm
 from llampc.planner import get_reference_trajectory_segment, get_lookahead_point

@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from functools import partial
 
 from llampc.rollout.rk6 import _rk4_step, rollout
-import llampc.rollout.dynamic as dynamics
+import llampc.llampc.rollout.dynamic_lateral as dynamics
 
 # State / control conventions: x = [px, py, ψ, vx, vy, ω], u = [δ, d]
 PX_, PY_, PSI_, VX_, VY_, R_ = 0, 1, 2, 3, 4, 5

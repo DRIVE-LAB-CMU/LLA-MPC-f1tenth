@@ -12,10 +12,10 @@ def export_model(params_car, exact = False):
     model = AcadosModel()
     model.name = "f1tenthfiala"
 
-    x = ca.MX.sym('x', 10)   # state: x, y, phi, vx, vy, omega, omega_r, pwm, delta
-    u = ca.MX.sym('u', 2)   # control rate: pwm rate, steer rate
-    p = ca.MX.sym('p', 7)
-    # parameters: muf, mur, Cf, Cr, Cro, Cm1, Cm2
+    x = ca.MX.sym('x', 10)   # state: x, y, phi, vx, vy, omega, omega_w, dFz, current, delta
+    u = ca.MX.sym('u', 2)   # control rate: curent slew rate, steer rate
+    p = ca.MX.sym('p', 4)
+    # parameters: muf, mur, Cf, Cr
     x_ref = ca.MX.sym('x_ref', 6)
 
     mass = params_car['mass']
@@ -24,29 +24,23 @@ def export_model(params_car, exact = False):
     lr   = params_car['lr']
     rw   = params_car['rw']     # rear wheel radius [m]
     Iw   = params_car['Iw']     # rear driveline rotational inertia [kg m^2]
+    pole_pairs  = params_car['pole_pairs']
+    gear_ratio  = params_car['gear_ratio']
+    lam = params_car['lambda']
     g    = 9.81
+    hcg, L = params_car['h'], lf + lr
+    c = 20      # dFz relaxation rate [1/s]
+
+
+    muf, mur, Cf, Cr = [p[i] for i in range(4)]
+    
 
     if not exact:
-        pass
+        eps = 0.1
+        vx_dyn = ca.sqrt(x[3]**2 + eps)
 
-    else:
-        muf, mur, Cf, Cr, Cro, Cm1, Cm2 = [p[i] for i in range(7)]
-        
-        # state: x, y, phi, vx, vy, omega, omega_r, dFz, pwm, delta   (10 states)
-        omega_r, dFz, pwm, delta = x[6], x[7], x[8], x[9]
-        hcg, L = params_car['h'], lf + lr
-        c = 20      # dFz relaxation rate [1/s]
-
-        # --- slip angles (no guard) ---
-        alphaf = delta - ca.atan2(x[5]*lf + x[4], x[3])
-        alphar = ca.atan2(x[5]*lr - x[4], x[3])
-
-        # --- rear longitudinal slip ratio from wheel speed (no guard) ---
-        kappa_r = (rw*omega_r - x[3]) / x[3]
-
-        # --- combined slips ---
-        sigma_f = ca.sqrt(ca.tan(alphaf)**2 + 1e-9)               # front free-rolling
-        sigma_r = ca.sqrt(ca.tan(alphar)**2 + kappa_r**2 + 1e-9)
+        # state: x, y, phi, vx, vy, omega, omega_w, dFz, current, delta   (10 states)
+        omega_w, dFz, current, delta = x[6], x[7], x[8], x[9]
 
         # --- load transfer is now a STATE (dFz), not computed here ---
         Ffz = mass*g*lr/L - dFz
@@ -54,6 +48,77 @@ def export_model(params_car, exact = False):
         Ffmax = muf*Ffz
         Frmax = mur*Frz          # coupling lives in sigma_r, no friction-circle derate
 
+        # --- slip angles (no guard) ---
+        alphaf = delta - ca.atan2(x[5]*lf + x[4], vx_dyn)
+        alphar = ca.atan2(x[5]*lr - x[4], vx_dyn)
+
+        kappa = (rw*omega_w- x[3]) / vx_dyn
+
+        # --- combined slips ---
+        sigma_f = ca.sqrt(ca.tan(alphaf)**2 + kappa**2 + 1e-9)               # front free-rolling
+        sigma_r = ca.sqrt(ca.tan(alphar)**2 + kappa**2 + 1e-9)
+        
+        sigmaf_max = 3*Ffmax/Cf
+        sigmar_max = 3*Frmax/Cr
+
+
+        def brush(C, s, Fmax):
+            Cs = C*s
+            return Cs - Cs**2/(3*Fmax) + Cs**3/(27*Fmax**2)
+
+        Ff_total = ca.if_else(sigma_f < sigmaf_max, brush(Cf, sigma_f, Ffmax), Ffmax)
+        Fr_total = ca.if_else(sigma_r < sigmar_max, brush(Cr, sigma_r, Frmax), Frmax)
+
+        # --- front: lateral only ---
+        Ffy = -Ff_total*ca.tan(alphaf)/sigma_f
+        Ffx = Ff_total*kappa       /sigma_f
+        
+
+        # --- rear: lateral and longitudinal share Fr_total via sigma_r ---
+        Fry =  -Fr_total*ca.tan(alphar)/sigma_r
+        Frx =   Fr_total*kappa       /sigma_r
+
+        # --- drive torque on rear wheel ---
+        tau_drive = gear_ratio * (1.5 * pole_pairs * lam) * current
+
+        # --- realized longitudinal chassis force drives load transfer ---
+        Fx_chassis = Frx + Ffx*ca.cos(delta) - Ffy*ca.sin(delta)
+
+        # --- dynamics ---
+        dx0 = x[3]*ca.cos(x[2]) - x[4]*ca.sin(x[2])
+        dx1 = x[3]*ca.sin(x[2]) + x[4]*ca.cos(x[2])
+        dx2 = x[5]
+        dx3 = (Frx + Ffx*ca.cos(delta) - Ffy*ca.sin(delta))/mass + x[4]*x[5]
+        dx4 = (Fry + Ffy*ca.cos(delta) + Ffx*ca.sin(delta))/mass - x[3]*x[5]
+        dx5 = (lf *(Ffy*ca.cos(delta) + Ffx*ca.sin(delta)) - lr*Fry)/Iz
+        dx6 = (tau_drive - Frx*rw - Ffx *rw)/Iw
+        dx7 = -c*(dFz - (hcg/L)*Fx_chassis)      # dFz relaxation, driven by REALIZED force
+        dx8 = u[0]
+        dx9 = u[1]
+
+
+    else:
+        # state: x, y, phi, vx, vy, omega, omega_w, dFz, current, delta   (10 states)
+        omega_w, dFz, current, delta = x[6], x[7], x[8], x[9]
+
+        # --- load transfer is now a STATE (dFz), not computed here ---
+        Ffz = mass*g*lr/L - dFz
+        Frz = mass*g*lf/L + dFz
+        Ffmax = muf*Ffz
+        Frmax = mur*Frz          # coupling lives in sigma_r, no friction-circle derate
+
+
+        # --- slip angles (no guard) ---
+        alphaf = delta - ca.atan2(x[5]*lf + x[4], x[3])
+        alphar = ca.atan2(x[5]*lr - x[4], x[3])
+
+        # --- rear longitudinal slip ratio from wheel speed (no guard) ---
+        kappa = (rw*omega_w- x[3]) / x[3]
+
+        # --- combined slips ---
+        sigma_f = ca.sqrt(ca.tan(alphaf)**2 + kappa**2 + 1e-9)               # front free-rolling
+        sigma_r = ca.sqrt(ca.tan(alphar)**2 + kappa**2 + 1e-9)
+        
         sigmaf_max = 3*Ffmax/Cf
         sigmar_max = 3*Frmax/Cr
 
@@ -66,25 +131,26 @@ def export_model(params_car, exact = False):
 
         # --- front: lateral only ---
         Ffy = -Ff_total*ca.tan(alphaf)/sigma_f
-
+        Ffx = Ff_total*kappa       /sigma_f
+        
         # --- rear: lateral and longitudinal share Fr_total via sigma_r ---
         Fry =  -Fr_total*ca.tan(alphar)/sigma_r
-        Fxr =   Fr_total*kappa_r       /sigma_r
+        Frx =   Fr_total*kappa       /sigma_r
 
         # --- drive torque on rear wheel ---
-        tau_drive = rw*(mass*pwm*(Cm1 - Cm2*x[3]) - Cro)
+        tau_drive = gear_ratio * (1.5 * pole_pairs * lam) * current
 
         # --- realized longitudinal chassis force drives load transfer ---
-        Fx_chassis = Fxr - Ffy*ca.sin(delta)
+        Fx_chassis =  Frx + Ffx*ca.cos(delta) - Ffy*ca.sin(delta)
 
         # --- dynamics ---
         dx0 = x[3]*ca.cos(x[2]) - x[4]*ca.sin(x[2])
         dx1 = x[3]*ca.sin(x[2]) + x[4]*ca.cos(x[2])
         dx2 = x[5]
-        dx3 = (Fxr - Ffy*ca.sin(delta))/mass + x[4]*x[5]
-        dx4 = (Fry + Ffy*ca.cos(delta))/mass - x[3]*x[5]
-        dx5 = (lf*Ffy*ca.cos(delta) - lr*Fry)/Iz
-        dx6 = (tau_drive - Fxr*rw)/Iw
+        dx3 = (Frx + Ffx*ca.cos(delta) - Ffy*ca.sin(delta))/mass + x[4]*x[5]
+        dx4 = (Fry + Ffy*ca.cos(delta) + Ffx*ca.sin(delta))/mass - x[3]*x[5]
+        dx5 = (lf *(Ffy*ca.cos(delta) + Ffx*ca.sin(delta)) - lr*Fry)/Iz
+        dx6 = (tau_drive - Frx*rw - Ffx *rw)/Iw
         dx7 = -c*(dFz - (hcg/L)*Fx_chassis)      # dFz relaxation, driven by REALIZED force
         dx8 = u[0]
         dx9 = u[1]
@@ -122,21 +188,25 @@ def create_ocp(model, params_car, steps, horizon):
     w_xe = 0.0
     w_ye = 0.0
     w_theta = 0
-    w_vel = 0
-    w_pwm = 2
+    w_vx = 0
+
+
+    w_current = 0.01
     w_steer = 0.1
     w_slew = 0.0
     w_steer_v = 0.01
     
       
-    Q_flat = [w_x, w_y, w_theta, w_vel, 0, 0, w_pwm, w_steer]
+    Q_flat = [w_x, w_y, w_theta, w_vx, 0, 0,  w_current, w_steer]
+
+    # vx, vy, omega
     R_flat = [w_slew, w_steer_v]
 
-    Q = np.diag(Q_flat) # nx, for trajectory deviation 6x6
-    R = np.diag(R_flat)  # nu, for control smoothness 2x2
-    Qf = np.diag([w_xe, w_ye, 0, 0, 0, 0, 0, 0, 0])  # Now size 8x8
+    Q = np.diag(Q_flat)
+    R = np.diag(R_flat)
+    Qf = np.diag([w_xe, w_ye, 0, 0, 0, 0, 0, 0])
 
-    ocp.cost.W = np.diag(np.concatenate((Q_flat, R_flat))) #nx, nu, nu, 10x10
+    ocp.cost.W = np.diag(np.concatenate((Q_flat, R_flat)))
     ocp.cost.W_e = Qf
 
     x_ref = model.p[-6:]  # last 6 parameters
@@ -153,13 +223,13 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.cost.yref_e = np.zeros(ny_e) # terminal objective function reference
 
     yaw_err = x[2] - x_ref[2]
-    #yaw_err_wrapped = ca.atan2(ca.sin(yaw_err), ca.cos(yaw_err))
+    yaw_err_wrapped = ca.atan2(ca.sin(yaw_err), ca.cos(yaw_err))
 
 
     ocp.model.cost_y_expr = ca.vertcat(
         x[0] - x_ref[0],   # x
         x[1] - x_ref[1],   # y
-        yaw_err,    # yaw (wrapped)
+        yaw_err_wrapped,    # yaw (wrapped)
         x[3] - x_ref[3],   # vx
         x[4] - x_ref[4],   # vy
         x[5] - x_ref[5],   # omega
@@ -170,7 +240,7 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.model.cost_y_expr_e = ca.vertcat(
         x[0] - x_ref[0],   # x
         x[1] - x_ref[1],   # y
-        yaw_err,    # yaw (wrapped)
+        yaw_err_wrapped,    # yaw (wrapped)
         x[3] - x_ref[3],   # vx
         x[4] - x_ref[4],   # vy
         x[5] - x_ref[5],   # omega
@@ -186,24 +256,24 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.constraints.lbx = np.array([-0.5, 
                                 -4,
                                 -2 * np.pi,
-                                -0.1, 
+                                -100, 
                                params_car['min_steer']])
 
     ocp.constraints.ubx = np.array([params_car['max_v'], 
                                     4,
                                     2* np.pi,
-                                    0.5, 
+                                    100, 
                                     params_car['max_steer']])
     
-    ocp.constraints.lbu = np.array([-0.05, -params_car['max_steer_vel']])
-    ocp.constraints.ubu = np.array([0.2, params_car['max_steer_vel']])
-    ocp.constraints.idxbu = np.array([0, 1]) # 0 is slew rate, 1 is steer_vel
+    ocp.constraints.lbu = np.array([-params_car['max_steer_vel']])
+    ocp.constraints.ubu = np.array([params_car['max_steer_vel']])
+    ocp.constraints.idxbu = np.array([1]) # 0 is slew rate, 1 is steer_vel
 
     # slack on constraints
     w_slack = 100.0       # L2 slack penalty (quadratic)
     w_slack_l1 = 10.0    # L1 slack penalty (linear)
     
-    nsbx = 3
+    nsbx = 5
     ocp.dims.nsbx = nsbx
     ocp.constraints.idxsbx = np.arange(nsbx)   # slack all idxbx entries
 
@@ -290,137 +360,3 @@ def setup_mpc(steps, horizon, json_file='f1tenth_acados_ocp.json', solver_config
     finally:
         os.chdir(original_cwd) 
 
-
-import casadi as ca
-import numpy as np
-import matplotlib.pyplot as plt
-def diagnostic_mpc_solve():
-    mass, Iz, lf, lr = 3.47, 0.047, 0.149, 0.181
-    params_p = [12.0, 12.0, 1.7, 1.7, 32.0, 32.0] 
-    params_p = [8.0, 8.0, 1.45, 1.45, 32.0, 32.0] 
-
-    N, dt = 20, 0.04
-    
-    # Decisions: X (States), U (Controls) -- SLACKS REMOVED
-    X = ca.MX.sym('X', 8, N+1)
-    U = ca.MX.sym('U', 2, N)
-
-    # Model
-    x = ca.MX.sym('x', 8)
-    u = ca.MX.sym('u', 2)
-    vx, vy, omega, a, delta = x[3], x[4], x[5], x[6], x[7]
-    
-    # Tiny epsilon to absolutely prevent division by zero in IPOPT line searches
-    vx_safe = ca.sqrt(vx**2 + 1e-4)
-    
-    # --- CRITICAL FIX: The Slip Angles ---
-    # Rear slip angle MUST oppose the lateral velocity to be stable
-    af = delta - ca.atan2(vy + omega*lf, vx_safe)
-    ar = -ca.atan2(vy - omega*lr, vx_safe) 
-    
-    Ffy = params_p[4] * ca.sin(params_p[2] * ca.atan(params_p[0] * af))
-    Fry = params_p[5] * ca.sin(params_p[3] * ca.atan(params_p[1] * ar))
-
-    f = ca.vertcat(
-        vx*ca.cos(x[2]) - vy*ca.sin(x[2]),
-        vx*ca.sin(x[2]) + vy*ca.cos(x[2]),
-        omega,
-        a - (Ffy*ca.sin(delta))/mass + vy*omega,
-        (Fry + Ffy*ca.cos(delta))/mass - vx*omega,
-        (lf*Ffy*ca.cos(delta) - lr*Fry)/Iz,
-        u[0], u[1]
-    )
-    f_func = ca.Function('f', [x, u], [f])
-
-    obj = 0
-    g = []
-    
-    x0_init = [0, 0, 0.05, 1.0, 0, 0, 0, 0] 
-    g.append(X[:, 0] - x0_init) 
-    
-    for k in range(N):
-        # Cost Function
-        obj += 5000*(X[1, k] - 0.15)**2    # Target Y
-        # obj += 100*(X[3, k] - 3.0)**2    # Target Speed
-        
-        # Stability Costs
-        # obj += 200 * (X[2, k])**2        # Penalize Heading Angle
-        # obj += 100 * (X[4, k])**2        # Penalize lateral sliding (vy)
-        # obj += 100 * (X[5, k])**2        # Penalize yaw rate (omega)
-        # obj += 50 * (X[7, k])**2         # Penalize Steering Angle
-        
-        obj += 0.1 * U[0, k]**2          # Jerk effort
-        obj += 5.0 * U[1, k]**2          # Steering rate effort 
-        
-        # Dynamics (Hard Constraints)
-        M = 10 
-        dt_sub = dt / M
-        
-        X_k = X[:,k]
-        for _ in range(M):
-            k1 = f_func(X_k, U[:,k])
-            k2 = f_func(X_k + dt_sub/2*k1, U[:,k])
-            k3 = f_func(X_k + dt_sub/2*k2, U[:,k])
-            k4 = f_func(X_k + dt_sub*k3, U[:,k])
-            X_k = X_k + dt_sub/6*(k1 + 2*k2 + 2*k3 + k4)
-            
-        g.append(X[:, k+1] - X_k)
-
-    # SOLVER OPTIONS
-    opts = {
-        'ipopt.max_iter': 500,
-        'ipopt.hessian_approximation': 'limited-memory', 
-        'ipopt.tol': 1e-3, 
-        'ipopt.print_level': 5,
-    }
-
-    all_vars = ca.vertcat(ca.reshape(X,-1,1), ca.reshape(U,-1,1))
-    nlp = {'x': all_vars, 'f': obj, 'g': ca.vertcat(*g)}
-    solver = ca.nlpsol('S', 'ipopt', nlp, opts)
-    
-    # BOUNDS
-    lbx = []
-    ubx = []
-    
-    # State bounds: [x, y, theta, vx, vy, omega, a, delta]
-    for _ in range(N+1):
-        lbx.extend([-ca.inf, -ca.inf, -ca.inf,  0.1, -ca.inf, -ca.inf, -8.0, -0.6])
-        ubx.extend([ ca.inf,  ca.inf,  ca.inf, 20.0,  ca.inf,  ca.inf,  8.0,  0.6])
-        
-    # Control bounds: [jerk, steer_rate]
-    for _ in range(N):
-        lbx.extend([-10.0, -2.0])
-        ubx.extend([ 10.0,  2.0])
-        
-    # Initial Guess
-    x_guess_list = []
-    for k in range(N+1):
-        step_guess = list(x0_init)
-        step_guess[0] += step_guess[3] * k * dt  # Move X forward based on vx
-        x_guess_list.extend(step_guess)
-        
-    u_guess_list = [0.0] * (2 * N)
-    vars_init = x_guess_list + u_guess_list
-    
-    # Solve 
-    sol = solver(x0=vars_init, lbg=0, ubg=0, lbx=lbx, ubx=ubx)
-
-    # Result Extraction
-    res = sol['x'].full().flatten()
-    states = res[:8*(N+1)].reshape(N+1, 8)
-    
-    plt.figure(figsize=(8, 5))
-    plt.subplot(211)
-    plt.plot(states[:,0], states[:,1], '-o', label='Trajectory')
-    plt.axhline(0.15, color='r', linestyle='--', label='Target Line')
-    plt.ylabel('Y pos (m)'); plt.legend()
-    
-    plt.subplot(212)
-    plt.plot(states[:,3], label='vx')
-    plt.axhline(0.05, color='k', alpha=0.3, label='if_else threshold')
-    plt.ylabel('Vel (m/s)'); plt.legend()
-    plt.tight_layout()
-    plt.show()
-
-if __name__ == '__main__':
-    diagnostic_mpc_solve()
