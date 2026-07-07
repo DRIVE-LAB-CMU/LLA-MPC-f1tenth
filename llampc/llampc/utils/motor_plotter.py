@@ -66,6 +66,9 @@ REFIT_EVERY = 10             # recompute the least-squares fit every N new messa
 WINDOW_SEC = 10.0
 RIDGE_LAMBDA = 50.0          # ridge strength on c2 (anchored toward -LAMBDA_PRIOR/RS); see _refit()
 
+RESID_PCT_THRESHOLD = 10.0       # print samples where |resid|/|avg_iq| exceeds this, in percent
+RESID_PCT_MIN_ABS_IQ = 0.3       # A -- ignore near-zero-current samples, where % error is meaningless
+
 
 class TorqueLinearityNode(Node):
     def __init__(self, topic):
@@ -111,7 +114,9 @@ class TorqueLinearityNode(Node):
         with self.lock:
             if self._t0 is None:
                 self._t0 = t_abs
-            self.t.append(t_abs - self._t0)
+            t_rel = t_abs - self._t0
+
+            self.t.append(t_rel)
             self.duty_vbus.append(duty_vbus)
             self.omega_e.append(omega_e)
             self.avg_iq.append(avg_iq)
@@ -121,6 +126,20 @@ class TorqueLinearityNode(Node):
             if len(self.avg_iq) >= MIN_FIT_SAMPLES and self._since_refit >= REFIT_EVERY:
                 self._since_refit = 0
                 self._refit()
+
+            c0, c1, c2, n_fit = self.c0, self.c1, self.c2, self.n_fit
+
+        # --- print samples where the CURRENT sample's residual exceeds 10% of measured avg_iq ---
+        # (done outside checking n_fit==0 so we never divide/report before a fit exists;
+        # RESID_PCT_MIN_ABS_IQ guards against meaningless % on near-zero current)
+        if n_fit > 0 and abs(avg_iq) > RESID_PCT_MIN_ABS_IQ:
+            iq_pred_now = c0 + c1 * duty_vbus + c2 * omega_e
+            resid_now = iq_pred_now - avg_iq
+            pct = abs(resid_now) / abs(avg_iq) * 100.0
+            if pct > RESID_PCT_THRESHOLD:
+                print(f'[t={t_rel:8.3f}s] duty={duty:6.3f} vbus={vbus:5.2f} speed={speed_erpm:8.1f}erpm '
+                      f'| measured avg_iq={avg_iq:7.3f}A  predicted={iq_pred_now:7.3f}A  '
+                      f'resid={resid_now:+7.3f}A ({pct:6.1f}%)  [n_fit={n_fit}]')
 
     def _refit(self):
         """Ridge-regularized least squares: iq = c0 + c1*(duty*Vbus) + c2*omega_e,
