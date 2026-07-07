@@ -17,11 +17,10 @@ def diffequation(bank_params, known_params, x, u):
     pwm = u[0]
     steer = u[1]
     psi = x[2]
-    vx = x[3]
     vy = x[4]
     omega = x[5]
 
-    mass, Iz, lf, lr = known_params
+    mass, Iz, lf, lr, vx = known_params
     Bf, Br, Cf, Cr, Df, Dr = bank_params
 
     vx_clamped = jnp.maximum(vx, 0.01)
@@ -49,11 +48,10 @@ def diffequation_nojit(bank_params, known_params, x, u):
     pwm = u[0]
     steer = u[1]
     psi = x[2]
-    vx = x[3]
     vy = x[4]
     omega = x[5]
 
-    mass, Iz, lf, lr = known_params
+    mass, Iz, lf, lr, vx = known_params
     Bf, Br, Cf, Cr, Df, Dr = bank_params
 
     vx_clamped = jnp.maximum(vx, 0.01)
@@ -81,7 +79,8 @@ class DBMPacejkaLateralBank():
                  Bf, Br,
                  Cf, Cr, 
                  Df, Dr, 
-                 num_models
+                 num_models,
+                 vx = 0
                  ):
         # non-varying parameters
         self.lf = lf
@@ -98,8 +97,9 @@ class DBMPacejkaLateralBank():
         self.Dr = Dr
         self.num_models = num_models
 
+
         self.known_params = jax.device_put(
-            jnp.array([self.mass, self.Iz, self.lf, self.lr]),
+            jnp.array([self.mass, self.Iz, self.lf, self.lr, vx]),
             device=gpu
         )
 
@@ -109,8 +109,10 @@ class DBMPacejkaLateralBank():
             ], axis=1), 
         device=cpu)
 
-    def update_known_params(self):
-        pass
+    def update_known_params(self, vx=None):
+        if vx:
+            self.known_params = self.known_params.at[4].set(vx)
+        
 
     def get_known_params(self):
         return self.known_params

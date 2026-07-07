@@ -14,8 +14,8 @@ def export_model(params_car, exact = False):
 
     x = ca.MX.sym('x', 10)   # state: x, y, phi, vx, vy, omega, omega_w, dFz, current, delta
     u = ca.MX.sym('u', 2)   # control rate: curent slew rate, steer rate
-    p = ca.MX.sym('p', 4)
-    # parameters: muf, mur, Cf, Cr
+    p = ca.MX.sym('p', 5)
+    # parameters: muf, mur, Cf, Cr, Cro
     x_ref = ca.MX.sym('x_ref', 6)
 
     mass = params_car['mass']
@@ -32,7 +32,7 @@ def export_model(params_car, exact = False):
     c = 20      # dFz relaxation rate [1/s]
 
 
-    muf, mur, Cf, Cr = [p[i] for i in range(4)]
+    Cf, Cr, muf, mur, Cro = [p[i] for i in range(5)]
     
 
     if not exact:
@@ -73,10 +73,11 @@ def export_model(params_car, exact = False):
         Ffy = -Ff_total*ca.tan(alphaf)/sigma_f
         Ffx = Ff_total*kappa       /sigma_f
         
-
         # --- rear: lateral and longitudinal share Fr_total via sigma_r ---
+        v_eps = 0.5
+        F_roll = Cro * Frz * ca.tanh(x[3] / v_eps)
+        Frx = Fr_total*kappa/sigma_r - F_roll
         Fry =  -Fr_total*ca.tan(alphar)/sigma_r
-        Frx =   Fr_total*kappa       /sigma_r
 
         # --- drive torque on rear wheel ---
         tau_drive = gear_ratio * (1.5 * pole_pairs * lam) * current
@@ -107,18 +108,17 @@ def export_model(params_car, exact = False):
         Ffmax = muf*Ffz
         Frmax = mur*Frz          # coupling lives in sigma_r, no friction-circle derate
 
-
         # --- slip angles (no guard) ---
         alphaf = delta - ca.atan2(x[5]*lf + x[4], x[3])
         alphar = ca.atan2(x[5]*lr - x[4], x[3])
 
         # --- rear longitudinal slip ratio from wheel speed (no guard) ---
-        kappa = (rw*omega_w- x[3]) / x[3]
+        kappa = (rw*omega_w - x[3]) / x[3]
 
         # --- combined slips ---
         sigma_f = ca.sqrt(ca.tan(alphaf)**2 + kappa**2 + 1e-9)               # front free-rolling
         sigma_r = ca.sqrt(ca.tan(alphar)**2 + kappa**2 + 1e-9)
-        
+
         sigmaf_max = 3*Ffmax/Cf
         sigmar_max = 3*Frmax/Cr
 
@@ -129,19 +129,20 @@ def export_model(params_car, exact = False):
         Ff_total = ca.if_else(sigma_f < sigmaf_max, brush(Cf, sigma_f, Ffmax), Ffmax)
         Fr_total = ca.if_else(sigma_r < sigmar_max, brush(Cr, sigma_r, Frmax), Frmax)
 
-        # --- front: lateral only ---
         Ffy = -Ff_total*ca.tan(alphaf)/sigma_f
         Ffx = Ff_total*kappa       /sigma_f
-        
+
         # --- rear: lateral and longitudinal share Fr_total via sigma_r ---
+        v_eps = 0.5
+        F_roll = Cro * Frz * ca.tanh(x[3] / v_eps)
+        Frx = Fr_total*kappa/sigma_r - F_roll
         Fry =  -Fr_total*ca.tan(alphar)/sigma_r
-        Frx =   Fr_total*kappa       /sigma_r
 
         # --- drive torque on rear wheel ---
         tau_drive = gear_ratio * (1.5 * pole_pairs * lam) * current
 
         # --- realized longitudinal chassis force drives load transfer ---
-        Fx_chassis =  Frx + Ffx*ca.cos(delta) - Ffy*ca.sin(delta)
+        Fx_chassis = Frx + Ffx*ca.cos(delta) - Ffy*ca.sin(delta)
 
         # --- dynamics ---
         dx0 = x[3]*ca.cos(x[2]) - x[4]*ca.sin(x[2])

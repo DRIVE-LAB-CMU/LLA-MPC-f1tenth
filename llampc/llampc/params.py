@@ -32,8 +32,6 @@ def F110():
     lr = 0.17145			# read tyres from center of gravity [m]
     mass = 3.74 			# vehicle mass [kg]
     Iz = 0.04712 			# moment of inertia [kgm^2]
-    Cf = 2.3 				# front cornering stiffness
-    Cr = 2.3 				# rear cornering stiffness
     Csf = 4.718
     Csr = 5.4562
     hcog = 0.074
@@ -46,6 +44,19 @@ def F110():
     max_steer = 0.34 		# max steering angle [rad]
     min_steer = -0.34 	# min steering angle [rad]
     max_steer_vel = 3.2 	# max steering velocity [rad/s]
+
+    # rw = .047
+    #mw = 0.055
+    # r_Iw = .043
+    mw = 0.1
+    rw = .051
+    r_Iw = .043
+
+    poles = 4
+    gear_ratio = 11.82
+    lam = .000730
+
+    Iw = 0.9 * mw * r_Iw * r_Iw
 
     max_jerk = 10
     min_jerk = -10
@@ -61,8 +72,6 @@ def F110():
         'lr': lr,
         'mass': mass,
         'Iz': Iz,
-        'Cf': Cf,
-        'Cr': Cr,
         'Csf': Csf,
         'Csr': Csr,
         'h': hcog,
@@ -81,6 +90,11 @@ def F110():
         'min_inputs': min_inputs,
         'max_rates': max_rates,
         'min_rates': min_rates,
+        'rw': rw,
+        'Iw': Iw,
+        'pole_pairs': poles/2,
+        'gear_ratio': gear_ratio,
+        'lambda':lam
         }
     return params
 

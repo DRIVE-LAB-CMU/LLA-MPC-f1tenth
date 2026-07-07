@@ -2,6 +2,7 @@
 import numpy as np
 import time
 import sys, os
+from collections import deque
 
 import rclpy
 from rclpy.node import Node
@@ -56,6 +57,62 @@ def rot_to_quat(R):
 
     return np.array([x, y, z, w])
 
+
+class CausalSpikeEMA:
+    """Live (causal) EMA + windowed spike clamp for one scalar channel.
+
+    Unlike the offline plotting-tool version, this only ever looks
+    BACKWARD in time -- each new sample is judged against a trailing
+    history buffer spanning `window_sec`, since a live callback has no
+    access to "future" samples the way a post-hoc analysis does.
+
+    Pipeline per sample: clamp to the trailing window's [pct, 100-pct]
+    percentile band, THEN apply a dt-normalized EMA with time constant tau.
+    tau should stay small (a few sample periods) -- this is meant to kill
+    single-sample noise/outliers, not to do the EKF's smoothing job for it
+    and add meaningful lag on top of what you're already fighting.
+    """
+
+    def __init__(self, tau, spike_pct, window_sec):
+        self.tau = tau
+        self.spike_pct = max(0.0, min(49.0, spike_pct))
+        self.window_sec = window_sec
+        self._hist_t = deque()
+        self._hist_v = deque()
+        self._ema = None
+        self._last_t = None
+
+    def update(self, t, v):
+        # --- 1. maintain trailing window ---
+        self._hist_t.append(t)
+        self._hist_v.append(v)
+        while self._hist_t and (t - self._hist_t[0]) > self.window_sec:
+            self._hist_t.popleft()
+            self._hist_v.popleft()
+
+        # --- 2. windowed spike clamp (causal: only past+current samples) ---
+        if self.spike_pct > 0 and len(self._hist_v) >= 3:
+            arr = np.asarray(self._hist_v, dtype=float)
+            lo = np.percentile(arr, self.spike_pct)
+            hi = np.percentile(arr, 100.0 - self.spike_pct)
+            v_clamped = min(max(v, lo), hi)
+        else:
+            v_clamped = v
+
+        # --- 3. dt-normalized EMA ---
+        if self._ema is None or self._last_t is None:
+            self._ema = v_clamped
+        else:
+            dt = t - self._last_t
+            if dt > 0 and self.tau > 0:
+                a = dt / (self.tau + dt)
+                self._ema = self._ema + a * (v_clamped - self._ema)
+            elif dt > 0:
+                self._ema = v_clamped  # tau<=0 -> spike clamp only, no smoothing
+        self._last_t = t
+        return self._ema
+
+
 class OptitrackSubscriber(Node):
     def __init__(self, history_size=5):
         if not rclpy.ok():
@@ -64,6 +121,25 @@ class OptitrackSubscriber(Node):
 
         self.declare_parameter('mocap_topic', '/f1tenth/pose')
         mocap_topic = self.get_parameter('mocap_topic').get_parameter_value().string_value
+
+        # --- filter tuning: EMA + windowed spike clamp on vx, vy, omega ---
+        # tau kept deliberately small (15 ms) -- just enough to knock the
+        # noise floor down without adding lag on top of an EKF that's
+        # already lagging. spike_pct=15% / window=0.5s clamps outliers
+        # relative to a LOCAL trailing neighborhood, not a single global
+        # threshold, since vx/vy here are pure finite differences with no
+        # independent velocity sensor to check them against.
+        self.declare_parameter('vel_ema_tau', 0.015)
+        self.declare_parameter('vel_spike_pct', 15.0)
+        self.declare_parameter('vel_spike_window', 0.5)
+
+        tau = self.get_parameter('vel_ema_tau').value
+        spike_pct = self.get_parameter('vel_spike_pct').value
+        spike_window = self.get_parameter('vel_spike_window').value
+
+        self._filt_vx = CausalSpikeEMA(tau, spike_pct, spike_window)
+        self._filt_vy = CausalSpikeEMA(tau, spike_pct, spike_window)
+        self._filt_omega = CausalSpikeEMA(tau, spike_pct, spike_window)
 
         qos = QoSProfile(depth=10, reliability=QoSReliabilityPolicy.BEST_EFFORT)
 
@@ -112,8 +188,7 @@ class OptitrackSubscriber(Node):
     def ekf_callback(self, msg):
         self.ekf_linear_velocity = [msg.twist.twist.linear.x, msg.twist.twist.linear.y]
         
-        
-        self.ekf_abs_linear_velocity = np.sqrt(self.ekf_linear_velocity[0]**2 + self.ekf_linear_velocity[0]**2)
+        self.ekf_abs_linear_velocity = np.sqrt(self.ekf_linear_velocity[0]**2 + self.ekf_linear_velocity[1]**2)
         self.ekf_ang_velocity = msg.twist.twist.angular.z
         
 
@@ -184,25 +259,34 @@ class OptitrackSubscriber(Node):
         odom_msg.pose.covariance = pcov.tolist()
 
         # ==========================================================
-        # ---- Twist (body frame) -- DISABLED FOR NOW ----
-        # Finite-difference velocity from mocap. Rotate world->body
-        # before publishing because robot_localization treats twist
-        # as base_link-frame. Uncomment to enable, and turn on the
-        # corresponding Vx/Vy/Vyaw slots in odom0_config.
+        # ---- Twist (body frame) ----
+        # Finite-difference velocity from mocap, rotated world->body
+        # (robot_localization treats twist as base_link-frame), then run
+        # through a causal EMA + windowed spike clamp per channel before
+        # publishing. Covariance is kept MODERATE-TO-HIGH, not low: the
+        # signal is filtered but still finite-difference-derived with no
+        # independent velocity sensor backing it up, so the EKF shouldn't
+        # be told to trust it blindly -- only that it's a real, usable
+        # (if somewhat noisy) correction.
         # ==========================================================
-        # R_body = quat_to_rot(quaternion)            # body->world
-        # v_body = R_body.T @ self.optitrack_linear_velocity_world
-        # w_body = R_body.T @ self.optitrack_angular_velocity_world
-        
-        # odom_msg.twist.twist.linear.x  = v_body[0]
-        # odom_msg.twist.twist.linear.y  = v_body[1]
-        # odom_msg.twist.twist.angular.z = w_body[2]
-        
-        # tcov = np.zeros(36)
-        # tcov[0]  = 1e-2  # Vx variance  (finite-diff is noisy)
-        # tcov[7]  = 1e-2  # Vy variance
-        # tcov[35] = 1e-2  # Vyaw variance
-        # odom_msg.twist.covariance = tcov.tolist()
+        if len(self.position_history) >= 2:
+            R_body = quat_to_rot(quaternion)            # body->world
+            v_body_raw = R_body.T @ self.optitrack_linear_velocity_world
+            w_body_raw = R_body.T @ self.optitrack_angular_velocity_world
+
+            vx_f = self._filt_vx.update(timestamp, v_body_raw[0])
+            vy_f = self._filt_vy.update(timestamp, v_body_raw[1])
+            wz_f = self._filt_omega.update(timestamp, w_body_raw[2])
+
+            odom_msg.twist.twist.linear.x  = vx_f
+            odom_msg.twist.twist.linear.y  = vy_f
+            odom_msg.twist.twist.angular.z = wz_f
+
+            tcov = np.zeros(36)
+            tcov[0]  = .09  # Vx variance -- moderate/high: filtered, but
+            tcov[7]  = .09  # Vy variance    still just finite-diff, no
+            tcov[35] = .09  # Vyaw variance  independent velocity sensor.
+            odom_msg.twist.covariance = tcov.tolist()
         # ==========================================================
         
         # if len(self.position_history) >= 2:

@@ -26,7 +26,7 @@ from llampc.utils import Track
 
 import llampc.rollout.history as history
 import llampc.rollout.dynamic_sim as dynamics_sim
-import llampc.llampc.rollout.dynamic_lateral as dynamics
+import llampc.llampc.rollout.dynamic_lateral as dynamics_lateral
 import llampc.rollout.dynamic_rp as dynamics_rp
 import llampc.rollout.dynamic_full as dynamics_full
 from llampc.rollout.rk6 import rk4Factory
@@ -70,7 +70,7 @@ class MPCNode(Node):
         self.maxtime = np.zeros(self.checkpoints)
         self.checkpoint = np.empty(self.checkpoints)
 
-        self.last_v = 0.0
+        self.last_v = None
 
         # dictionary, prefereably npy, which has waypoints_x, waypoints_y, and velocity
         track_name = self.get_parameter('track_file_name').get_parameter_value().string_value
@@ -131,8 +131,6 @@ class MPCNode(Node):
         self.lla_reset_interval = 0
         self.lla_reset_counter = 0
 
-        self.r_car = 0.04
-
         self.min_pwm = 0.1
         self.max_pwm = 0.25
 
@@ -180,9 +178,6 @@ class MPCNode(Node):
             'Cr': 1.4,
             'Df': 17.0,
             'Dr': 17.0,
-            'Cro': 0.0,
-            'Ce': 10,
-            'Cm': 0.0, 
         }
 
         variation_dict = {
@@ -192,9 +187,6 @@ class MPCNode(Node):
             'Cr': 0.3,   # 15% variation
             'Df': 10,   # 15% variation
             'Dr': 10,   # 15% variation
-            'Cro': 0, # 15% variation
-            'Ce': 0,  # motor efficiency conversion should never be above 1
-            'Cm': 0.0,  # motor speed saturation
         }
     
         cost_weights = np.array([0.0, 0.0, 20.0, 5.0, 10.0, 0.01])# x, y, theta, vx, vy, omega
@@ -218,15 +210,12 @@ class MPCNode(Node):
         self.get_logger().info("Dynamics bank starting")
         
         self.state_size = 6
-        self.dynamics_bank = dynamics.DBMPacejkaBank(
+        self.dynamics_bank = dynamics_lateral.DBMPacejkaLateralBank(
             params_car['lf'], params_car['lr'], 
             params_car['mass'], params_car['Iz'], 
             param_dict['Bf'], param_dict['Br'],
             param_dict['Cf'], param_dict['Cr'],
             param_dict['Df'], param_dict['Dr'],
-            param_dict['Cro'], param_dict['Cd'],
-            param_dict['Cm'],
-            0, 0,
             num_models
         )
         
@@ -237,7 +226,7 @@ class MPCNode(Node):
             num_models, history_length,
             self.lla_predict_horizon, cost_weights,
             self.state_size, rk4Factory,
-            self.dynamics_bank, dynamics.diffequation,
+            self.dynamics_bank, dynamics_lateral.diffequation,
             buffer_size = [0, 0]
         )
         
@@ -287,7 +276,9 @@ class MPCNode(Node):
     def pid_long_control(self, ref_v, vx, last_v):
         diff = self.max_pwm-self.min_pwm
 
-        pd = self.kp * (ref_v - vx) - self.kd * (vx-last_v)
+        pd = self.kp * (ref_v - vx)
+        if not last_v is None:
+            pd -= self.kd * (vx-last_v)
 
         return max(min(pd, diff), 0) + self.min_pwm
 
@@ -379,6 +370,7 @@ class MPCNode(Node):
         ##############################################
         ### BANK UPDATE
         one_step_cost = None
+        # ok_time = self.time_history[-1, self.count] * 1e-6 < 2 * self.dt * 1000
         ok_time = True
 
         one_step_cost = self.lb_history.update_lookback_error(
@@ -404,18 +396,13 @@ class MPCNode(Node):
         ########################################################
         #### SETUP AND SOLVE MPC
 
-        self.checkpoint[3]= time.perf_counter_ns()
-
-        filtered_state = self.current_state.copy()
-        if( np.abs(self.current_state[3]) < 0.1):
-            filtered_state[3] = 0.1
-        aug_state = np.concatenate([filtered_state, [self.last_control[1]]])
-
         self.checkpoint[2] = time.perf_counter_ns()
+
+        self.checkpoint[3]= time.perf_counter_ns()
 
 
         ref_point, idx = get_lookahead_point(self.current_state, self.track, self.projidx, lookahead_dist = 1.2)
-        if filtered_state[3] < 0.1:
+        if self.current_state[3] < 0.1:
             self.projidx = idx
 
             record_ref_trajectory = [ref_point]
@@ -423,6 +410,12 @@ class MPCNode(Node):
             u_opt = self.pure_pursuit_control(self.current_state, ref_point)
             status = 0
         else:
+            # filtered_state = self.current_state.copy()
+            # if( np.abs(self.current_state[3]) < 0.1):
+            #     filtered_state[3] = 0.1
+            aug_state = np.concatenate([self.current_state, [self.last_control[1]]])
+            self.dynamics_bank.update_known_params(self.current_state[3])
+
             # no need to copy states and trajectory in case of update b/c node is single thread
             ref_segment, idx = get_reference_trajectory_segment(x0, v0, self.track, self.N+1, self.dt, self.projidx)
             self.projidx = idx
@@ -437,7 +430,7 @@ class MPCNode(Node):
             self.solver.set(0, "lbx", aug_state)
             self.solver.set(0, "ubx", aug_state)
             def construct_params(N, selected_model_params, ref_segment):
-                full_params = np.zeros((N+1, 13), np.float64)
+                full_params = np.zeros((N+1, 12), np.float64)
                 full_params[:, :6] = selected_model_params
                 # self.get_logger().info(f"{full_params}")
                 full_params[:, 6:6+6] = ref_segment[:6, :N+1].T #reference x, y, theta
@@ -460,10 +453,7 @@ class MPCNode(Node):
                 ref_segment[1][3], self.current_state[3], self.last_v
             )
 
-            u_opt[0] = np.array([delta, pwm])
-
-
-
+            u_opt = np.array([pwm, delta])
 
         self.checkpoint[4] = time.perf_counter_ns()
 

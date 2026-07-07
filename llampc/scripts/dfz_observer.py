@@ -3,14 +3,18 @@
 dFz observer — fuses an MPC-predicted dFz (model-based, live sysID params)
 with a pitch-derived measurement (pure suspension kinematics).
 
-The MPC publishes its predicted dFz (integrated with the current adaptive
-parameters). This node treats that as the prediction and corrects it with
-pitch. No tire parameters live here — they live in the MPC.
+The MPC publishes its predicted dFz plus an active flag (integrated with the
+current adaptive parameters). This node treats that as the prediction when
+active, and falls back to its own relaxation-toward-zero prediction when the
+MPC is inactive (e.g. running pure pursuit at low speed) so filtering never
+stalls. It always corrects with pitch. No tire parameters live here — they
+live in the MPC.
 
 Modes:
-  "fused"     : pitch from mocap + IMU gyro, corrects MPC prediction
-  "imu"       : pitch from IMU gyro only, corrects MPC prediction
-  "open_loop" : pass MPC prediction through unchanged (trust the model)
+  "fused"     : pitch from mocap + IMU gyro, corrects the prediction
+  "imu"       : pitch from IMU gyro only, corrects the prediction
+  "open_loop" : pass MPC prediction through unchanged (trust the model);
+                falls back to raw relaxation-to-zero when MPC is inactive
 """
 
 import numpy as np
@@ -18,7 +22,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Imu
 from nav_msgs.msg import Odometry
-from std_msgs.msg import Float64
+from std_msgs.msg import Float64, Float64MultiArray
 
 
 class DFzObserver(Node):
@@ -36,10 +40,12 @@ class DFzObserver(Node):
         self.declare_parameter("tau_comp", 0.5)
         self.declare_parameter("gyro_bias_tau", 20.0)
         self.declare_parameter("mpc_var", 25.0)          # trust in MPC prediction [N^2]
+        # fallback prediction (used only while MPC is inactive)
+        self.declare_parameter("fallback_relax_rate", 20.0)   # 1/s, matches model's c
         # topics
         self.declare_parameter("imu_topic", "/sensors/imu/data")
         self.declare_parameter("mocap_topic", "/optitrack/odom")
-        self.declare_parameter("mpc_dfz_topic", "/mpc/dfz_pred")     # <-- MPC's predicted dFz
+        self.declare_parameter("mpc_dfz_topic", "/mpc/dfz_pred")     # Float64MultiArray: [dfz, active]
         self.declare_parameter("mpc_dfz_var_topic", "/mpc/dfz_var")  # optional: MPC covariance
 
         gp = lambda n: self.get_parameter(n).value
@@ -52,6 +58,7 @@ class DFzObserver(Node):
         self.tau_comp = gp("tau_comp")
         self.gyro_bias_tau = gp("gyro_bias_tau")
         self.mpc_var = gp("mpc_var")
+        self.c_fallback = gp("fallback_relax_rate")
 
         if self.mode not in ("fused", "imu", "open_loop"):
             self.get_logger().warn(f"bad mode {self.mode}, using open_loop")
@@ -63,8 +70,9 @@ class DFzObserver(Node):
 
         # MPC prediction cache
         self.dFz_mpc = 0.0
-        self.dFz_mpc_prev = 0.0
-        self.have_mpc = False
+        self.have_mpc = False       # have we ever received a message at all
+        self.mpc_active = False     # is the MPC's dynamic model currently running
+        self.last_mpc_time = None
 
         # pitch state
         self.pitch_comp = 0.0
@@ -76,7 +84,7 @@ class DFzObserver(Node):
 
         # subs
         self.create_subscription(Imu, gp("imu_topic"), self.imu_cb, 50)
-        self.create_subscription(Float64, gp("mpc_dfz_topic"), self.mpc_cb, 20)
+        self.create_subscription(Float64MultiArray, gp("mpc_dfz_topic"), self.mpc_cb, 20)
         self.create_subscription(Float64, gp("mpc_dfz_var_topic"), self.mpc_var_cb, 20)
         if self.mode == "fused":
             self.create_subscription(Odometry, gp("mocap_topic"), self.mocap_cb, 50)
@@ -93,19 +101,33 @@ class DFzObserver(Node):
         self.ax_imu = m.linear_acceleration.x
 
     def mpc_cb(self, m):
-        # PREDICT happens here — once per MPC message, no double-counting
-        if self.have_mpc:
-            delta = m.data - self.dFz_mpc
-            self.dFz += delta
-            self.P += self.Q * self.dt_mpc      # process noise over MPC interval
-        else:
-            self.dFz = m.data                   # initialize on first message
-        self.dFz_mpc = m.data
-        self.have_mpc = True
-        if self.mode == "open_loop":
-            self.dFz = m.data                   # open loop: just track MPC absolute
-            self.pub_dFz.publish(Float64(data=float(self.dFz)))
+        # msg.data = [dfz_pred, active_flag]
+        dfz_val, active = m.data[0], m.data[1]
+        now = self.get_clock().now()
 
+        if active < 0.5:
+            self.mpc_active = False
+            return
+
+        # PREDICT happens here — once per active MPC message, no double-counting
+        if self.have_mpc and self.mpc_active and self.last_mpc_time is not None:
+            dt_mpc = (now - self.last_mpc_time).nanoseconds * 1e-9
+            delta = dfz_val - self.dFz_mpc
+            self.dFz += delta
+            self.P += self.Q * dt_mpc
+        else:
+            # first message ever, or resuming after an inactive stretch --
+            # re-initialize directly rather than diffing against a stale value
+            self.dFz = dfz_val
+
+        self.dFz_mpc = dfz_val
+        self.have_mpc = True
+        self.mpc_active = True
+        self.last_mpc_time = now
+
+        if self.mode == "open_loop":
+            self.dFz = dfz_val
+            self.pub_dFz.publish(Float64(data=float(self.dFz)))
 
     def mpc_var_cb(self, m):
         self.mpc_var = max(m.data, 1e-3)
@@ -135,12 +157,27 @@ class DFzObserver(Node):
             self.pitch_comp = a*(self.pitch_comp + rate*self.dt)
         return self.pitch_comp, rate
 
-    
+    def fallback_predict(self):
+        """No active dynamic-model prediction available (MPC inactive).
+        Treat dFz as a random walk: hold the estimate, inflate uncertainty,
+        and let the pitch correction (in step()) pull toward the true value."""
+        self.P += self.Q * self.dt
+
     def step(self):
-        # CORRECT only — pitch measurement at timer rate
-        if not self.have_mpc or self.mode == "open_loop":
-            return
-        
+        if not self.have_mpc:
+            return   # never got a first message yet -- nothing to correct
+
+        if not self.mpc_active:
+            # keep predicting even though the MPC itself isn't running
+            self.fallback_predict()
+            if self.mode == "open_loop":
+                # open loop trusts the model only; with no active model,
+                # publish the relaxed fallback value directly
+                self.pub_dFz.publish(Float64(data=float(self.dFz)))
+                return
+        elif self.mode == "open_loop":
+            return  # already published straight through in mpc_cb
+
         pitch, rate = self.update_pitch()
         z = self.k_theta * pitch + self.b_theta * rate
         S = self.P + self.R * self.k_theta**2
