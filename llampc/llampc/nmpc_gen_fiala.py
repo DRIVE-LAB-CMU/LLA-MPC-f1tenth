@@ -12,7 +12,7 @@ def export_model(params_car, exact = False):
     model = AcadosModel()
     model.name = "f1tenthfiala"
 
-    x = ca.MX.sym('x', 10)   # state: x, y, phi, vx, vy, omega, omega_w, dFz, current, delta
+    x = ca.MX.sym('x', 11)   # state: x, y, phi, vx, vy, omega, omega_w, dFz, vbus, pwm, delta
     u = ca.MX.sym('u', 2)   # control rate: curent slew rate, steer rate
     p = ca.MX.sym('p', 5)
     # parameters: muf, mur, Cf, Cr, Cro
@@ -24,6 +24,7 @@ def export_model(params_car, exact = False):
     lr   = params_car['lr']
     rw   = params_car['rw']     # rear wheel radius [m]
     Iw   = params_car['Iw']     # rear driveline rotational inertia [kg m^2]
+    Rs  = params_car['Rs']
     pole_pairs  = params_car['pole_pairs']
     gear_ratio  = params_car['gear_ratio']
     lam = params_car['lambda']
@@ -80,7 +81,7 @@ def export_model(params_car, exact = False):
         Fry =  -Fr_total*ca.tan(alphar)/sigma_r
 
         # --- drive torque on rear wheel ---
-        tau_drive = gear_ratio * (1.5 * pole_pairs * lam) * current
+        tau_drive = (1.5 * pole_pairs * lam / Rs) * (duty * V_bus - omega_w * gear_ratio * pole_pairs * lam)
 
         # --- realized longitudinal chassis force drives load transfer ---
         Fx_chassis = Frx + Ffx*ca.cos(delta) - Ffy*ca.sin(delta)
@@ -94,8 +95,9 @@ def export_model(params_car, exact = False):
         dx5 = (lf *(Ffy*ca.cos(delta) + Ffx*ca.sin(delta)) - lr*Fry)/Iz
         dx6 = (tau_drive - Frx*rw - Ffx *rw)/Iw
         dx7 = -c*(dFz - (hcg/L)*Fx_chassis)      # dFz relaxation, driven by REALIZED force
-        dx8 = u[0]
-        dx9 = u[1]
+        dx8 = 0
+        dx9 = u[0]
+        dx10 = u[1]
 
 
     else:
@@ -153,11 +155,12 @@ def export_model(params_car, exact = False):
         dx5 = (lf *(Ffy*ca.cos(delta) + Ffx*ca.sin(delta)) - lr*Fry)/Iz
         dx6 = (tau_drive - Frx*rw - Ffx *rw)/Iw
         dx7 = -c*(dFz - (hcg/L)*Fx_chassis)      # dFz relaxation, driven by REALIZED force
-        dx8 = u[0]
-        dx9 = u[1]
+        dx8 = 0
+        dx9 = u[0]
+        dx10 = u[1]
 
 
-    f_expl = ca.vertcat(dx0, dx1, dx2, dx3, dx4, dx5, dx6, dx7, dx8, dx9)
+    f_expl = ca.vertcat(dx0, dx1, dx2, dx3, dx4, dx5, dx6, dx7, dx8, dx9, dx10)
     model.f_expl_expr = f_expl
     model.x = x
     model.u = u
@@ -234,8 +237,8 @@ def create_ocp(model, params_car, steps, horizon):
         x[3] - x_ref[3],   # vx
         x[4] - x_ref[4],   # vy
         x[5] - x_ref[5],   # omega
-        x[8],   # pwm
-        x[9],   # steer
+        x[9],   # pwm
+        x[10],   # steer
         u
     )
     ocp.model.cost_y_expr_e = ca.vertcat(
@@ -245,15 +248,15 @@ def create_ocp(model, params_car, steps, horizon):
         x[3] - x_ref[3],   # vx
         x[4] - x_ref[4],   # vy
         x[5] - x_ref[5],   # omega
-        x[8],   # pwm
-        x[9],   # steer
+        x[9],   # pwm
+        x[10],   # steer
     )
     
     ocp.model.p = model.p  # Combine with existing parameters
     ocp.dims.np = model.p.size()[0]
     ocp.parameter_values = np.zeros((ocp.dims.np, 1))
 
-    ocp.constraints.idxbx = np.array([3, 4,5, 8, 9])
+    ocp.constraints.idxbx = np.array([3, 4,5, 9, 10])
     ocp.constraints.lbx = np.array([-0.5, 
                                 -4,
                                 -2 * np.pi,

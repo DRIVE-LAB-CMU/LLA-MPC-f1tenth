@@ -150,14 +150,11 @@ class MPCNode(Node):
         self.lla_reset_interval = 0
         self.lla_reset_counter = 0
 
-        self.min_cur = 10.0
-        self.max_cur = 60.0
+        self.min_pwm = 0.1
+        self.max_pwm = 0.25
 
         self.max_v = 3.0
         self.min_v = 0.2
-
-        self.min_cur = 0.1
-        self.max_cur = 0.2
 
         self.kd = 0.1
         self.kp = 0.01
@@ -329,16 +326,18 @@ class MPCNode(Node):
         motor_rpm = erpm / pole_pairs
         motor_omega = motor_rpm * (2 * np.pi / 60.0)
         self.omega_w = motor_omega / gear_ratio
+
+        self.V_bus = msg.voltage_input
         
     def dfz_callback(self, msg):
         self.dFz = msg.data
 
     def pid_long_control(self, ref_v, vx, last_v):
-        diff = self.max_cur-self.min_cur
+        diff = self.max_pwm-self.min_pwm
         pd = self.kp * (ref_v - vx)
         if not last_v is None:
             pd -= self.kd * (vx-last_v)
-        return max(min(pd, diff), 0) + self.min_cur
+        return max(min(pd, diff), 0) + self.min_pwm
     
 
     def pure_pursuit_control(self, state, ref_point):
@@ -369,8 +368,8 @@ class MPCNode(Node):
         scale = self.max_v - self.min_v   # note: velocity range, not cur range
         ref_v = self.min_v + scale * np.sqrt(1.0 - abs(steer / self.params_car['max_steer']))
 
-        cur = self.pid_long_control(ref_v, state[3], self.last_v)
-        return np.array([cur, steer])
+        pwm = self.pid_long_control(ref_v, state[3], self.last_v)
+        return np.array([pwm, steer])
 
     
     def prepare_solve(self):
@@ -458,7 +457,7 @@ class MPCNode(Node):
             # filtered_state = self.current_state.copy()
             # if( np.abs(self.current_state[3]) < 0.1):
             #     filtered_state[3] = 0.1
-            aug_state = np.concatenate([self.current_state, [self.omega_w, self.dFz], self.last_control])
+            aug_state = np.concatenate([self.current_state, [self.omega_w, self.dFz, self.V_bus], self.last_control])
 
             self.dynamics_bank.update_known_params(self.omega_w, self.dFz)
             # no need to copy states and trajectory in case of update b/c node is single thread
@@ -497,7 +496,7 @@ class MPCNode(Node):
                 
         
             status = self.solver.solve()
-            u_opt = self.solver.get(1, "x")[-2:] # cur, delta
+            u_opt = self.solver.get(1, "x")[-2:] # pwm, delta
             self.mpc_dfz_pub.publish(Float64MultiArray(
                 data=[float(self.solver.get(1, "x")[7]), 1.0]
             ))

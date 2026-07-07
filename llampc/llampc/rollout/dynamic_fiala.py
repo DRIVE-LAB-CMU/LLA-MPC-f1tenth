@@ -13,7 +13,7 @@ gpu = jax.devices("cpu")[0]
 def diffequation(bank_params, known_params, x, u):
     """Pure dynamic Pacejka model - no blending needed (no autodiff)"""
     g = 9.81
-    current = u[0]
+    pwm = u[0]
     steer = u[1]
 
     psi = x[2]
@@ -21,7 +21,7 @@ def diffequation(bank_params, known_params, x, u):
     vy = x[4]
     omega = x[5]
 
-    mass, Iz, lf, lr, rw, omega_w, dFz = known_params
+    mass, Iz, lf, lr, rw, omega_w, dFz= known_params
     Cf, Cr, muf, mur, Cro = bank_params
     L = lf + lr
 
@@ -73,15 +73,13 @@ def diffequation(bank_params, known_params, x, u):
 def diffequation_nojit(bank_params, known_params, x, u):
     """Pure dynamic Pacejka model - no blending needed (no autodiff)"""
     g = 9.81
-    current = u[0]
+    pwm = u[0]
     steer = u[1]
 
     psi = x[2]
     vx = x[3]
     vy = x[4]
     omega = x[5]
-    omega_w = x[6]
-    dFz = x[7] 
 
     mass, Iz, lf, lr, rw, omega_w, dFz = known_params
     Cf, Cr, muf, mur, Cro = bank_params
