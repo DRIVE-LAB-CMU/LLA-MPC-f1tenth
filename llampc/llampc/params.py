@@ -44,6 +44,7 @@ def F110():
     max_steer = 0.34 		# max steering angle [rad]
     min_steer = -0.34 	# min steering angle [rad]
     max_steer_vel = 3.2 	# max steering velocity [rad/s]
+    tau_k = .57
     
 
     # rw = .047
@@ -97,7 +98,8 @@ def F110():
         'pole_pairs': poles/2,
         'gear_ratio': gear_ratio,
         'lambda':lam,
-        'Rs': Rs
+        'Rs': Rs,
+        'tau_k': tau_k
         }
     return params
 

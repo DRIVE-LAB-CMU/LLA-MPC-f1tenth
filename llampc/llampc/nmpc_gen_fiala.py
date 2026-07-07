@@ -28,20 +28,20 @@ def export_model(params_car, exact = False):
     pole_pairs  = params_car['pole_pairs']
     gear_ratio  = params_car['gear_ratio']
     lam = params_car['lambda']
+    tau_k = params_car['k']
     g    = 9.81
     hcg, L = params_car['h'], lf + lr
     c = 20      # dFz relaxation rate [1/s]
 
 
     Cf, Cr, muf, mur, Cro = [p[i] for i in range(5)]
+    # state: x, y, phi, vx, vy, omega, omega_w, dFz, current, delta   (10 states)
+    omega_w, dFz, v_bus, pwm, delta = x[6], x[7], x[9], x[10]
     
 
     if not exact:
         eps = 0.1
         vx_dyn = ca.sqrt(x[3]**2 + eps)
-
-        # state: x, y, phi, vx, vy, omega, omega_w, dFz, current, delta   (10 states)
-        omega_w, dFz, current, delta = x[6], x[7], x[8], x[9]
 
         # --- load transfer is now a STATE (dFz), not computed here ---
         Ffz = mass*g*lr/L - dFz
@@ -81,7 +81,8 @@ def export_model(params_car, exact = False):
         Fry =  -Fr_total*ca.tan(alphar)/sigma_r
 
         # --- drive torque on rear wheel ---
-        tau_drive = (1.5 * pole_pairs * lam / Rs) * (duty * V_bus - omega_w * gear_ratio * pole_pairs * lam)
+        tau_drive = (1.5 * pole_pairs * lam / Rs) * \
+            (tau_k* pwm * v_bus - omega_w * gear_ratio * pole_pairs * lam)
 
         # --- realized longitudinal chassis force drives load transfer ---
         Fx_chassis = Frx + Ffx*ca.cos(delta) - Ffy*ca.sin(delta)
@@ -101,8 +102,6 @@ def export_model(params_car, exact = False):
 
 
     else:
-        # state: x, y, phi, vx, vy, omega, omega_w, dFz, current, delta   (10 states)
-        omega_w, dFz, current, delta = x[6], x[7], x[8], x[9]
 
         # --- load transfer is now a STATE (dFz), not computed here ---
         Ffz = mass*g*lr/L - dFz
@@ -141,8 +140,9 @@ def export_model(params_car, exact = False):
         Fry =  -Fr_total*ca.tan(alphar)/sigma_r
 
         # --- drive torque on rear wheel ---
-        tau_drive = gear_ratio * (1.5 * pole_pairs * lam) * current
-
+        tau_drive = (1.5 * pole_pairs * lam / Rs) * \
+            (tau_k* pwm * v_bus - omega_w * gear_ratio * pole_pairs * lam)
+        
         # --- realized longitudinal chassis force drives load transfer ---
         Fx_chassis = Frx + Ffx*ca.cos(delta) - Ffy*ca.sin(delta)
 
