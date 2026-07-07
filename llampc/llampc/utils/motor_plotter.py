@@ -57,12 +57,14 @@ from matplotlib.animation import FuncAnimation
 
 # --- F110() constants (llampc.params) -- Rs kept fixed; k/lambda re-derived from the live fit ---
 RS = 0.00954                 # ohms -- used only to translate the fitted A/B back into k, lambda for display
+LAMBDA_PRIOR = 0.000726      # Wb, from F110() -- used as a ridge anchor, see _refit()
 
 MAX_SAMPLES = 5000
 FIT_WINDOW = 2000            # most recent N samples used for each refit
 MIN_FIT_SAMPLES = 30         # don't attempt a fit until this many samples are buffered
 REFIT_EVERY = 10             # recompute the least-squares fit every N new messages
 WINDOW_SEC = 10.0
+RIDGE_LAMBDA = 50.0          # ridge strength on c2 (anchored toward -LAMBDA_PRIOR/RS); see _refit()
 
 
 class TorqueLinearityNode(Node):
@@ -82,8 +84,9 @@ class TorqueLinearityNode(Node):
         # fit state: iq = c0 + c1*(duty*Vbus) + c2*omega_e
         self.c0 = 0.0
         self.c1 = 0.0
-        self.c2 = 0.0
+        self.c2 = -LAMBDA_PRIOR / RS   # start at the physically-expected value, not zero
         self.n_fit = 0
+        self.cond_number = 0.0
 
         qos = QoSProfile(depth=10,
                           reliability=QoSReliabilityPolicy.BEST_EFFORT,
@@ -120,9 +123,22 @@ class TorqueLinearityNode(Node):
                 self._refit()
 
     def _refit(self):
-        """Ordinary least squares: iq = c0 + c1*(duty*Vbus) + c2*omega_e,
-        using the most recent FIT_WINDOW samples. Direct current-space fit --
-        avoids chaining a voltage-domain k through a division by Rs."""
+        """Ridge-regularized least squares: iq = c0 + c1*(duty*Vbus) + c2*omega_e,
+        using the most recent FIT_WINDOW samples.
+
+        duty*Vbus and omega_e are highly correlated in ordinary driving (duty
+        tracks speed), which makes the plain (unregularized) 2-feature fit
+        ill-conditioned: c1/c2 individually swing wildly between refits even
+        though their combined effect on the fit is stable, producing huge,
+        unphysical predictions (and residuals) whenever a point deviates even
+        slightly from the exact duty<->speed relationship the fit last saw.
+
+        Fix: add a ridge penalty pulling c2 toward the value implied by the
+        known F110() lambda (c2_prior = -lambda/Rs). This breaks the
+        collinearity by giving the fit a preferred direction to fall back on,
+        while still letting the data override it if there's enough
+        independent (non-collinear) variation to support that.
+        """
         n = len(self.avg_iq)
         start = max(0, n - FIT_WINDOW)
         f1 = np.asarray(list(self.duty_vbus)[start:], dtype=float)
@@ -130,25 +146,38 @@ class TorqueLinearityNode(Node):
         y = np.asarray(list(self.avg_iq)[start:], dtype=float)
 
         X = np.column_stack([np.ones_like(f1), f1, f2])
-        coeffs, *_ = np.linalg.lstsq(X, y, rcond=None)
+        self.cond_number = float(np.linalg.cond(X))
+
+        # augment with a ridge row: sqrt(RIDGE_LAMBDA)*c2 ~= sqrt(RIDGE_LAMBDA)*c2_prior
+        # (only c2 is regularized -- c0, c1 are left free)
+        c2_prior = -LAMBDA_PRIOR / RS
+        ridge_row = np.array([[0.0, 0.0, np.sqrt(RIDGE_LAMBDA)]])
+        ridge_target = np.array([np.sqrt(RIDGE_LAMBDA) * c2_prior])
+
+        X_aug = np.vstack([X, ridge_row])
+        y_aug = np.concatenate([y, ridge_target])
+
+        coeffs, *_ = np.linalg.lstsq(X_aug, y_aug, rcond=None)
         self.c0, self.c1, self.c2 = (float(v) for v in coeffs)
         self.n_fit = len(y)
 
     def snapshot(self):
         with self.lock:
-            t = list(self.t)
-            duty_vbus = list(self.duty_vbus)
-            omega_e = list(self.omega_e)
-            avg_iq = list(self.avg_iq)
-            avg_vq = list(self.avg_vq)
-            c0, c1, c2, n_fit = self.c0, self.c1, self.c2, self.n_fit
+            n = len(self.avg_iq)
+            start = max(0, n - FIT_WINDOW)
+            t = list(self.t)[start:]
+            duty_vbus = list(self.duty_vbus)[start:]
+            omega_e = list(self.omega_e)[start:]
+            avg_iq = list(self.avg_iq)[start:]
+            avg_vq = list(self.avg_vq)[start:]
+            c0, c1, c2, n_fit, cond = self.c0, self.c1, self.c2, self.n_fit, self.cond_number
 
         iq_pred = [c0 + c1 * dv + c2 * we for dv, we in zip(duty_vbus, omega_e)]
         # back_EMF uses lambda implied by the CURRENT fit (lam = -c2*Rs), not a fixed constant,
         # so the left panel reflects what the live regression actually believes right now
         lam_fit = -c2 * RS
         back_emf = [we * lam_fit for we in omega_e]
-        return t, avg_vq, back_emf, avg_iq, iq_pred, (c0, c1, c2, n_fit, lam_fit)
+        return t, avg_vq, back_emf, avg_iq, iq_pred, (c0, c1, c2, n_fit, lam_fit, cond)
 
 
 def main():
@@ -205,7 +234,7 @@ def main():
             plt.close(fig)
             return []
 
-        t, avg_vq, back_emf, avg_iq, iq_pred, (c0, c1, c2, n_fit, lam_fit) = node.snapshot()
+        t, avg_vq, back_emf, avg_iq, iq_pred, (c0, c1, c2, n_fit, lam_fit, cond) = node.snapshot()
         artists = [ln_vq_meas, ln_back_emf, scatter, ln_ref, fit_text, ln_resid]
         if not t:
             return artists
@@ -236,12 +265,14 @@ def main():
             ln_ref.set_data([lo - pad, hi + pad], [lo - pad, hi + pad])
 
         k_fit = c1 * RS
+        cond_flag = '  <-- ILL-CONDITIONED, collinear duty/speed' if cond > 1000 else ''
         fit_text.set_text(
             f'n_fit = {n_fit}\n'
-            f'iq = c0 + c1*(duty*Vbus) + c2*omega_e\n'
+            f'iq = c0 + c1*(duty*Vbus) + c2*omega_e  (ridge on c2)\n'
             f'c0 = {c0:.4f} A\n'
             f'c1 = {c1:.4f}  (implied k = c1*Rs = {k_fit:.3f})\n'
-            f'c2 = {c2:.6f}  (implied lambda = -c2*Rs = {lam_fit:.6f} Wb)'
+            f'c2 = {c2:.6f}  (implied lambda = -c2*Rs = {lam_fit:.6f} Wb)\n'
+            f'cond(X) = {cond:.0f}{cond_flag}'
         )
 
         # right panel
