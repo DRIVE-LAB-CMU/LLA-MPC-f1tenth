@@ -17,11 +17,11 @@ def diffequation(bank_params, known_params, x, u):
     pwm = u[0]
     steer = u[1]
     psi = x[2]
-    # vx = x[3]
+    vx = x[3]
     vy = x[4]
     omega = x[5]
 
-    mass, Iz, lf, lr, vx = known_params
+    mass, Iz, lf, lr = known_params
     Bf, Br, Cf, Cr, Df, Dr = bank_params
 
     vx_clamped = jnp.maximum(vx, 0.01)
@@ -49,11 +49,11 @@ def diffequation_nojit(bank_params, known_params, x, u):
     pwm = u[0]
     steer = u[1]
     psi = x[2]
-    # vx = x[3]
+    vx = x[3]
     vy = x[4]
     omega = x[5]
 
-    mass, Iz, lf, lr, vx = known_params
+    mass, Iz, lf, lr = known_params
     Bf, Br, Cf, Cr, Df, Dr = bank_params
 
     vx_clamped = jnp.maximum(vx, 0.01)

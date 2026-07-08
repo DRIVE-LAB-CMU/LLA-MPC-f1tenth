@@ -173,8 +173,10 @@ def get_param_dict_grid(mean_dict, variation_dict, discretization, ground_truth 
             
     for key in key_list:
         param_dict[key] = np.array(param_dict[key])
-  
-    print(f"PARAMS: {len(param_dict['Bf'])}")
+
+
+    first_key = next(iter(param_dict))
+    print(f"PARAMS: {len(param_dict[first_key])}")
   
     return param_dict
 

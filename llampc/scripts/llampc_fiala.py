@@ -24,7 +24,7 @@ from llampc.utils import Track
 
 import llampc.rollout.history as history
 import llampc.rollout.dynamic_sim as dynamics_sim
-import llampc.llampc.rollout.dynamic_fiala as dynamics_fiala
+import llampc.rollout.dynamic_fiala as dynamics_fiala
 import llampc.rollout.dynamic_rp as dynamics_rp
 import llampc.rollout.dynamic_full as dynamics_full
 from llampc.rollout.rk6 import rk4Factory
