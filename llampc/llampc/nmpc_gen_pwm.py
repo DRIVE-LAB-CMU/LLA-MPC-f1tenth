@@ -96,10 +96,10 @@ def export_model(params_car, exact = False):
     model.p = ca.vertcat(p, x_ref)
     model.a_long_expr = dx3
 
-    xdot = ca.SX.sym('xdot', 8) 
+    # xdot = ca.SX.sym('xdot', 8) 
 
-    model.f_impl_expr = xdot - f_expl   # <-- add this
-    model.xdot = xdot                    # <-- add this
+    # model.f_impl_expr = xdot - f_expl   # <-- add this
+    # model.xdot = xdot                    # <-- add this
 
 
     return model
@@ -123,18 +123,18 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.cost.cost_type = 'NONLINEAR_LS'
     ocp.cost.cost_type_e = 'NONLINEAR_LS'
 
-    w_x = 2.0
-    w_y = 2.0
+    w_x = 4.0
+    w_y = 4.0
     w_xe = 0.0
     w_ye = 0.0
     w_theta = 0
     w_vel = 0
-    w_pwm = 5
+    w_pwm = 0.1
     w_steer = 0.01
-    w_slew = 0.0
+    w_slew = 0.0001
     w_steer_v = 0.001
     
-    w_a_long = 0.001
+    w_a_long = 0.0
       
     Q_flat = [w_x, w_y, w_theta, w_vel, 0, 0, w_pwm, w_steer, w_a_long]
     R_flat = [w_slew, w_steer_v]
@@ -246,13 +246,13 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.solver_options.qp_solver = 'PARTIAL_CONDENSING_HPIPM'
     ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'
 
-    ocp.solver_options.integrator_type = 'IRK'
+    ocp.solver_options.integrator_type = 'ERK'
     ocp.solver_options.sim_method_num_stages = 4
     
     # DROPPED FROM 10 to 2 (This makes the solver ~5x faster)
-    # ocp.solver_options.sim_method_num_steps = 8
+    ocp.solver_options.sim_method_num_steps = 8
 
-    ocp.solver_options.nlp_solver_type = 'SQP'
+    ocp.solver_options.nlp_solver_type = 'SQP_RTI'
     # ocp.solver_options.nlp_solver_max_iter = 10  # 2-3 iterations
     # ocp.solver_options.globalization = 'FIXED_STEP'
     ocp.solver_options.print_level = 0
