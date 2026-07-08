@@ -283,7 +283,7 @@ class OptitrackSubscriber(Node):
             odom_msg.twist.twist.angular.z = wz_f
 
             tcov = np.zeros(36)
-            tcov[0]  = .09  # Vx variance -- moderate/high: filtered, but
+            tcov[0]  = .25  # Vx variance -- moderate/high: filtered, but
             tcov[7]  = .09  # Vy variance    still just finite-diff, no
             tcov[35] = .09  # Vyaw variance  independent velocity sensor.
             odom_msg.twist.covariance = tcov.tolist()

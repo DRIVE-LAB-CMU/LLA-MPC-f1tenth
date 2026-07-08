@@ -19,7 +19,7 @@ import jax.numpy as jnp
 
 
 
-from llampc.nmpc_gen_pwm import setup_mpc
+from llampc.nmpc_gen_pid import setup_mpc
 from llampc.params import F110, F110_sim, get_param_dict_random, get_param_dict_grid, param_validate_ptm
 from llampc.planner import get_reference_trajectory_segment, get_lookahead_point
 from llampc.utils import Track
@@ -118,7 +118,7 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'mocap_square2fast.npz')
+        self.declare_parameter('track_file_name', 'mocap_square2slow.npz')
         self.declare_parameter('odom_topic', '/odometry/filtered')
         #self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
@@ -139,9 +139,9 @@ class MPCNode(Node):
 
         self.params_car = F110()
 
-        self.kd = 0.1
-        self.ki = 0.1
-        self.kp = 0.01
+        self.kd = 0.0
+        self.ki = 0.0
+        self.kp = 0.1
 
         # TODO: Implement thresholding to prevent hysteresis
         if(self.log_data):
@@ -191,12 +191,12 @@ class MPCNode(Node):
         
         # grid discretization
         discretization_dict = {
-            'Bf': 1,   # 15% variation
-            'Br': 1,   # 15% variation
-            'Cf': 7,   # 15% variation
-            'Cr': 7,   # 15% variation
-            'Df': 7,   # 15% variation
-            'Dr': 7,   # 15% variation
+            'Bf': 4,   # 15% variation
+            'Br': 4,   # 15% variation
+            'Cf': 4,   # 15% variation
+            'Cr': 4,   # 15% variation
+            'Df': 4,   # 15% variation
+            'Dr': 4,   # 15% variation
         }
 
         cost_weights = np.array([0.0, 0.0, 20.0, 5.0, 10.0, 0.01])# x, y, theta, vx, vy, omega
@@ -288,11 +288,13 @@ class MPCNode(Node):
 
         pid = self.kp * err + self.ki * self.v_int_err - d_term
         self.last_v_err = err
+        
+        print(f"ERR {err} {ref_v} {vx}")
 
         return max(min(pid, diff), 0) + self.min_pwm
 
     def pure_pursuit_control(self, state, ref_point):
-        x, y, psi = state[0], state[1], state[2]
+        x, y, psi  = state[0], state[1], state[2]
 
         dx = ref_point[0] - x
         dy = ref_point[1] - y
@@ -316,10 +318,10 @@ class MPCNode(Node):
             ))
 
         # velocity-scaled pwm: slow down on sharp turns
-        scale = self.max_v - self.min_v   # note: velocity range, not PWM range
-        ref_v = self.min_v + scale * np.sqrt(1.0 - abs(steer / self.params_car['max_steer']))
+        # scale = self.max_v - self.min_v   # note: velocity range, not PWM range
+        # ref_v = self.min_v + scale * np.sqrt(1.0 - abs(steer / self.params_car['max_steer']))
 
-        pwm = self.pid_long_control(ref_v, state[3])
+        pwm = self.pid_long_control(ref_point[3], state[3])
         return np.array([pwm, steer])
 
     def odom_callback(self, msg):    
@@ -411,7 +413,7 @@ class MPCNode(Node):
 
 
         ref_point, idx = get_lookahead_point(self.current_state, self.track, self.projidx, lookahead_dist = 1.2)
-        if self.current_state[3] < 0.1:
+        if self.current_state[3] < 2.0:
             self.projidx = idx
 
             record_ref_trajectory = [ref_point]
@@ -440,7 +442,7 @@ class MPCNode(Node):
             self.solver.set(0, "lbx", aug_state)
             self.solver.set(0, "ubx", aug_state)
             def construct_params(N, selected_model_params, ref_segment):
-                full_params = np.zeros((N+1, 12), np.float64)
+                full_params = np.zeros((N+1, 13), np.float64)
                 full_params[:, :6] = selected_model_params
                 # self.get_logger().info(f"{full_params}")
                 full_params[:, 6:6+6] = ref_segment[:6, :N+1].T #reference x, y, theta
@@ -509,7 +511,7 @@ class MPCNode(Node):
 
             #version for our dynamics
             self.checkpoint[5] = time.perf_counter_ns()
-            self.lb_history.predict_states_lateral(
+            self.lb_history.predict_states(
                 self.current_state, u_opt, self.lla_reset_counter == 0
             )
             self.checkpoint[6] = time.perf_counter_ns()

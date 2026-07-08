@@ -369,7 +369,7 @@ class MPCNode(Node):
     
 
     def pure_pursuit_control(self, state, ref_point):
-        x, y, psi = state[0], state[1], state[2]
+        x, y, psi, ref_v = state[0], state[1], state[2], state[3]
 
         dx = ref_point[0] - x
         dy = ref_point[1] - y
