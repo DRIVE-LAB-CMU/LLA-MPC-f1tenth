@@ -129,7 +129,7 @@ class OptitrackSubscriber(Node):
         # relative to a LOCAL trailing neighborhood, not a single global
         # threshold, since vx/vy here are pure finite differences with no
         # independent velocity sensor to check them against.
-        self.declare_parameter('vel_ema_tau', 0.015)
+        self.declare_parameter('vel_ema_tau', 0.06)
         self.declare_parameter('vel_spike_pct', 15.0)
         self.declare_parameter('vel_spike_window', 0.5)
 
@@ -283,8 +283,8 @@ class OptitrackSubscriber(Node):
             odom_msg.twist.twist.angular.z = wz_f
 
             tcov = np.zeros(36)
-            tcov[0]  = 1  # Vx variance -- moderate/high: filtered, but
-            tcov[7]  = .25  # Vy variance    still just finite-diff, no
+            tcov[0]  = .25  # Vx variance -- moderate/high: filtered, but
+            tcov[7]  = .09  # Vy variance    still just finite-diff, no
             tcov[35] = .09  # Vyaw variance  independent velocity sensor.
             odom_msg.twist.covariance = tcov.tolist()
         # ==========================================================
