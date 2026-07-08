@@ -17,6 +17,7 @@ def diffequation(bank_params, known_params, x, u):
     pwm = u[0]
     steer = u[1]
     psi = x[2]
+    # vx = x[3]
     vy = x[4]
     omega = x[5]
 
@@ -48,6 +49,7 @@ def diffequation_nojit(bank_params, known_params, x, u):
     pwm = u[0]
     steer = u[1]
     psi = x[2]
+    # vx = x[3]
     vy = x[4]
     omega = x[5]
 
@@ -99,7 +101,7 @@ class DBMPacejkaLateralBank():
 
 
         self.known_params = jax.device_put(
-            jnp.array([self.mass, self.Iz, self.lf, self.lr, vx]),
+            jnp.array([self.mass, self.Iz, self.lf, self.lr]),
             device=gpu
         )
 

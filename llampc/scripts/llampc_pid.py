@@ -424,7 +424,7 @@ class MPCNode(Node):
             # if( np.abs(self.current_state[3]) < 0.1):
             #     filtered_state[3] = 0.1
             aug_state = np.concatenate([self.current_state, [self.last_control[1]]])
-            self.dynamics_bank.update_known_params(self.current_state[3])
+            # self.dynamics_bank.update_known_params(self.current_state[3])
 
             # no need to copy states and trajectory in case of update b/c node is single thread
             ref_segment, idx = get_reference_trajectory_segment(x0, v0, self.track, self.N+1, self.dt, self.projidx)
