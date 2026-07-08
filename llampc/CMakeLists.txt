@@ -72,6 +72,8 @@ install(PROGRAMS
   scripts/drive_relay.py
   scripts/desktop_ping.py
   scripts/car_pong.py
+  scripts/llampc_pid.py
+  scripts/llampc_fiala.py
   DESTINATION lib/${PROJECT_NAME}
 )
 if(BUILD_TESTING)
