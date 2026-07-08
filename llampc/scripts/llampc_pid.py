@@ -69,7 +69,7 @@ class MPCNode(Node):
         self.maxtime = np.zeros(self.checkpoints)
         self.checkpoint = np.empty(self.checkpoints)
 
-        self.last_v_err = None
+        self.last_v = None
         self.v_int_err = 0
 
         # dictionary, prefereably npy, which has waypoints_x, waypoints_y, and velocity
@@ -131,7 +131,7 @@ class MPCNode(Node):
         self.lla_reset_interval = 0
         self.lla_reset_counter = 0
 
-        self.min_pwm = 0.1
+        self.min_pwm = 0.05
         self.max_pwm = 0.25
 
         self.max_v = 3.0
@@ -140,7 +140,7 @@ class MPCNode(Node):
         self.params_car = F110()
 
         self.kd = 0.0
-        self.ki = 0.0
+        self.ki = 0.001
         self.kp = 0.1
 
         # TODO: Implement thresholding to prevent hysteresis
@@ -205,7 +205,7 @@ class MPCNode(Node):
         param_dict = get_param_dict_grid(mean_dict, variation_dict, 
                                          discretization=discretization_dict, 
                                          ground_truth=True,
-                                         noadapt=False)
+                                         noadapt=True)
         num_models = len(param_dict['Bf'])
         
         self.get_logger().info("Dynamics bank starting")
@@ -271,7 +271,7 @@ class MPCNode(Node):
         diff = self.max_pwm - self.min_pwm
         err = ref_v - vx
 
-        d_term = self.kd * (err - self.last_v_err) if self.last_v_err is not None else 0.0
+        d_term = self.kd * (err - self.last_v) if self.last_v is not None else 0.0
 
         # compute unsaturated pid using CURRENT integral (don't add err yet)
         pid_unsat = self.kp * err + self.ki * self.v_int_err - d_term
@@ -287,11 +287,11 @@ class MPCNode(Node):
         # TODO: Potentially need to use leaky integrator here
 
         pid = self.kp * err + self.ki * self.v_int_err - d_term
-        self.last_v_err = err
+        self.last_v = vx
         
         print(f"ERR {err} {ref_v} {vx}")
 
-        return max(min(pid, diff), 0) + self.min_pwm
+        return max(min(pid, diff) + self.min_pwm, 0)
 
     def pure_pursuit_control(self, state, ref_point):
         x, y, psi  = state[0], state[1], state[2]
@@ -413,7 +413,7 @@ class MPCNode(Node):
 
 
         ref_point, idx = get_lookahead_point(self.current_state, self.track, self.projidx, lookahead_dist = 1.2)
-        if self.current_state[3] < 2.0:
+        if self.current_state[3] < 0.3:
             self.projidx = idx
 
             record_ref_trajectory = [ref_point]
@@ -430,6 +430,8 @@ class MPCNode(Node):
 
             # no need to copy states and trajectory in case of update b/c node is single thread
             ref_segment, idx = get_reference_trajectory_segment(x0, v0, self.track, self.N+1, self.dt, self.projidx)
+
+            print("REF")
             self.projidx = idx
 
             record_ref_trajectory = []
@@ -461,7 +463,7 @@ class MPCNode(Node):
             status = self.solver.solve()
             delta = self.solver.get(1, "x")[-1] # delta
             pwm = self.pid_long_control(
-                ref_segment[1][3], self.current_state[3]
+                ref_segment[3][1], self.current_state[3]
             )
 
             u_opt = np.array([pwm, delta])
