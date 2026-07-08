@@ -60,6 +60,7 @@ private:
    * Used when jerk flag is detected in the Ackermann message
    */
   rclcpp::Publisher<Float64>::SharedPtr duty_cycle_pub_;
+  rclcpp::Publisher<Float64>::SharedPtr current_pub_;
 
   // ROS subscription
   rclcpp::Subscription<AckermannDriveStamped>::SharedPtr ackermann_sub_;

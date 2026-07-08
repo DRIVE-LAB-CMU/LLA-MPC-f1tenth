@@ -36,8 +36,8 @@ ekf_filter_node:
     odom0: /optitrack/odom
     odom0_config: [true,  true,  false,
                    false, false, true,
-                   false, false, false,    # Vx, Vy off until twist is enabled
-                   false, false, false,
+                   true, true, false,    # Vx, Vy off until twist is enabled
+                   false, false, true,
                    false, false, false]
     odom0_differential: false
 
