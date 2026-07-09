@@ -120,7 +120,7 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'mocap_square2fast.npz')
+        self.declare_parameter('track_file_name', 'mocap_square2slow.npz')
         self.declare_parameter('odom_topic', '/odometry/filtered')
         #self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
@@ -207,7 +207,7 @@ class MPCNode(Node):
         param_dict = get_param_dict_grid(mean_dict, variation_dict, 
                                          discretization=discretization_dict, 
                                          ground_truth=True,
-                                         noadapt=True)
+                                         noadapt=False)
         num_models = len(param_dict['Bf'])
         
         self.get_logger().info("Dynamics bank starting")
@@ -430,7 +430,6 @@ class MPCNode(Node):
             aug_state = np.concatenate([self.current_state, [self.last_control[1]]])
             self.dynamics_bank.update_known_params(self.current_state[3])
 
-            known_params = np.array(self.dynamics_bank.get_known_params())
 
             # no need to copy states and trajectory in case of update b/c node is single thread
             ref_segment, idx = get_reference_trajectory_segment(x0, v0, self.track, self.N+1, self.dt, self.projidx)
@@ -556,7 +555,8 @@ class MPCNode(Node):
         if(self.count == 0):
             print(np.max(self.time_history*1e-6, axis = 1))
 
-        self.log_lla_data(selected_model_params, selected_model_index, mpc_states, record_ref_trajectory, known_params, self.time_history[-1, self.count])
+        known_params = np.array(self.dynamics_bank.get_known_params())
+        self.log_lla_data(selected_model_params, selected_model_index, known_params, self.time_history[-1, self.count], mpc_states, record_ref_trajectory)
         
 
     def publish_ref_trajectory(self, ref_trajectory):

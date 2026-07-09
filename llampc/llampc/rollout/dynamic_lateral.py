@@ -29,8 +29,6 @@ def diffequation(bank_params, known_params, x, u):
 
     vx_clamped = jnp.maximum(vx, 0.01)
 
-    
-
     alphaf = steer - jnp.arctan((omega * lf + vy) / vx_clamped)
     alphar = jnp.arctan((omega * lr - vy) / vx_clamped)
 
