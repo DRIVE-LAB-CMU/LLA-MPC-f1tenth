@@ -72,7 +72,7 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button, CheckButtons
 from matplotlib.patches import FancyArrow, Circle, Patch
 
-from rollouts import (
+from rollouts_lateral import (
     _ROLLOUT_OK, _ROLLOUT_ERR,
     BANK_ORDER, DEFAULT_LOG_ORDER, COST_DIM_LABELS,
     dict_to_bank_vec, remap_to_bank_order,
@@ -209,6 +209,25 @@ class StateVisualizer:
             if len(ref_traj_data) > 0 and len(ref_traj_data[0]) > 0:
                 self.ref_trajectory = ref_traj_data
 
+        # Optional per-timestep known_params logged by the real-time node
+        # (e.g. dynamics_bank.update_known_params(vx) -> get_known_params()).
+        # When present, the LLA rollout simulators use the EXACT logged value
+        # at each step instead of a single static value recomputed once for
+        # the whole replay.
+        self.known_params = None
+        if "known_params" in data:
+            kp = data["known_params"]
+            if len(kp) > 0:
+                self.known_params = kp
+
+        # Optional per-timestep solver solve time (ms), logged alongside the
+        # rest of the control-loop data. Shown in the on-frame info text.
+        self.solve_time = None
+        if "solve_time" in data:
+            st = data["solve_time"]
+            if len(st) > 0:
+                self.solve_time = np.asarray(st, dtype=float)
+
         if self.n_params_to_show is None:
             self.n_params_to_show = [x for x in range(len(self.params))]
 
@@ -248,12 +267,20 @@ class StateVisualizer:
             lla_total = min(self.rollout_total, len(logged))
             lla_params = remap_to_bank_order(logged[:lla_total], self.log_order)
             self.lla_params_over_time = lla_params
+
+            # Slice the logged known_params to match the rollout length, if present.
+            kp_slice = None
+            if self.known_params is not None:
+                kp_slice = self.known_params[:lla_total]
+
             self.lla_traj = simulate_lla_rollout(
                 lla_total, self.recording, lla_params, self.params_car,
-                self.dt, self.ol_reset_interval, full_open_loop=self.full_open_loop
+                self.dt, self.ol_reset_interval, full_open_loop=self.full_open_loop,
+                known_params_over_time=kp_slice
             )
             self.lla_one_step_traj = simulate_lla_one_step(
-                lla_total, self.recording, lla_params, self.params_car, self.dt
+                lla_total, self.recording, lla_params, self.params_car, self.dt,
+                known_params_over_time=kp_slice
             )
 
         # If we have the dynamic LLA traj but no one-step yet (e.g. loaded from npz
@@ -262,9 +289,11 @@ class StateVisualizer:
                 and self.lla_params_over_time is not None
                 and self.compute_rollouts and _ROLLOUT_OK):
             lla_total = len(self.lla_traj)
+            kp_slice = (self.known_params[:lla_total]
+                        if self.known_params is not None else None)
             self.lla_one_step_traj = simulate_lla_one_step(
                 lla_total, self.recording, self.lla_params_over_time,
-                self.params_car, self.dt
+                self.params_car, self.dt, known_params_over_time=kp_slice
             )
 
         # ---------------- General fixed-param models ----------------
@@ -390,11 +419,14 @@ class StateVisualizer:
         modes = ("open_loop", "one_step")
 
         if self.lla_params_over_time is not None:
+            kp_slice = (self.known_params[:T]
+                        if self.known_params is not None else None)
             for mode in modes:
                 comp = simulate_lla_m_step(
                     T, self.recording, self.lla_params_over_time, self.params_car,
                     self.dt, M, self.cost_form, mode, self.ol_reset_interval,
-                    full_open_loop=self.full_open_loop)
+                    full_open_loop=self.full_open_loop,
+                    known_params_over_time=kp_slice)
                 self.lla_m_step_components[mode] = comp[:T]
 
         names = [n for n in self.general_order if n in self.general_models]
@@ -1314,6 +1346,14 @@ class StateVisualizer:
             )
             self.ax.add_patch(self.accel_arrow)
 
+        # Solve-time stat for this frame, if it was logged. Guarded on both
+        # availability and index range so a shorter/missing solve_time array
+        # (e.g. logged before this field existed) just falls back to "n/a"
+        # rather than throwing.
+        solve_time_str = "n/a"
+        if self.solve_time is not None and frame_idx < len(self.solve_time):
+            solve_time_str = f"{self.solve_time[frame_idx]:.2f} ms"
+
         time_str = f"Time: {self.time[frame_idx]:.3f}s"
         info = (f"Frame: {frame_idx}/{self.n_frames-1}\n{time_str}\n"
                 f"\u03b8: {self.theta[frame_idx]:.3f} rad\n"
@@ -1322,6 +1362,7 @@ class StateVisualizer:
                 f"\u03c9: {self.omega[frame_idx]:.3f} rad/s\n"
                 f"accel: {self.accel[frame_idx]:.3f}\n"
                 f"steer: {self.steer[frame_idx]:.3f}\n"
+                f"solve: {solve_time_str}\n"
                 f"Model: {self.model_idx[frame_idx]}")
         self.info_text.set_text(info)
 

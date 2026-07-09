@@ -494,6 +494,8 @@ class MPCNode(Node):
             )
 
             self.dynamics_bank.update_known_params(self.omega_w, self.dFz)
+
+            known_params = np.array(self.dynamics_bank.get_known_params())
             # no need to copy states and trajectory in case of update b/c node is single thread
             ref_segment, idx = get_reference_trajectory_segment(x0, v0, self.track, self.N+1, self.dt, self.projidx)
             self.projidx = idx
@@ -557,8 +559,6 @@ class MPCNode(Node):
             # print(f"PREDICTED CONTROLS: {predicted_controls}")
                 
             self.publish_predicted_trajectory(mpc_states) # Publish predicted trajectory
-            
-        self.log_lla_data(selected_model_params, selected_model_index, mpc_states, record_ref_trajectory)
 
         
         if(not ok_time):
@@ -574,25 +574,18 @@ class MPCNode(Node):
         vx = self.current_state[3]
         # eq_tol = 1e-2 if vx > 0.1 else 0.1   # much looser at low speed
         
+        self.checkpoint[5] = time.perf_counter_ns()
         if status == 0 or (status == 2):  # Success
             # Get optimal control
             self.apply_control(u_opt) # Apply control
             # self.get_logger().info(f"Logging control {u_opt}")
             
             #version for our dynamics
-            self.checkpoint[5] = time.perf_counter_ns()
+            
             self.lb_history.predict_states(
                 self.current_state, u_opt, self.lla_reset_counter == 0
             )
-            self.checkpoint[6] = time.perf_counter_ns()
                 
-
-            self.count = (self.count + 1) % self.time_window
-            self.time_history[:self.checkpoints-1, self.count] = np.array(self.checkpoint[1:]-self.checkpoint[:-1])
-            self.time_history[-1, self.count] = (self.checkpoint[-1] - self.checkpoint[0])
-        
-            if(self.count == 0):
-                print(np.max(self.time_history*1e-6, axis = 1))
         else:
             print(f"\n--- SOLVER FAILED WITH STATUS {status} ---")
 
@@ -618,6 +611,17 @@ class MPCNode(Node):
 
             self.current_mode = False
             self.first_control = True
+
+        self.checkpoint[6] = time.perf_counter_ns()
+        self.count = (self.count + 1) % self.time_window
+        self.time_history[:self.checkpoints-1, self.count] = np.array(self.checkpoint[1:]-self.checkpoint[:-1])
+        self.time_history[-1, self.count] = (self.checkpoint[-1] - self.checkpoint[0])
+    
+        if(self.count == 0):
+            print(np.max(self.time_history*1e-6, axis = 1))
+
+        
+        self.log_lla_data(selected_model_params, selected_model_index, mpc_states, record_ref_trajectory, known_params, self.time_history[-1, self.count])
 
     def publish_ref_trajectory(self, ref_trajectory):
         ref_msg = PoseArray()
@@ -671,9 +675,8 @@ class MPCNode(Node):
         # print( acceleration * self.dt)
         self.last_control = np.array([cur, steer])
         self.last_v = self.current_state[3]
-        
-        
 
+        
     def publish_predicted_trajectory(self, predicted_states):
         """Publish predicted trajectory for visualization"""
 
@@ -697,8 +700,9 @@ class MPCNode(Node):
         
         self.predicted_path_pub.publish(path_msg)
 
-    def log_lla_data(self, params, model_index, mpc_rollout = [], ref_trajectory = []):
-        if(self.log_data):
+    def log_lla_data(self, params, model_index, known_params, solve_time,
+                  mpc_rollout=[], ref_trajectory=[]):
+        if self.log_data:
             now_ns = time.perf_counter_ns()
             self.log_buffer["time"].append(now_ns)
             self.log_buffer["state"].append(self.current_state.copy())
@@ -708,6 +712,8 @@ class MPCNode(Node):
             self.log_buffer["cmd"].append(self.last_drive_command.copy())
             self.log_buffer["mpc_rollout"].append(np.array(mpc_rollout))
             self.log_buffer["ref_trajectory"].append(np.array(ref_trajectory))
+            self.log_buffer["known_params"].append(np.array(known_params))  # NEW
+            self.log_buffer["solve_time"].append(solve_time)
 
     def log_rollout_data(self, lb_history, one_step_cost, ok_time):
         if(self.log_data):

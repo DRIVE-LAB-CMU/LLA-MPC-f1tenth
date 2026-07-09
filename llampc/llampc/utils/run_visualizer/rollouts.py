@@ -52,7 +52,7 @@ BANK_ORDER = ['Bf', 'Br', 'Cf', 'Cr', 'Df', 'Dr', 'Cro', 'Cd', 'Ce', 'Cm']
 
 # Order in which the logged `params` field is laid out by get_model_params_arr().
 # >>> VERIFY against your dynamics.DBMPacejkaBank.get_model_params_arr(). <<<
-DEFAULT_LOG_ORDER = ['Bf', 'Br', 'Cf', 'Cr', 'Df', 'Dr', 'Cro', 'Cd', 'Ce', 'Cm']
+DEFAULT_LOG_ORDER = ['Bf', 'Br', 'Cf', 'Cr', 'Df', 'Dr', 'Cro', 'Cd', 'Ce', 'Cm]
 
 # State layout: [x, y, theta, dx, dy, omega]. Short labels used for the
 # per-component cost checkboxes; index 2 (theta) is angle-wrapped in cost calc.
