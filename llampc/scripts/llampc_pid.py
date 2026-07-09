@@ -118,7 +118,7 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'mocap_square2slow.npz')
+        self.declare_parameter('track_file_name', 'mocap_square2fast.npz')
         self.declare_parameter('odom_topic', '/odometry/filtered')
         #self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
@@ -128,18 +128,16 @@ class MPCNode(Node):
         self.dt = self.Tf / self.N
         self.control_callback_speed = 0.04
         self.lla_predict_horizon = 0.04
-        self.lla_reset_interval = 0
+        self.lla_reset_interval = 5
         self.lla_reset_counter = 0
 
         self.min_pwm = 0.05
         self.max_pwm = 0.25
 
-        self.max_v = 3.0
-        self.min_v = 0.2
 
         self.params_car = F110()
 
-        self.kd = 0.0
+        self.kd = 0.01
         self.ki = 0.001
         self.kp = 0.1
 
@@ -199,13 +197,13 @@ class MPCNode(Node):
             'Dr': 4,   # 15% variation
         }
 
-        cost_weights = np.array([0.0, 0.0, 20.0, 5.0, 10.0, 0.01])# x, y, theta, vx, vy, omega
+        cost_weights = np.array([0.0, 0.0, 20.0, 0.0, 10.0, 0.01])# x, y, theta, vx, vy, omega
         # x, y, theta, vx, vy, omega
 
         param_dict = get_param_dict_grid(mean_dict, variation_dict, 
                                          discretization=discretization_dict, 
                                          ground_truth=True,
-                                         noadapt=True)
+                                         noadapt=False)
         num_models = len(param_dict['Bf'])
         
         self.get_logger().info("Dynamics bank starting")
@@ -426,7 +424,7 @@ class MPCNode(Node):
             # if( np.abs(self.current_state[3]) < 0.1):
             #     filtered_state[3] = 0.1
             aug_state = np.concatenate([self.current_state, [self.last_control[1]]])
-            # self.dynamics_bank.update_known_params(self.current_state[3])
+            self.dynamics_bank.update_known_params(self.current_state[3])
 
             # no need to copy states and trajectory in case of update b/c node is single thread
             ref_segment, idx = get_reference_trajectory_segment(x0, v0, self.track, self.N+1, self.dt, self.projidx)

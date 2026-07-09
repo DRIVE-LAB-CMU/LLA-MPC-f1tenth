@@ -81,7 +81,7 @@ from rollouts import (
 )
 
 if _ROLLOUT_OK:
-    from rollouts import F110
+    from rollouts_lateral import F110
 else:
     F110 = None
 
@@ -1483,7 +1483,7 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'lla13.npz')
+    filepath = os.path.join(dir_path, 'pid2.npz')
 
     ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square2slow.npz')
 
@@ -1494,12 +1494,12 @@ def main():
         3: 'Cr',
         4: 'Df',
         5: 'Dr',
-        6: 'Cro',
-        7: 'Cd',
-        8: 'Ce',
-        9: 'Cm',
-        10: 'Roll',
-        11: 'Pitch'
+        # 6: 'Cro',
+        # 7: 'Cd',
+        # 8: 'Ce',
+        # 9: 'Cm',
+        # 10: 'Roll',
+        # 11: 'Pitch'
 
     }
 
@@ -1515,15 +1515,14 @@ def main():
     general_models = {
         "nominal": {
             'Bf': 6.5, 'Br': 6.5, 'Cf': 1.4, 'Cr': 1.4,
-            'Df': 17.0, 'Dr': 17.0, 'Cro': 0.0, 'Cd': 0.0,
-            'Ce': 10.0, 'Cm': 0.0,
+            'Df': 17.0, 'Dr': 17.0
         },
     }
 
     visualizer = StateVisualizer(
         filepath,
         ref_filepath=ref_filepath,
-        n_params_to_show=range(12),
+        n_params_to_show=range(6),
         params_per_column=6,
         param_names=param_names,
         obstacles=obstacles,
@@ -1534,8 +1533,8 @@ def main():
         ol_reset_interval=5,
         full_open_loop=False,
         window_P=40,
-        cost_form=np.array([0.0, 0.0, 20.0, 5.0, 10.0, 0.01]),
-        compute_m_step=False,    # set False to skip the slow M-step computation
+        cost_form=np.array([0.0, 0.0, 20.0, 0.0, 10.0, 0.01]),
+        compute_m_step=True,    # set False to skip the slow M-step computation
         m_step_M=10,
     )
     visualizer.show()

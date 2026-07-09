@@ -17,14 +17,16 @@ def diffequation(bank_params, known_params, x, u):
     pwm = u[0]
     steer = u[1]
     psi = x[2]
-    vx = x[3]
+    
     vy = x[4]
     omega = x[5]
 
-    mass, Iz, lf, lr = known_params
+    mass, Iz, lf, lr, vx = known_params
     Bf, Br, Cf, Cr, Df, Dr = bank_params
 
     vx_clamped = jnp.maximum(vx, 0.01)
+
+    vx = x[3]
 
     alphaf = steer - jnp.arctan((omega * lf + vy) / vx_clamped)
     alphar = jnp.arctan((omega * lr - vy) / vx_clamped)
@@ -49,12 +51,14 @@ def diffequation_nojit(bank_params, known_params, x, u):
     pwm = u[0]
     steer = u[1]
     psi = x[2]
-    vx = x[3]
+    
     vy = x[4]
     omega = x[5]
 
-    mass, Iz, lf, lr = known_params
+    mass, Iz, lf, lr, vx = known_params
     Bf, Br, Cf, Cr, Df, Dr = bank_params
+
+    vx = x[3]
 
     vx_clamped = jnp.maximum(vx, 0.01)
 
@@ -101,7 +105,7 @@ class DBMPacejkaLateralBank():
 
 
         self.known_params = jax.device_put(
-            jnp.array([self.mass, self.Iz, self.lf, self.lr]),
+            jnp.array([self.mass, self.Iz, self.lf, self.lr, vx]),
             device=gpu
         )
 
