@@ -1483,7 +1483,7 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'pid2.npz')
+    filepath = os.path.join(dir_path, 'pid4.npz')
 
     ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square2slow.npz')
 
@@ -1512,12 +1512,79 @@ def main():
     # ]
     r_car = 0.04
 
+
     general_models = {
-        "nominal": {
-            'Bf': 6.5, 'Br': 6.5, 'Cf': 1.4, 'Cr': 1.4,
-            'Df': 17.0, 'Dr': 17.0
-        },
-    }
+    "nominal": {
+        'Bf': 6.5, 'Br': 6.5, 'Cf': 1.4, 'Cr': 1.4,
+        'Df': 17.0, 'Dr': 17.0
+    },
+    # rank 1  |  model index 5  |  selected 684x (55.6%)
+    # "model_5": {
+    #     'Bf': 6.500000,  # std=0.0000
+    #     'Br': 6.500000,  # std=0.0000
+    #     'Cf': 1.400000,  # std=0.0000
+    #     'Cr': 1.400000,  # std=0.0000
+    #     'Df': 12.000000,  # std=0.0000
+    #     'Dr': 22.000000,  # std=0.0000
+    #     'Cro': 0.000000,  # std=0.0000
+    #     'Cd': 0.000000,  # std=0.0000
+    #     'Ce': 10.000000,  # std=0.0000
+    #     'Cm': 0.000000,  # std=0.0000
+    # },
+    # # rank 2  |  model index 1  |  selected 341x (27.7%)
+    # "model_1": {
+    #     'Bf': 6.500000,  # std=0.0000
+    #     'Br': 6.500000,  # std=0.0000
+    #     'Cf': 1.400000,  # std=0.0000
+    #     'Cr': 1.400000,  # std=0.0000
+    #     'Df': 12.000000,  # std=0.0000
+    #     'Dr': 12.000000,  # std=0.0000
+    #     'Cro': 0.000000,  # std=0.0000
+    #     'Cd': 0.000000,  # std=0.0000
+    #     'Ce': 10.000000,  # std=0.0000
+    #     'Cm': 0.000000,  # std=0.0000
+    # },
+    # # rank 3  |  model index 21  |  selected 182x (14.8%)
+    # "model_21": {
+    #     'Bf': 6.500000,  # std=0.0000
+    #     'Br': 6.500000,  # std=0.0000
+    #     'Cf': 1.400000,  # std=0.0000
+    #     'Cr': 1.400000,  # std=0.0000
+    #     'Df': 22.000000,  # std=0.0000
+    #     'Dr': 12.000000,  # std=0.0000
+    #     'Cro': 0.000000,  # std=0.0000
+    #     'Cd': 0.000000,  # std=0.0000
+    #     'Ce': 10.000000,  # std=0.0000
+    #     'Cm': 0.000000,  # std=0.0000
+    # },
+    # # rank 4  |  model index 11  |  selected 11x (0.9%)
+    # "model_11": {
+    #     'Bf': 6.500000,  # std=0.0000
+    #     'Br': 6.500000,  # std=0.0000
+    #     'Cf': 1.400000,  # std=0.0000
+    #     'Cr': 1.400000,  # std=0.0000
+    #     'Df': 17.000000,  # std=0.0000
+    #     'Dr': 12.000000,  # std=0.0000
+    #     'Cro': 0.000000,  # std=0.0000
+    #     'Cd': 0.000000,  # std=0.0000
+    #     'Ce': 10.000000,  # std=0.0000
+    #     'Cm': 0.000000,  # std=0.0000
+    # },
+    # # rank 5  |  model index 6  |  selected 6x (0.5%)
+    # "model_6": {
+    #     'Bf': 6.500000,  # std=0.0000
+    #     'Br': 6.500000,  # std=0.0000
+    #     'Cf': 1.400000,  # std=0.0000
+    #     'Cr': 1.400000,  # std=0.0000
+    #     'Df': 14.500000,  # std=0.0000
+    #     'Dr': 12.000000,  # std=0.0000
+    #     'Cro': 0.000000,  # std=0.0000
+    #     'Cd': 0.000000,  # std=0.0000
+    #     'Ce': 10.000000,  # std=0.0000
+    #     'Cm': 0.000000,  # std=0.0000
+    # },
+}
+
 
     visualizer = StateVisualizer(
         filepath,
@@ -1533,7 +1600,7 @@ def main():
         ol_reset_interval=5,
         full_open_loop=False,
         window_P=40,
-        cost_form=np.array([0.0, 0.0, 20.0, 0.0, 10.0, 0.01]),
+        cost_form=np.array([10.0, 10.0, 10.0, 10.0, 10.0, 10.0]),
         compute_m_step=True,    # set False to skip the slow M-step computation
         m_step_M=10,
     )

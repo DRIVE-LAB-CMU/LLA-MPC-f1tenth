@@ -227,11 +227,11 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.solver_options.qp_solver = 'PARTIAL_CONDENSING_HPIPM'
     ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'
 
-    ocp.solver_options.integrator_type = 'IRK'
+    ocp.solver_options.integrator_type = 'ERK'
     ocp.solver_options.sim_method_num_stages = 4
     
     # DROPPED FROM 10 to 2 (This makes the solver ~5x faster)
-    # ocp.solver_options.sim_method_num_steps = 8
+    ocp.solver_options.sim_method_num_steps = 8
 
     ocp.solver_options.nlp_solver_type = 'SQP'
     # ocp.solver_options.nlp_solver_max_iter = 10  # 2-3 iterations

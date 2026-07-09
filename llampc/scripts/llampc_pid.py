@@ -74,6 +74,8 @@ class MPCNode(Node):
 
         # dictionary, prefereably npy, which has waypoints_x, waypoints_y, and velocity
         track_name = self.get_parameter('track_file_name').get_parameter_value().string_value
+        print("TRACK: --------------------------------")
+        print(track_name)
 
         self.track = Track(track_name)
 
@@ -128,7 +130,7 @@ class MPCNode(Node):
         self.dt = self.Tf / self.N
         self.control_callback_speed = 0.04
         self.lla_predict_horizon = 0.04
-        self.lla_reset_interval = 5
+        self.lla_reset_interval = 0
         self.lla_reset_counter = 0
 
         self.min_pwm = 0.05
@@ -203,7 +205,7 @@ class MPCNode(Node):
         param_dict = get_param_dict_grid(mean_dict, variation_dict, 
                                          discretization=discretization_dict, 
                                          ground_truth=True,
-                                         noadapt=False)
+                                         noadapt=True)
         num_models = len(param_dict['Bf'])
         
         self.get_logger().info("Dynamics bank starting")
@@ -218,7 +220,7 @@ class MPCNode(Node):
             num_models
         )
                 
-        history_length=40
+        history_length=20
         self.lb_history = history.LBHistory(
             num_models, history_length,
             self.lla_predict_horizon, cost_weights,
