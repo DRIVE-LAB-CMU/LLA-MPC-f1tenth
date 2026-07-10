@@ -310,7 +310,7 @@ def create_ocp(model, params_car, steps, horizon):
 
     ocp.solver_options.nlp_solver_type = 'SQP'
     ocp.solver_options.nlp_solver_max_iter = 10  # 2-3 iterations
-    ocp.solver_options.globalization = 'FIXED_STEP'
+    # ocp.solver_options.globalization = 'FIXED_STEP'
     ocp.solver_options.print_level = 0
     ocp.solver_options.qp_solver_warm_start = 1    
     
@@ -356,3 +356,98 @@ def setup_mpc(steps, horizon, json_file='f1tenth_acados_ocp.json', solver_config
     finally:
         os.chdir(original_cwd) 
 
+
+def _build_reference_trajectory(N, dt, vx_ref=3.0):
+    """
+    Simple straight-line reference: drive in +x at constant vx_ref.
+    Returns an (N+1, 6) array of [x, y, phi, vx, vy, omega], one row
+    per stage (stages 0..N inclusive).
+    """
+    t = np.arange(N + 1) * dt
+    x_ref = vx_ref * t
+    y_ref = np.zeros_like(t)
+    phi_ref = np.zeros_like(t)
+    vx_ref_arr = np.full_like(t, vx_ref)
+    vy_ref = np.zeros_like(t)
+    omega_ref = np.zeros_like(t)
+
+    return np.stack([x_ref, y_ref, phi_ref, vx_ref_arr, vy_ref, omega_ref], axis=1)
+
+
+def _get_tire_params(p_car):
+    """
+    Pull [Cf, Cr, muf, mur, Cro] to match the unpacking order used in
+    export_model: `Cf, Cr, muf, mur, Cro = [p[i] for i in range(5)]`.
+    Uses the same dict-style access (`params_car['key']`) as the rest
+    of this file, with fallbacks in case a key is missing from F110.
+    """
+    def _get(key, default):
+        try:
+            return p_car[key]
+        except (KeyError, TypeError):
+            return default
+
+    Cf  = _get('Cf', 5.0)
+    Cr  = _get('Cr', 5.0)
+    muf = _get('muf', 1.0)
+    mur = _get('mur', 1.0)
+    Cro = _get('Cro', 0.01)
+    return np.array([Cf, Cr, muf, mur, Cro])
+
+
+def main():
+    """
+    Smoke test: build the solver, set an initial state + a simple
+    straight-line reference, solve once, and print the result.
+    """
+    N = 20          # prediction steps
+    horizon = 1.0   # seconds
+    dt = horizon / N
+
+    solver = setup_mpc(steps=N, horizon=horizon, solver_config="test", build=True)
+
+    p_car = F110()
+    tire_params = _get_tire_params(p_car)
+
+    ref_traj = _build_reference_trajectory(N, dt, vx_ref=3.0)  # (N+1, 6)
+
+    # Stage-wise parameters: [Cf, Cr, muf, mur, Cro, x_ref(6)] for k = 0..N
+    for k in range(N + 1):
+        p_k = np.concatenate([tire_params, ref_traj[k]])
+        solver.set(k, "p", p_k)
+
+    # Initial state: x, y, phi, vx, vy, omega, omega_w, dFz, current, delta
+    x0 = np.zeros(10)
+    x0[3] = 3.0                       # vx
+    x0[6] = x0[3] / p_car['rw']       # omega_w, consistent with vx (no initial slip)
+
+    solver.set(0, "lbx", x0)
+    solver.set(0, "ubx", x0)
+
+    # Warm start
+    for k in range(N + 1):
+        solver.set(k, "x", x0)
+    for k in range(N):
+        solver.set(k, "u", np.zeros(2))
+
+    status = solver.solve()
+
+    if status != 0:
+        print(f"Solver returned status {status} (nonzero => check solver.print_statistics())")
+        solver.print_statistics()
+    else:
+        print("Solve succeeded.")
+
+    cost = solver.get_cost()
+    u0 = solver.get(0, "u")
+    print(f"Cost: {cost:.4f}")
+    print(f"First control [slew_rate, steer_vel]: {u0}")
+
+    print("\nPredicted trajectory (x, y, phi, vx, vy, omega, omega_w, dFz, current, delta):")
+    for k in range(N + 1):
+        xk = solver.get(k, "x")
+        print(f"  k={k:2d}: {np.array2string(xk, precision=3, suppress_small=True)}")
+
+
+if __name__ == "__main__":
+    main()
