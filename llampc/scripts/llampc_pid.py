@@ -120,7 +120,7 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'mocap_square2slow.npz')
+        self.declare_parameter('track_file_name', 'mocap_square2fast.npz')
         self.declare_parameter('odom_topic', '/odometry/filtered')
         #self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
@@ -130,7 +130,7 @@ class MPCNode(Node):
         self.dt = self.Tf / self.N
         self.control_callback_speed = 0.04
         self.lla_predict_horizon = 0.04
-        self.lla_reset_interval = 0
+        self.lla_reset_interval = 5
         self.lla_reset_counter = 0
 
         self.min_pwm = 0.05
@@ -193,12 +193,12 @@ class MPCNode(Node):
         
         # grid discretization
         discretization_dict = {
-            'Bf': 4,   # 15% variation
-            'Br': 4,   # 15% variation
-            'Cf': 4,   # 15% variation
-            'Cr': 4,   # 15% variation
-            'Df': 4,   # 15% variation
-            'Dr': 4,   # 15% variation
+            'Bf': 5,   # 15% variation
+            'Br': 5,   # 15% variation
+            'Cf': 5,   # 15% variation
+            'Cr': 5,   # 15% variation
+            'Df': 5,   # 15% variation
+            'Dr': 5,   # 15% variation
         }
 
         cost_weights = np.array([0.0, 0.0, 20.0, 0.0, 10.0, 0.01])# x, y, theta, vx, vy, omega
@@ -222,7 +222,7 @@ class MPCNode(Node):
             num_models
         )
                 
-        history_length=20
+        history_length=40
         self.lb_history = history.LBHistory(
             num_models, history_length,
             self.lla_predict_horizon, cost_weights,
