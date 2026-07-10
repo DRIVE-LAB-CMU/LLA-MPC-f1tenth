@@ -120,7 +120,7 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'mocap_square2fast.npz')
+        self.declare_parameter('track_file_name', 'mocap_curvefast.npz')
         self.declare_parameter('odom_topic', '/odometry/filtered')
         #self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
@@ -193,12 +193,12 @@ class MPCNode(Node):
         
         # grid discretization
         discretization_dict = {
-            'Bf': 5,   # 15% variation
-            'Br': 5,   # 15% variation
-            'Cf': 5,   # 15% variation
-            'Cr': 5,   # 15% variation
-            'Df': 5,   # 15% variation
-            'Dr': 5,   # 15% variation
+            'Bf': 1,   # 15% variation
+            'Br': 1,   # 15% variation
+            'Cf': 7,   # 15% variation
+            'Cr': 7,   # 15% variation
+            'Df': 7,   # 15% variation
+            'Dr': 7,   # 15% variation
         }
 
         cost_weights = np.array([0.0, 0.0, 20.0, 0.0, 10.0, 0.01])# x, y, theta, vx, vy, omega
@@ -207,7 +207,7 @@ class MPCNode(Node):
         param_dict = get_param_dict_grid(mean_dict, variation_dict, 
                                          discretization=discretization_dict, 
                                          ground_truth=True,
-                                         noadapt=False)
+                                         noadapt=True)
         num_models = len(param_dict['Bf'])
         
         self.get_logger().info("Dynamics bank starting")
