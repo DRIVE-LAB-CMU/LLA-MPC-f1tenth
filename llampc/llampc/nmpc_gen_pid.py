@@ -234,7 +234,7 @@ def create_ocp(model, params_car, steps, horizon):
     # ocp.solver_options.sim_method_num_steps = 8
 
     ocp.solver_options.nlp_solver_type = 'SQP'
-    ocp.solver_options.nlp_solver_max_iter = 5  # matches SQP_RTI (1 Newton step)
+    ocp.solver_options.nlp_solver_max_iter = 10  # matches SQP_RTI (1 Newton step)
     ocp.solver_options.qp_solver_iter_max = 20  # cap inner HPIPM iterations
 
     # ocp.solver_options.globalization = 'FIXED_STEP'

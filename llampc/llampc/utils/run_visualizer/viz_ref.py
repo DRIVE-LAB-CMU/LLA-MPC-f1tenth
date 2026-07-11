@@ -2,8 +2,10 @@
 
 Two windows:
   * main      - trajectory plot + per-parameter time series + playback controls
-  * diagnostics - sliding-window cost, one-step difference, and (optional)
-                  M-step lookahead error, sharing cost-component checkboxes
+  * diagnostics - sliding-window cost, one-step difference, (optional)
+                  M-step lookahead error, and (optional) accumulated MPC
+                  tracking error vs. reference, sharing cost-component
+                  checkboxes
 
 Run as a script. Rollout backend lives in rollouts.py; if it is unavailable the
 visualizer falls back to precomputed npz arrays or the recorded run only.
@@ -97,7 +99,9 @@ class StateVisualizer:
                  general_models=None, compute_rollouts=True,
                  dt=1.0 / 40.0, ol_reset_interval=40, cost_weights=None,
                  full_open_loop=False, log_order=None, window_P=20, cost_form=None,
-                 compute_m_step=False, m_step_M=10):
+                 compute_m_step=False, m_step_M=10,
+                 mpc_state_weights=None, mpc_ctrl_weights=None,
+                 mpc_last_ctrl_weights=None):
         self.n_params_to_show = n_params_to_show
         self.params_per_column = params_per_column
         self.param_names = param_names
@@ -124,6 +128,31 @@ class StateVisualizer:
         # this mask only controls what gets added together for display.
         # Defaults to whichever dims have nonzero weight in cost_form.
         self.active_cost_dims = [bool(w != 0) for w in self.cost_form]
+
+        # Weights for the "accumulated MPC error" diagnostic: squared error
+        # (yaw wrapped at index 2) between the ACTUAL recorded state at
+        # frame t and the FIRST node of the reference segment the real MPC
+        # solved against at that step (logged as ref_trajectory[t][0]), plus
+        # a weighted control-effort term from the logged per-step control
+        # rate (d_ctrl), plus a weighted term for the actual applied control
+        # itself (last_ctrl, i.e. the recorded [accel, steer] command, as
+        # distinct from its rate). Summed CUMULATIVELY (not windowed) over
+        # the whole run, and only for frames where the NMPC solver actually
+        # ran (the low-speed pure-pursuit fallback contributes zero, see
+        # _compute_mpc_error_curve). The control dimensions aren't known
+        # until d_ctrl/ctrl are loaded, so the combined weight vector is
+        # resolved lazily in _compute_mpc_error_curve; these are just the
+        # raw user-provided pieces (state weights default to x,y only).
+        self._mpc_state_weights_init = (None if mpc_state_weights is None
+                                        else np.asarray(mpc_state_weights, dtype=float))
+        self._mpc_ctrl_weights_init = (None if mpc_ctrl_weights is None
+                                       else np.asarray(mpc_ctrl_weights, dtype=float))
+        self._mpc_last_ctrl_weights_init = (None if mpc_last_ctrl_weights is None
+                                            else np.asarray(mpc_last_ctrl_weights, dtype=float))
+        self.mpc_cost_form = None
+        self.active_mpc_cost_dims = None
+        self.mpc_dim_labels = None
+
         self.full_open_loop = full_open_loop
         self.general_models = general_models or {}
         self.log_order = log_order or DEFAULT_LOG_ORDER
@@ -165,7 +194,9 @@ class StateVisualizer:
         """Load trajectory data from npz file."""
         data = np.load(filepath, allow_pickle=True)
         self._raw = data
-        self.time = data["time"]
+        self.time = np.asarray(data["time"], dtype=float)
+        if len(self.time) > 0:
+            self.time = self.time - self.time[0]
         state = data["state"]
         self.state = state
         self.x = state[:, 0]
@@ -227,6 +258,18 @@ class StateVisualizer:
             st = data["solve_time"]
             if len(st) > 0:
                 self.solve_time = np.asarray(st, dtype=float)
+
+        # Optional per-timestep control-rate command (d_ctrl), logged by the
+        # real-time node. Ragged: empty ([]) on frames handled by the
+        # low-speed pure-pursuit fallback, a real array (e.g. [slew_rate,
+        # steer_vel]) on frames the NMPC solver actually ran. Used to (a)
+        # detect and exclude pure-pursuit frames from the accumulated
+        # MPC-error diagnostic, and (b) fold control effort into that cost.
+        self.d_ctrl = None
+        if "d_ctrl" in data:
+            dctrl_data = data["d_ctrl"]
+            if len(dctrl_data) > 0:
+                self.d_ctrl = dctrl_data
 
         if self.n_params_to_show is None:
             self.n_params_to_show = [x for x in range(len(self.params))]
@@ -335,6 +378,10 @@ class StateVisualizer:
         self._compute_cost_curves()
         # M-step lookahead error (gated by compute_m_step; expensive).
         self._compute_m_step_curves()
+        # Accumulated tracking error of the ACTUAL state vs. the reference
+        # the real controller solved against (first node of the logged
+        # reference segment for that step), plus control-effort cost.
+        self._compute_mpc_error_curve()
 
     def _step_cost_components(self, traj):
         """Per-timestep, per-state-dimension weighted squared error vs truth,
@@ -441,6 +488,197 @@ class StateVisualizer:
                     self.gen_m_step_components.setdefault(name, {})[mode] = comp[:T, i, :]
 
         self._has_m_step = bool(self.lla_m_step_components or self.gen_m_step_components)
+
+    # ------------------------------------------------------------------
+    # Accumulated MPC tracking error: ACTUAL state vs. reference, NMPC-only
+    # ------------------------------------------------------------------
+    def _extract_first_ref_node(self):
+        """Return an (T, 6) array: the first node of the logged reference
+        segment at each control step (i.e. what the real MPC solved
+        against at k=0, roughly "where the controller currently wants to
+        be"). Returns None if no reference segments were logged.
+
+        Indexed directly against the recorded run (T = n_frames), not
+        against any model rollout, since this diagnostic no longer depends
+        on rollouts at all. Segments can be ragged (pure-pursuit frames log
+        a single point, NMPC frames log the full N+1-length segment), so
+        each frame is normalized independently and short rows are
+        zero-padded up to 6 columns (x, y, theta, vx, vy, omega).
+        """
+        if self.ref_trajectory is None:
+            return None
+
+        T = min(self.n_frames, len(self.ref_trajectory))
+        if T == 0:
+            return None
+
+        first_nodes = np.zeros((T, 6), dtype=float)
+        for t in range(T):
+            seg = self.ref_trajectory[t]
+            if seg is None or len(seg) == 0:
+                first_nodes[t] = np.nan
+                continue
+            pts = self._as_points(seg)
+            row = np.asarray(pts[0], dtype=float)
+            n = min(6, row.shape[0])
+            first_nodes[t, :n] = row[:n]
+        return first_nodes
+
+    def _compute_mpc_error_curve(self):
+        """Cumulative (running total, NOT a sliding window) tracking error
+        of the ACTUAL recorded state vs. the reference's first node, plus a
+        weighted control-effort term from the logged control rate (d_ctrl),
+        plus a weighted term for the actual applied control itself
+        (last_ctrl = the recorded [accel, steer] command at that frame, as
+        distinct from its rate).
+
+        Only frames where the NMPC solver actually ran are counted (frames
+        handled by the low-speed pure-pursuit fallback log an empty d_ctrl
+        and contribute exactly zero for that step, so the curve stays flat
+        across those stretches rather than accumulating error against a
+        reference the real controller never solved against). The last_ctrl
+        term is masked the same way, for consistency with the "NMPC solves
+        only" framing of this diagnostic.
+        """
+        self.mpc_error_time = None
+        self.mpc_error_cumulative = None     # (T, n_dims) cumulative, weighted
+        self.mpc_error_valid = None          # (T,) bool, True where NMPC ran
+        self.mpc_ctrl_dim = 0
+        self.mpc_last_ctrl_dim = 0
+
+        ref_first = self._extract_first_ref_node()
+        if ref_first is None:
+            return
+
+        T = len(ref_first)
+
+        # Which frames were real NMPC solves (non-empty d_ctrl)? Excludes
+        # the pure-pursuit low-speed fallback frames from the accumulation.
+        valid = np.zeros(T, dtype=bool)
+        ctrl_dim = 0
+        if self.d_ctrl is not None:
+            for t in range(min(T, len(self.d_ctrl))):
+                dc = self.d_ctrl[t]
+                dc = np.atleast_1d(dc) if dc is not None else np.array([])
+                if dc.size > 0:
+                    valid[t] = True
+                    ctrl_dim = max(ctrl_dim, dc.size)
+        else:
+            print("[mpc-error] no d_ctrl logged; can't exclude pure-pursuit "
+                  "frames, so all frames are treated as valid.")
+            valid[:] = True
+
+        self.mpc_ctrl_dim = ctrl_dim
+        n_dims = 6 + ctrl_dim
+
+        # last_ctrl: the actual applied control (accel, steer) recorded every
+        # frame (self.ctrl), not ragged like d_ctrl. Dimension comes straight
+        # from the recorded control array.
+        last_ctrl_dim = int(self.ctrl.shape[1]) if self.ctrl is not None else 0
+
+        # Resolve the combined weight vector / active mask / labels now that
+        # ctrl_dim and last_ctrl_dim are known (state weights default to
+        # x,y only; d_ctrl weights default to 1.0 per channel; last_ctrl
+        # weights default to 1.0 per channel too, unless the user passed one).
+        state_w = (self._mpc_state_weights_init
+                  if self._mpc_state_weights_init is not None
+                  else np.array([1.0, 1.0, 0.0, 0.0, 0.0, 0.0]))
+        if ctrl_dim > 0:
+            ctrl_w = (self._mpc_ctrl_weights_init
+                     if self._mpc_ctrl_weights_init is not None
+                     else np.ones(ctrl_dim))
+            ctrl_w = np.resize(np.asarray(ctrl_w, dtype=float), ctrl_dim)
+        else:
+            ctrl_w = np.zeros(0)
+        if last_ctrl_dim > 0:
+            last_ctrl_w = (self._mpc_last_ctrl_weights_init
+                          if self._mpc_last_ctrl_weights_init is not None
+                          else np.ones(last_ctrl_dim))
+            last_ctrl_w = np.resize(np.asarray(last_ctrl_w, dtype=float), last_ctrl_dim)
+        else:
+            last_ctrl_w = np.zeros(0)
+
+        self.mpc_last_ctrl_dim = last_ctrl_dim
+        self.mpc_cost_form = np.concatenate(
+            [np.asarray(state_w, dtype=float), ctrl_w, last_ctrl_w])
+        self.active_mpc_cost_dims = [bool(w != 0) for w in self.mpc_cost_form]
+
+        last_ctrl_labels = (['accel', 'steer'] if last_ctrl_dim == 2
+                            else [f"last_u{i}" for i in range(last_ctrl_dim)])
+        self.mpc_dim_labels = (list(COST_DIM_LABELS)
+                               + [f"u{i}" for i in range(ctrl_dim)]
+                               + last_ctrl_labels)
+
+        # --- state tracking error (yaw wrapped at index 2) ---
+        truth = np.asarray(self.state[:T], dtype=float)
+        err_state = ref_first - truth
+        err_state[:, 2] = (err_state[:, 2] + np.pi) % (2 * np.pi) - np.pi
+        state_components = err_state ** 2                       # (T, 6), unweighted
+
+        # --- control-effort term from the logged control rate ---
+        if ctrl_dim > 0:
+            ctrl_components = np.zeros((T, ctrl_dim), dtype=float)
+            if self.d_ctrl is not None:
+                for t in range(min(T, len(self.d_ctrl))):
+                    if not valid[t]:
+                        continue
+                    dc = np.atleast_1d(np.asarray(self.d_ctrl[t], dtype=float))
+                    n = min(ctrl_dim, dc.shape[0])
+                    ctrl_components[t, :n] = dc[:n] ** 2
+        else:
+            ctrl_components = np.zeros((T, 0), dtype=float)
+
+        # --- actual applied control term (last_ctrl: accel, steer) ---
+        if last_ctrl_dim > 0:
+            last_ctrl_components = np.asarray(self.ctrl[:T], dtype=float) ** 2
+        else:
+            last_ctrl_components = np.zeros((T, 0), dtype=float)
+
+        components = np.concatenate(
+            [state_components, ctrl_components, last_ctrl_components], axis=1)
+        weighted = components * self.mpc_cost_form[None, :]
+        # Pure-pursuit frames contribute nothing (excluded), rather than
+        # being dropped from the timeline entirely.
+        weighted[~valid] = 0.0
+
+        self.mpc_error_time = np.asarray(self.time[:T], dtype=float)
+        self.mpc_error_cumulative = np.cumsum(weighted, axis=0)
+        self.mpc_error_valid = valid
+
+    def _mpc_error_curve(self):
+        """Sum the cumulative per-component curves for only the currently
+        active dims (state + control). Returns (T,) or None."""
+        if self.mpc_error_cumulative is None:
+            return None
+        mask = np.asarray(self.active_mpc_cost_dims, dtype=float)
+        if not np.any(mask):
+            return np.zeros(self.mpc_error_cumulative.shape[0])
+        return self.mpc_error_cumulative @ mask
+
+    @staticmethod
+    def _shade_excluded_regions(ax, valid, times, color='gray', alpha=0.15,
+                                label='Pure pursuit (excluded)'):
+        """Shade contiguous stretches where `valid` is False (e.g. the
+        low-speed pure-pursuit fallback), so it's visually clear those
+        stretches contribute nothing to the accumulated curve."""
+        if valid is None or times is None or len(valid) == 0:
+            return
+        n = len(valid)
+        i = 0
+        first = True
+        while i < n:
+            if not valid[i]:
+                j = i
+                while j < n and not valid[j]:
+                    j += 1
+                t0 = times[i]
+                t1 = times[min(j, n - 1)]
+                ax.axvspan(t0, t1, color=color, alpha=alpha, zorder=0,
+                          label=label if first else None)
+                first = False
+                i = j
+            else:
+                i += 1
 
     def _iter_limit_trajs(self):
         """Trajectories used to size the axes (the well-behaved ones)."""
@@ -573,24 +811,37 @@ class StateVisualizer:
         row 0 = sliding-window cost (mode-aware)
         row 1 = per-step one-step difference (always one-step)
         row 2 = M-step lookahead error (mode-aware)  [only if computed]
-        right = cost-component checkboxes, shared by all subplots.
+        row 3 = accumulated MPC tracking error: actual state vs. reference,
+                NMPC solves only (single curve, not per-model) [only if computed]
+        right = cost-component checkboxes (rows 0-2); a second panel below
+                controls the MPC-error weights (row 3).
         """
         have_m = self._has_m_step
-        n_rows = 3 if have_m else 2
+        have_mpc_err = self.mpc_error_cumulative is not None
+        n_rows = 2 + int(have_m) + int(have_mpc_err)
 
-        self.fig_diag = plt.figure(figsize=(11, 9 if have_m else 7))
+        self.fig_diag = plt.figure(figsize=(11, 6 + 2.2 * n_rows))
         try:
             self.fig_diag.canvas.manager.set_window_title('Cost / lookahead diagnostics')
         except Exception:
             pass
 
         gs = self.fig_diag.add_gridspec(
-            n_rows, 1, left=0.08, right=0.80, top=0.95, bottom=0.07, hspace=0.40
+            n_rows, 1, left=0.08, right=0.80, top=0.95, bottom=0.07, hspace=0.45
         )
         self.ax_cost = self.fig_diag.add_subplot(gs[0])
         self.ax_onestep = self.fig_diag.add_subplot(gs[1], sharex=self.ax_cost)
-        self.ax_mstep = (self.fig_diag.add_subplot(gs[2], sharex=self.ax_cost)
-                         if have_m else None)
+
+        next_row = 2
+        self.ax_mstep = None
+        if have_m:
+            self.ax_mstep = self.fig_diag.add_subplot(gs[next_row], sharex=self.ax_cost)
+            next_row += 1
+
+        self.ax_mpc_error = None
+        if have_mpc_err:
+            self.ax_mpc_error = self.fig_diag.add_subplot(gs[next_row], sharex=self.ax_cost)
+            next_row += 1
 
         self.ax_cost.set_title(f'Sliding-window model cost (P={self.window_P})',
                                fontsize=10, fontweight='bold', loc='left')
@@ -612,16 +863,31 @@ class StateVisualizer:
             self.ax_mstep.grid(True, alpha=0.3)
             self.ax_mstep.tick_params(labelsize=8)
 
+        if self.ax_mpc_error is not None:
+            self.ax_mpc_error.set_title(
+                'Accumulated MPC error: actual state vs. reference (NMPC solves only)',
+                fontsize=10, fontweight='bold', loc='left')
+            self.ax_mpc_error.set_ylabel('Cumulative error', fontsize=9)
+            self.ax_mpc_error.grid(True, alpha=0.3)
+            self.ax_mpc_error.tick_params(labelsize=8)
+
         # X label only on the bottom-most subplot.
-        bottom_ax = self.ax_mstep if self.ax_mstep is not None else self.ax_onestep
+        bottom_ax = self.ax_mpc_error if self.ax_mpc_error is not None else \
+            (self.ax_mstep if self.ax_mstep is not None else self.ax_onestep)
         bottom_ax.set_xlabel('Time (s)', fontsize=9)
 
         if self.cost_time is not None and len(self.cost_time) > 1:
             self.ax_cost.set_xlim(self.cost_time[0], self.cost_time[-1])
 
-        self.ax_cost_dims = self.fig_diag.add_axes([0.82, 0.40, 0.16, 0.30])
+        self.ax_cost_dims = self.fig_diag.add_axes([0.82, 0.55, 0.16, 0.28])
         self.ax_cost_dims.set_title('Cost terms', fontsize=8, fontweight='bold')
         self.ax_cost_dims.axis('off')
+
+        self.ax_mpc_cost_dims = None
+        if have_mpc_err:
+            self.ax_mpc_cost_dims = self.fig_diag.add_axes([0.82, 0.15, 0.16, 0.28])
+            self.ax_mpc_cost_dims.set_title('MPC-error terms', fontsize=8, fontweight='bold')
+            self.ax_mpc_cost_dims.axis('off')
 
     def setup_artists(self):
         """Initialize plot elements."""
@@ -766,6 +1032,8 @@ class StateVisualizer:
         self.ms_dot_lla = None
         self.ms_lines_gen = {}
         self.ms_dots_gen = {}
+        self.mpc_error_line = None
+        self.mpc_error_dot = None
 
         if self.lla_traj is not None:
             self.cost_line_lla, = self.ax_cost.plot([], [], '-', color='orange',
@@ -808,6 +1076,15 @@ class StateVisualizer:
                 self.ms_lines_gen[name] = mline
                 self.ms_dots_gen[name] = mdot
 
+        # ---- Accumulated MPC-error line/dot (single curve, only if computed) ----
+        if getattr(self, "ax_mpc_error", None) is not None and self.mpc_error_cumulative is not None:
+            self.mpc_error_line, = self.ax_mpc_error.plot(
+                [], [], '-', color='purple', linewidth=1.8, label='Actual state (NMPC only)')
+            self.mpc_error_dot, = self.ax_mpc_error.plot(
+                [], [], 'o', color='purple', mec='k', markersize=6, zorder=5)
+            self._shade_excluded_regions(
+                self.ax_mpc_error, self.mpc_error_valid, self.mpc_error_time)
+
         # Red shaded trailing-window span on the one-step subplot, marking the
         # same trailing P-sample window under the cursor.
         self.cost_window_span = self.ax_onestep.axvspan(
@@ -821,6 +1098,10 @@ class StateVisualizer:
         if getattr(self, "ax_mstep", None) is not None:
             self.mstep_cursor = self.ax_mstep.axvline(
                 x=0, color='red', linestyle='--', linewidth=1.2, alpha=0.7, zorder=3)
+        self.mpc_error_cursor = None
+        if getattr(self, "ax_mpc_error", None) is not None:
+            self.mpc_error_cursor = self.ax_mpc_error.axvline(
+                x=0, color='red', linestyle='--', linewidth=1.2, alpha=0.7, zorder=3)
 
         if self.cost_line_lla is not None or self.cost_lines_gen:
             ncol = min(4, 1 + len(self.general_order))
@@ -829,8 +1110,11 @@ class StateVisualizer:
             if (getattr(self, "ax_mstep", None) is not None
                     and (self.ms_line_lla is not None or self.ms_lines_gen)):
                 self.ax_mstep.legend(loc='upper left', fontsize=7, ncol=ncol)
+            if getattr(self, "ax_mpc_error", None) is not None and self.mpc_error_line is not None:
+                self.ax_mpc_error.legend(loc='upper left', fontsize=7)
 
         self._setup_cost_dim_checkboxes()
+        self._setup_mpc_cost_dim_checkboxes()
         self._refresh_cost_lines()
 
     def _setup_cost_dim_checkboxes(self):
@@ -855,6 +1139,31 @@ class StateVisualizer:
         self.active_cost_dims[i] = not self.active_cost_dims[i]
         self._refresh_cost_lines()
         self._update_cost_cursor(self.current_frame)
+        if getattr(self, "fig_diag", None) is not None:
+            self.fig_diag.canvas.draw_idle()
+
+    def _setup_mpc_cost_dim_checkboxes(self):
+        """Checkboxes to toggle which state-dimension components are summed
+        into the accumulated MPC-error curves (row 3). Independent from the
+        lookback-cost checkboxes above; same on-the-fly recombination
+        pattern (no recompute of the underlying cumulative sums)."""
+        if getattr(self, "ax_mpc_cost_dims", None) is None or self.mpc_dim_labels is None:
+            self.mpc_cost_dim_checks = None
+            return
+        self.mpc_cost_dim_checks = CheckButtons(
+            self.ax_mpc_cost_dims, self.mpc_dim_labels, list(self.active_mpc_cost_dims)
+        )
+        for label in self.mpc_cost_dim_checks.labels:
+            label.set_fontsize(8)
+        self.mpc_cost_dim_checks.on_clicked(self.on_mpc_cost_dim_toggle)
+
+    def on_mpc_cost_dim_toggle(self, label):
+        """Flip one MPC-error component's active flag (state dim or control
+        channel) and redraw the recombined accumulated curve + cursor dot."""
+        i = self.mpc_dim_labels.index(label)
+        self.active_mpc_cost_dims[i] = not self.active_mpc_cost_dims[i]
+        self._refresh_mpc_error_lines()
+        self._update_mpc_error_cursor(self.current_frame)
         if getattr(self, "fig_diag", None) is not None:
             self.fig_diag.canvas.draw_idle()
 
@@ -954,6 +1263,25 @@ class StateVisualizer:
                 [self.ms_line_lla, *self.ms_lines_gen.values()]
             )
 
+        # --- Accumulated MPC error vs. reference (mode-aware) ---
+        self._refresh_mpc_error_lines()
+
+    def _refresh_mpc_error_lines(self):
+        """Single actual-state-vs-reference curve; independent of the
+        model_mode / show_lla / show_general toggles, since it doesn't
+        involve any model rollout."""
+        if getattr(self, "ax_mpc_error", None) is None or self.mpc_error_time is None:
+            return
+        if self.mpc_error_line is None:
+            return
+
+        curve = self._mpc_error_curve()
+        if curve is not None:
+            self.mpc_error_line.set_data(self.mpc_error_time, curve)
+        else:
+            self.mpc_error_line.set_data([], [])
+        self._autoscale_axis_y(self.ax_mpc_error, [self.mpc_error_line])
+
     def _update_cost_cursor(self, frame_idx):
         if getattr(self, "ax_cost", None) is None or self.cost_time is None:
             return
@@ -1010,6 +1338,27 @@ class StateVisualizer:
                     dot.set_data([ct], [curve[ridx]])
                 else:
                     dot.set_data([], [])
+
+        # Accumulated MPC-error subplot
+        self._update_mpc_error_cursor(frame_idx)
+
+    def _update_mpc_error_cursor(self, frame_idx):
+        if getattr(self, "ax_mpc_error", None) is None or self.mpc_error_time is None:
+            return
+        ridx = min(frame_idx, len(self.mpc_error_time) - 1)
+        if ridx < 0:
+            return
+        ct = float(self.mpc_error_time[ridx])
+
+        if self.mpc_error_cursor is not None:
+            self.mpc_error_cursor.set_xdata([ct, ct])
+
+        if self.mpc_error_dot is not None:
+            curve = self._mpc_error_curve()
+            if curve is not None and ridx < len(curve):
+                self.mpc_error_dot.set_data([ct], [curve[ridx]])
+            else:
+                self.mpc_error_dot.set_data([], [])
 
     @staticmethod
     def _as_points(arr):
@@ -1524,9 +1873,9 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'multi8.npz')
+    filepath = os.path.join(dir_path, 'multi12.npz')
 
-    ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square2slow.npz')
+    ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_turnfast.npz')
 
     param_names = {
         0: 'Bf',
@@ -1624,7 +1973,7 @@ def main():
     #     'Ce': 10.000000,  # std=0.0000
     #     'Cm': 0.000000,  # std=0.0000
     # },
-}
+    }
 
 
     visualizer = StateVisualizer(
@@ -1642,8 +1991,17 @@ def main():
         full_open_loop=False,
         window_P=40,
         cost_form=np.array([10.0, 10.0, 20.0, 0.0, 10.0, 0.01]),
-        compute_m_step=True,    # set False to skip the slow M-step computation
+        compute_m_step=False,    # set False to skip the slow M-step computation
         m_step_M=10,
+        # Weights for the accumulated-MPC-error graph: actual state vs.
+        # reference node 0 (x, y, theta, vx, vy, omega), NMPC solves only.
+        mpc_state_weights=np.array([2.0, 2.0, 0.0, 0.0, 0.0, 0.1]),
+        # Weight per control-rate channel in d_ctrl (e.g. [slew_rate,
+        # steer_vel]); defaults to 1.0 each if left as None.
+        mpc_ctrl_weights=[0.01],
+        # Weight per actual-applied-control channel (accel, steer); defaults
+        # to 1.0 each if left as None.
+        mpc_last_ctrl_weights=[0.01, 0.01],
     )
     visualizer.show()
 

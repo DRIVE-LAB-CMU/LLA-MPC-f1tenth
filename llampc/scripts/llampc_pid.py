@@ -120,7 +120,7 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'mocap_curvefast.npz')
+        self.declare_parameter('track_file_name', 'mocap_turnfast.npz')
         self.declare_parameter('odom_topic', '/odometry/filtered')
         #self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
@@ -130,7 +130,7 @@ class MPCNode(Node):
         self.dt = self.Tf / self.N
         self.control_callback_speed = 0.04
         self.lla_predict_horizon = 0.04
-        self.lla_reset_interval = 5
+        self.lla_reset_interval = 4
         self.lla_reset_counter = 0
 
         self.min_pwm = 0.05
@@ -158,6 +158,7 @@ class MPCNode(Node):
                 "params": [],
                 "model_idx": [],
                 "ctrl": [],
+                "d_ctrl":[],
                 "cmd":[],
                 "mpc_rollout":[],
                 "ref_trajectory":[],
@@ -193,21 +194,21 @@ class MPCNode(Node):
         
         # grid discretization
         discretization_dict = {
-            'Bf': 1,   # 15% variation
-            'Br': 1,   # 15% variation
-            'Cf': 7,   # 15% variation
-            'Cr': 7,   # 15% variation
-            'Df': 7,   # 15% variation
-            'Dr': 7,   # 15% variation
+            'Bf': 5,   # 15% variation
+            'Br': 5,   # 15% variation
+            'Cf': 5,   # 15% variation
+            'Cr': 5,   # 15% variation
+            'Df': 5,   # 15% variation
+            'Dr': 5,   # 15% variation
         }
 
-        cost_weights = np.array([0.0, 0.0, 20.0, 0.0, 10.0, 0.01])# x, y, theta, vx, vy, omega
+        cost_weights = np.array([0.0, 0.0, 20.0, 0.0, 10.0, 0.1])# x, y, theta, vx, vy, omega
         # x, y, theta, vx, vy, omega
 
         param_dict = get_param_dict_grid(mean_dict, variation_dict, 
                                          discretization=discretization_dict, 
                                          ground_truth=True,
-                                         noadapt=True)
+                                         noadapt=False)
         num_models = len(param_dict['Bf'])
         
         self.get_logger().info("Dynamics bank starting")
@@ -415,6 +416,7 @@ class MPCNode(Node):
 
 
         ref_point, idx = get_lookahead_point(self.current_state, self.track, self.projidx, lookahead_dist = 1.2)
+        d_ctrl = []
         if self.current_state[3] < 0.3:
             self.projidx = idx
 
@@ -465,6 +467,8 @@ class MPCNode(Node):
             
             status = self.solver.solve()
             delta = self.solver.get(1, "x")[-1] # delta
+            d_ctrl = self.solver.get(0, "u")[:]
+
             pwm = self.pid_long_control(
                 ref_segment[3][1], self.current_state[3]
             )
@@ -556,7 +560,14 @@ class MPCNode(Node):
             print(np.max(self.time_history*1e-6, axis = 1))
 
         known_params = np.array(self.dynamics_bank.get_known_params())
-        self.log_lla_data(selected_model_params, selected_model_index, known_params, self.time_history[-1, self.count], mpc_states, record_ref_trajectory)
+        self.log_lla_data(
+            selected_model_params, 
+            selected_model_index, 
+            known_params, 
+            self.time_history[-1, self.count], 
+            d_ctrl,
+            mpc_states, 
+            record_ref_trajectory)
         
 
     def publish_ref_trajectory(self, ref_trajectory):
@@ -636,7 +647,7 @@ class MPCNode(Node):
         
         self.predicted_path_pub.publish(path_msg)
 
-    def log_lla_data(self, params, model_index, known_params, solve_time,
+    def log_lla_data(self, params, model_index, known_params, solve_time, delta_u=[],
                   mpc_rollout=[], ref_trajectory=[]):
         if self.log_data:
             now_ns = time.perf_counter_ns()
@@ -645,6 +656,7 @@ class MPCNode(Node):
             self.log_buffer["params"].append(params.copy())
             self.log_buffer["model_idx"].append(model_index)
             self.log_buffer["ctrl"].append(self.last_control.copy())
+            self.log_buffer["d_ctrl"].append(delta_u)
             self.log_buffer["cmd"].append(self.last_drive_command.copy())
             self.log_buffer["mpc_rollout"].append(np.array(mpc_rollout))
             self.log_buffer["ref_trajectory"].append(np.array(ref_trajectory))
@@ -668,6 +680,7 @@ class MPCNode(Node):
                 params=np.array(self.log_buffer["params"]),
                 model_index=np.array(self.log_buffer["model_idx"]),
                 ctrl=np.array(self.log_buffer["ctrl"]), 
+                d_ctrl=np.array(self.log_buffer["d_ctrl"]), 
                 states=np.array(self.log_buffer["predicted_state"]),
                 mpc_rollout=np.array(self.log_buffer["mpc_rollout"]),
                 ref_trajectory=np.array(self.log_buffer["ref_trajectory"]),
