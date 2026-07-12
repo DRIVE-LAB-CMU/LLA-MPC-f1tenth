@@ -181,6 +181,7 @@ class MPCNode(Node):
                 "params": [],
                 "model_idx": [],
                 "ctrl": [],
+                "d_ctrl":[],
                 "cmd":[],
                 "mpc_rollout":[],
                 "ref_trajectory":[],
@@ -188,6 +189,8 @@ class MPCNode(Node):
                 "predicted_state": [],
                 "one_step_cost": [],
                 "running_cost":[],
+                "known_params": [],   # NEW
+                "solve_time": [],     # NEW
             }
             self.get_logger().info(f"Logging MPC data to {self.log_file}")
     
@@ -323,7 +326,7 @@ class MPCNode(Node):
         # self.get_logger().info(f"Logging State {self.current_state}")
 
     def sensor_callback(self, msg):
-        erpm = msg.speed
+        erpm = msg.state.speed
 
         pole_pairs = self.params_car['pole_pairs']
         gear_ratio = self.params_car['gear_ratio']
@@ -332,7 +335,7 @@ class MPCNode(Node):
         motor_omega = motor_rpm * (2 * np.pi / 60.0)
         self.omega_w = motor_omega / gear_ratio
 
-        self.last_control[0] = msg.avg_iq
+        self.last_control[0] = msg.state.avg_iq
         
     def dfz_callback(self, msg):
         self.dFz = msg.data
@@ -468,8 +471,8 @@ class MPCNode(Node):
       
 
         self.checkpoint[3] = time.perf_counter_ns()
-
-        if self.current_state[3] < 0.5:
+        d_ctrl = []
+        if self.current_state[3] < 0.1:
             ref_point, idx = get_lookahead_point(self.current_state, self.track, self.projidx, lookahead_dist = 1.2)
             self.projidx = idx
 
@@ -495,7 +498,6 @@ class MPCNode(Node):
 
             self.dynamics_bank.update_known_params(self.omega_w, self.dFz)
 
-            known_params = np.array(self.dynamics_bank.get_known_params())
             # no need to copy states and trajectory in case of update b/c node is single thread
             ref_segment, idx = get_reference_trajectory_segment(x0, v0, self.track, self.N+1, self.dt, self.projidx)
             self.projidx = idx
@@ -531,6 +533,7 @@ class MPCNode(Node):
                 
             status = self.solver.solve()
             u_opt = self.solver.get(1, "x")[-2:] # pwm, delta
+            d_ctrl = self.solver.get(0, "u")[:]
             self.mpc_dfz_pub.publish(Float64MultiArray(
                 data=[float(self.solver.get(1, "x")[7]), 1.0]
             ))
@@ -575,6 +578,7 @@ class MPCNode(Node):
         # eq_tol = 1e-2 if vx > 0.1 else 0.1   # much looser at low speed
         
         self.checkpoint[5] = time.perf_counter_ns()
+        
         if status == 0 or (status == 2):  # Success
             # Get optimal control
             self.apply_control(u_opt) # Apply control
@@ -620,8 +624,16 @@ class MPCNode(Node):
         if(self.count == 0):
             print(np.max(self.time_history*1e-6, axis = 1))
 
+        known_params = np.array(self.dynamics_bank.get_known_params())
         
-        self.log_lla_data(selected_model_params, selected_model_index, mpc_states, record_ref_trajectory, known_params, self.time_history[-1, self.count])
+        self.log_lla_data(
+            selected_model_params, 
+            selected_model_index, 
+            known_params, 
+            self.time_history[-1, self.count], 
+            d_ctrl,
+            mpc_states, 
+            record_ref_trajectory)
 
     def publish_ref_trajectory(self, ref_trajectory):
         ref_msg = PoseArray()
@@ -700,7 +712,7 @@ class MPCNode(Node):
         
         self.predicted_path_pub.publish(path_msg)
 
-    def log_lla_data(self, params, model_index, known_params, solve_time,
+    def log_lla_data(self, params, model_index, known_params, solve_time, delta_u=[],
                   mpc_rollout=[], ref_trajectory=[]):
         if self.log_data:
             now_ns = time.perf_counter_ns()
@@ -709,11 +721,13 @@ class MPCNode(Node):
             self.log_buffer["params"].append(params.copy())
             self.log_buffer["model_idx"].append(model_index)
             self.log_buffer["ctrl"].append(self.last_control.copy())
+            self.log_buffer["d_ctrl"].append(delta_u)
             self.log_buffer["cmd"].append(self.last_drive_command.copy())
             self.log_buffer["mpc_rollout"].append(np.array(mpc_rollout))
             self.log_buffer["ref_trajectory"].append(np.array(ref_trajectory))
             self.log_buffer["known_params"].append(np.array(known_params))  # NEW
-            self.log_buffer["solve_time"].append(solve_time)
+            self.log_buffer["solve_time"].append(solve_time)                # NEW
+
 
     def log_rollout_data(self, lb_history, one_step_cost, ok_time):
         if(self.log_data):

@@ -15,7 +15,7 @@ def export_model(params_car, exact = False):
     x = ca.MX.sym('x', 10)   # state: x, y, phi, vx, vy, omega, omega_w, dFz, current, delta
     u = ca.MX.sym('u', 2)   # control rate: curent slew rate, steer rate
     p = ca.MX.sym('p', 5)
-    # parameters: muf, mur, Cf, Cr, Cro
+
     x_ref = ca.MX.sym('x_ref', 6)
 
     mass = params_car['mass']
@@ -68,14 +68,14 @@ def export_model(params_car, exact = False):
         Fr_total = ca.if_else(sigma_r < sigmar_max, brush(Cr, sigma_r, Frmax), Frmax)
 
         # --- front: lateral only ---
-        Ffy = -Ff_total*ca.tan(alphaf)/sigma_f
+        Ffy = Ff_total*ca.tan(alphaf)/sigma_f
         Ffx = Ff_total*kappa       /sigma_f
         
         # --- rear: lateral and longitudinal share Fr_total via sigma_r ---
         v_eps = 0.5
         F_roll = Cro * Frz * ca.tanh(x[3] / v_eps)
         Frx = Fr_total*kappa/sigma_r - F_roll
-        Fry =  -Fr_total*ca.tan(alphar)/sigma_r
+        Fry =  Fr_total*ca.tan(alphar)/sigma_r
 
         # --- drive torque on rear wheel ---
         tau_drive = 1.5 * pole_pairs * current
@@ -125,14 +125,14 @@ def export_model(params_car, exact = False):
         Ff_total = ca.if_else(sigma_f < sigmaf_max, brush(Cf, sigma_f, Ffmax), Ffmax)
         Fr_total = ca.if_else(sigma_r < sigmar_max, brush(Cr, sigma_r, Frmax), Frmax)
 
-        Ffy = -Ff_total*ca.tan(alphaf)/sigma_f
+        Ffy = Ff_total*ca.tan(alphaf)/sigma_f
         Ffx = Ff_total*kappa       /sigma_f
 
         # --- rear: lateral and longitudinal share Fr_total via sigma_r ---
         v_eps = 0.5
         F_roll = Cro * Frz * ca.tanh(x[3] / v_eps)
         Frx = Fr_total*kappa/sigma_r - F_roll
-        Fry =  -Fr_total*ca.tan(alphar)/sigma_r
+        Fry =  Fr_total*ca.tan(alphar)/sigma_r
 
         # --- drive torque on rear wheel ---
         tau_drive = 1.5 * pole_pairs * current
@@ -187,7 +187,7 @@ def create_ocp(model, params_car, steps, horizon):
     w_theta = 0
     w_vx = 0
 
-    w_current = 0.01
+    w_current = 0.0
     w_steer = 0.1
     w_slew = 0.0
     w_steer_v = 0.01
