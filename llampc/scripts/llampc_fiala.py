@@ -746,13 +746,16 @@ class MPCNode(Node):
                 params=np.array(self.log_buffer["params"]),
                 model_index=np.array(self.log_buffer["model_idx"]),
                 ctrl=np.array(self.log_buffer["ctrl"]), 
+                d_ctrl=np.array(self.log_buffer["d_ctrl"]),
                 states=np.array(self.log_buffer["predicted_state"]),
                 mpc_rollout=np.array(self.log_buffer["mpc_rollout"]),
                 ref_trajectory=np.array(self.log_buffer["ref_trajectory"]),
                 one_step_cost=np.array(self.log_buffer["one_step_cost"]),
                 running_cost=np.array(self.log_buffer["running_cost"]),
                 ok_time = np.array(self.log_buffer["ok_time"]),
-                cmd = np.array(self.log_buffer["cmd"])
+                cmd = np.array(self.log_buffer["cmd"]),
+                known_params = np.array(self.log_buffer["known_params"]),
+                solve_time = np.array(self.log_buffer["solve_time"])
             )
         super().destroy_node()
 

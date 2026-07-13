@@ -687,7 +687,9 @@ class MPCNode(Node):
                 one_step_cost=np.array(self.log_buffer["one_step_cost"]),
                 running_cost=np.array(self.log_buffer["running_cost"]),
                 ok_time = np.array(self.log_buffer["ok_time"]),
-                cmd = np.array(self.log_buffer["cmd"])
+                cmd = np.array(self.log_buffer["cmd"]),
+                known_params = np.array(self.log_buffer["known_params"]),
+                solve_time = np.array(self.log_buffer["solve_time"])
             )
         super().destroy_node()
 

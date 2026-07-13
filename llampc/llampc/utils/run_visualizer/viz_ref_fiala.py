@@ -74,7 +74,7 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button, CheckButtons
 from matplotlib.patches import FancyArrow, Circle, Patch
 
-from rollouts_lateral import (
+from rollouts_fiala import (
     _ROLLOUT_OK, _ROLLOUT_ERR,
     BANK_ORDER, DEFAULT_LOG_ORDER, COST_DIM_LABELS,
     dict_to_bank_vec, remap_to_bank_order,
@@ -1703,6 +1703,14 @@ class StateVisualizer:
         if self.solve_time is not None and frame_idx < len(self.solve_time):
             solve_time_str = f"{self.solve_time[frame_idx]:.2f} ms"
 
+        known_str = "n/a"
+        if self.known_params is not None and frame_idx < len(self.known_params):
+            kp = self.known_params[frame_idx]
+            if kp is not None:
+                kp_arr = np.atleast_1d(np.asarray(kp, dtype=float))
+                if kp_arr.size > 0:
+                    known_str = ", ".join(f"{v:.3f}" for v in kp_arr)
+
         time_str = f"Time: {self.time[frame_idx]:.3f}s"
         info = (f"Frame: {frame_idx}/{self.n_frames-1}\n{time_str}\n"
                 f"\u03b8: {self.theta[frame_idx]:.3f} rad\n"
@@ -1712,6 +1720,7 @@ class StateVisualizer:
                 f"accel: {self.accel[frame_idx]:.3f}\n"
                 f"steer: {self.steer[frame_idx]:.3f}\n"
                 f"solve: {solve_time_str}\n"
+                f"known: {known_str}\n"
                 f"Model: {self.model_idx[frame_idx]}")
         self.info_text.set_text(info)
 
@@ -1873,24 +1882,16 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'fiala.npz')
+    filepath = os.path.join(dir_path, 'fiala2.npz')
 
     ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_turnfast.npz')
 
     param_names = {
-        0: 'Bf',
-        1: 'Br',
-        2: 'Cf',
-        3: 'Cr',
-        4: 'Df',
-        5: 'Dr',
-        # 6: 'Cro',
-        # 7: 'Cd',
-        # 8: 'Ce',
-        # 9: 'Cm',
-        # 10: 'Roll',
-        # 11: 'Pitch'
-
+        0: 'Cf',
+        1: 'Cr',
+        2: 'muf',
+        3: 'mur',
+        4: 'Cro',
     }
 
     obstacles = []
@@ -1905,82 +1906,20 @@ def main():
 
     general_models = {
     "nominal": {
-        'Bf': 6.5, 'Br': 6.5, 'Cf': 1.4, 'Cr': 1.4,
-        'Df': 17.0, 'Dr': 17.0
+        'Cf': 250,
+        'Cr': 225,
+        'muf': 0.9,
+        'mur': 0.9,
+        'Cro': 0.0,
     },
-    # rank 1  |  model index 5  |  selected 684x (55.6%)
-    # "model_5": {
-    #     'Bf': 6.500000,  # std=0.0000
-    #     'Br': 6.500000,  # std=0.0000
-    #     'Cf': 1.400000,  # std=0.0000
-    #     'Cr': 1.400000,  # std=0.0000
-    #     'Df': 12.000000,  # std=0.0000
-    #     'Dr': 22.000000,  # std=0.0000
-    #     'Cro': 0.000000,  # std=0.0000
-    #     'Cd': 0.000000,  # std=0.0000
-    #     'Ce': 10.000000,  # std=0.0000
-    #     'Cm': 0.000000,  # std=0.0000
-    # },
-    # # rank 2  |  model index 1  |  selected 341x (27.7%)
-    # "model_1": {
-    #     'Bf': 6.500000,  # std=0.0000
-    #     'Br': 6.500000,  # std=0.0000
-    #     'Cf': 1.400000,  # std=0.0000
-    #     'Cr': 1.400000,  # std=0.0000
-    #     'Df': 12.000000,  # std=0.0000
-    #     'Dr': 12.000000,  # std=0.0000
-    #     'Cro': 0.000000,  # std=0.0000
-    #     'Cd': 0.000000,  # std=0.0000
-    #     'Ce': 10.000000,  # std=0.0000
-    #     'Cm': 0.000000,  # std=0.0000
-    # },
-    # # rank 3  |  model index 21  |  selected 182x (14.8%)
-    # "model_21": {
-    #     'Bf': 6.500000,  # std=0.0000
-    #     'Br': 6.500000,  # std=0.0000
-    #     'Cf': 1.400000,  # std=0.0000
-    #     'Cr': 1.400000,  # std=0.0000
-    #     'Df': 22.000000,  # std=0.0000
-    #     'Dr': 12.000000,  # std=0.0000
-    #     'Cro': 0.000000,  # std=0.0000
-    #     'Cd': 0.000000,  # std=0.0000
-    #     'Ce': 10.000000,  # std=0.0000
-    #     'Cm': 0.000000,  # std=0.0000
-    # },
-    # # rank 4  |  model index 11  |  selected 11x (0.9%)
-    # "model_11": {
-    #     'Bf': 6.500000,  # std=0.0000
-    #     'Br': 6.500000,  # std=0.0000
-    #     'Cf': 1.400000,  # std=0.0000
-    #     'Cr': 1.400000,  # std=0.0000
-    #     'Df': 17.000000,  # std=0.0000
-    #     'Dr': 12.000000,  # std=0.0000
-    #     'Cro': 0.000000,  # std=0.0000
-    #     'Cd': 0.000000,  # std=0.0000
-    #     'Ce': 10.000000,  # std=0.0000
-    #     'Cm': 0.000000,  # std=0.0000
-    # },
-    # # rank 5  |  model index 6  |  selected 6x (0.5%)
-    # "model_6": {
-    #     'Bf': 6.500000,  # std=0.0000
-    #     'Br': 6.500000,  # std=0.0000
-    #     'Cf': 1.400000,  # std=0.0000
-    #     'Cr': 1.400000,  # std=0.0000
-    #     'Df': 14.500000,  # std=0.0000
-    #     'Dr': 12.000000,  # std=0.0000
-    #     'Cro': 0.000000,  # std=0.0000
-    #     'Cd': 0.000000,  # std=0.0000
-    #     'Ce': 10.000000,  # std=0.0000
-    #     'Cm': 0.000000,  # std=0.0000
-    # },
     }
 
 
     visualizer = StateVisualizer(
         filepath,
         ref_filepath=ref_filepath,
-        n_params_to_show=range(6),
-        params_per_column=6,
+        n_params_to_show=range(5),
+        params_per_column=5,
         param_names=param_names,
         obstacles=obstacles,
         r_car=r_car,

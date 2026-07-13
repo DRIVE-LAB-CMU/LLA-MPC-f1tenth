@@ -33,7 +33,7 @@ import numpy as np
 try:
     from llampc.params import F110
     from llampc.rollout import history_no_record
-    from llampc.rollout import dynamic as dynamics
+    from llampc.rollout import dynamic_fiala as dynamics
     from llampc.rollout.rk6 import rk6Factory
     import jax
     _ROLLOUT_OK = True
@@ -48,11 +48,11 @@ except Exception as e:  # noqa: BLE001
 # ===========================================================================
 # Order the DBMPacejkaBank constructor expects:
 #   lf, lr, mass, Iz, Bf, Br, Cf, Cr, Df, Dr, Cro, Cd, Ce, Cm, roll, pitch, n
-BANK_ORDER = ['Bf', 'Br', 'Cf', 'Cr', 'Df', 'Dr', 'Cro', 'Cd', 'Ce', 'Cm']
+BANK_ORDER = ['Cf', 'Cr', 'muf', 'mur', 'Cro']
 
 # Order in which the logged `params` field is laid out by get_model_params_arr().
 # >>> VERIFY against your dynamics.DBMPacejkaBank.get_model_params_arr(). <<<
-DEFAULT_LOG_ORDER = ['Bf', 'Br', 'Cf', 'Cr', 'Df', 'Dr', 'Cro', 'Cd', 'Ce', 'Cm']
+DEFAULT_LOG_ORDER = ['Cf', 'Cr', 'muf', 'mur', 'Cro']
 
 # State layout: [x, y, theta, dx, dy, omega]. Short labels used for the
 # per-component cost checkboxes; index 2 (theta) is angle-wrapped in cost calc.
@@ -85,14 +85,14 @@ def remap_to_bank_order(params, source_order):
 def build_bank(params_bank, params_car, num_models):
     """params_bank: (num_models, 10) in BANK_ORDER."""
     p = params_bank
-    return dynamics.DBMPacejkaBank(
-        params_car['lf'], params_car['lr'], params_car['mass'], params_car['Iz'],
-        p[:, 0], p[:, 1],   # Bf, Br
-        p[:, 2], p[:, 3],   # Cf, Cr
-        p[:, 4], p[:, 5],   # Df, Dr
-        p[:, 6], p[:, 7],   # Cro, Cd
-        p[:, 8], p[:, 9],   # Ce, Cm
-        0, 0, num_models     # roll, pitch, n
+    return dynamics.DBMFialaBank(
+        params_car['lf'], params_car['lr'], 
+        params_car['mass'], params_car['Iz'],
+        params_car['rw'],
+        p[:, 0], p[:, 1],   # Cf, Cr,
+        p[:, 2], p[:, 3],   # muf, mur
+        p[:, 4], # Cro
+        num_models     # roll, pitch, n
     )
 
 
@@ -141,7 +141,8 @@ def simulate_general_models(total, recording, general_params_bank, params_car,
 
 
 def simulate_lla_rollout(total, recording, lla_params_over_time, params_car,
-                         dt, ol_reset_interval, full_open_loop=False):
+                         dt, ol_reset_interval, full_open_loop=False,
+                         known_params_over_time=None):
     """Single trajectory whose Pacejka params change EVERY timestep, fed by the
     optimal-per-timestep sequence taken from the LLA log.
 
@@ -149,13 +150,28 @@ def simulate_lla_rollout(total, recording, lla_params_over_time, params_car,
     traj[t] is the state AT time t: reset to truth[t] every ol_reset_interval
     (so the reset point sits exactly on the recorded trajectory), then
     integrated forward using the t-th parameter set.
+
+    known_params_over_time: optional (total, ...) array of the EXACT
+    known_params logged by the real-time node at each control tick (e.g. via
+    dynamics_bank.update_known_params(vx) -> get_known_params()). If given,
+    step t uses known_params_over_time[t] instead of a single static
+    bank.get_known_params() computed once for the whole rollout - this matters
+    whenever known_params is velocity- (or otherwise state-) dependent, since
+    the real node's value tracked the actual current_state[3] at every tick
+    rather than one fixed value for the entire replay.
     """
     print(f"[rollout] LLA dynamic: {total} steps (params change per timestep)")
     num_steps = len(lla_params_over_time)
 
     bank = build_bank(lla_params_over_time, params_car, num_steps)
     integrator = rk6Factory(jax.device_put(bank.param_bank), dynamics.diffequation, dt)
-    known_params = bank.get_known_params()
+    static_known_params = bank.get_known_params()
+
+    logged_kp = None
+    if known_params_over_time is not None:
+        logged_kp = np.asarray(known_params_over_time)
+        print(f"[rollout] LLA dynamic: using logged known_params {logged_kp.shape} "
+              f"in place of recomputed bank.get_known_params()")
 
     traj_dynamic = []
     current_state = recording["state"][0]
@@ -168,15 +184,19 @@ def simulate_lla_rollout(total, recording, lla_params_over_time, params_car,
 
         traj_dynamic.append(np.array(current_state))        # store the state AT time t
 
+        kp_t = (logged_kp[t] if logged_kp is not None and t < len(logged_kp)
+                else static_known_params)
+
         # Advance t -> t+1 using the t-th parameter set.
         batched_state = np.tile(current_state, (num_steps, 1))
-        next_states = integrator(known_params, batched_state, u_t)
+        next_states = integrator(kp_t, batched_state, u_t)
         current_state = np.array(next_states[t])
 
     return np.array(traj_dynamic)
 
 
-def simulate_lla_one_step(total, recording, lla_params_over_time, params_car, dt):
+def simulate_lla_one_step(total, recording, lla_params_over_time, params_car, dt,
+                          known_params_over_time=None):
     """One-step predictions for the LLA model: each step predicts from truth[t],
     using the t-th parameter set, producing the predicted state at t+1.
 
@@ -184,22 +204,32 @@ def simulate_lla_one_step(total, recording, lla_params_over_time, params_car, dt
     traj[t] = one-step prediction from truth[t-1] using params[t-1].
     This mirrors the general models' one-step convention so the same
     'one_step' mode toggle applies uniformly.
+
+    known_params_over_time: optional per-timestep logged known_params, same
+    semantics as in simulate_lla_rollout - use the logged value at t instead
+    of a single static bank-wide computation.
     """
     print(f"[rollout] LLA one-step: {total} steps")
     num_steps = len(lla_params_over_time)
 
     bank = build_bank(lla_params_over_time, params_car, num_steps)
     integrator = rk6Factory(jax.device_put(bank.param_bank), dynamics.diffequation, dt)
-    known_params = bank.get_known_params()
+    static_known_params = bank.get_known_params()
+
+    logged_kp = None
+    if known_params_over_time is not None:
+        logged_kp = np.asarray(known_params_over_time)
 
     state0 = recording["state"][0]
     one_step = [np.array(state0)]   # index 0 = truth[0], same as general one-step
 
     for t in range(total):
         u_t = recording["ctrl"][t]
+        kp_t = (logged_kp[t] if logged_kp is not None and t < len(logged_kp)
+                else static_known_params)
         # Predict from truth[t] using the t-th LLA params.
         batched_state = np.tile(recording["state"][t], (num_steps, 1))
-        next_states = integrator(known_params, batched_state, u_t)
+        next_states = integrator(kp_t, batched_state, u_t)
         one_step.append(np.array(next_states[t]))   # prediction for t+1
 
     return np.array(one_step[:total])
@@ -256,11 +286,15 @@ def simulate_general_m_step(total, recording, general_params_bank, params_car,
 
 def simulate_lla_m_step(total, recording, lla_params_over_time, params_car,
                         dt, M, cost_form, mode, ol_reset_interval,
-                        full_open_loop=False):
+                        full_open_loop=False, known_params_over_time=None):
     """M-step lookahead error for the LLA (per-timestep params) model.
 
     Same reset semantics as simulate_general_m_step. At horizon step k the
     params used are the ones logged for absolute time ti = t + k.
+
+    known_params_over_time: optional per-timestep logged known_params (see
+    simulate_lla_rollout). If given, the integrator at horizon step ti uses
+    known_params_over_time[ti] instead of a single static bank-wide value.
 
     Returns (total, state_dim): per-dim weighted error summed over the horizon.
     WARNING: ~total * M integrator calls -> this is the slow path.
@@ -270,7 +304,12 @@ def simulate_lla_m_step(total, recording, lla_params_over_time, params_car,
     bank = build_bank(lla_params_over_time, params_car, num_steps)
     integrator = rk6Factory(jax.device_put(bank.param_bank),
                             dynamics.diffequation, dt)
-    known_params = bank.get_known_params()
+    static_known_params = bank.get_known_params()
+
+    logged_kp = None
+    if known_params_over_time is not None:
+        logged_kp = np.asarray(known_params_over_time)
+
     truth = recording["state"]
     ctrl = recording["ctrl"]
     w = np.asarray(cost_form, dtype=float)
@@ -289,8 +328,10 @@ def simulate_lla_m_step(total, recording, lla_params_over_time, params_car,
                     not full_open_loop and ti % ol_reset_interval == 0)
                 if reset:
                     state = truth[ti]
+            kp_ti = (logged_kp[ti] if logged_kp is not None and ti < len(logged_kp)
+                     else static_known_params)
             batched_state = np.tile(state, (num_steps, 1))
-            next_states = integrator(known_params, batched_state, ctrl[ti])
+            next_states = integrator(kp_ti, batched_state, ctrl[ti])
             state = np.array(next_states[ti])
             err = truth[ti + 1] - state
             err[2] = (err[2] + np.pi) % (2 * np.pi) - np.pi
