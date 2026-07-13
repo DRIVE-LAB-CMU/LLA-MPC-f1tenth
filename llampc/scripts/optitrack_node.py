@@ -208,13 +208,12 @@ class OptitrackSubscriber(Node):
 
         # Axis permutation matrix
         P = np.array([
-            [0, -1, 0],  # x_new = z_old
-            [0, 0, 1],  # y_new = x_old
-            [1, 0, 0]   # z_new = y_old
-        ])
+            [-1, 0, 0],
+            [ 0, 0, 1],
+            [ 0, 1, 0]])
 
         # Transform rotation matrix
-        R_new = P @ R_orig          # not P @ R_orig @ P.T
+        R_new = P @ R_orig @ P.T         # not P @ R_orig @ P.T
         quaternion = rot_to_quat(R_new)
 
 
