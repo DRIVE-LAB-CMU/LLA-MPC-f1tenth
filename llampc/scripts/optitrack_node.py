@@ -213,7 +213,7 @@ class OptitrackSubscriber(Node):
             [ 0, 1, 0]])
 
         # Transform rotation matrix
-        R_new = P @ R_orig @ P.T         # not P @ R_orig @ P.T
+        R_new = P @ R_orig        # not P @ R_orig @ P.T
         quaternion = rot_to_quat(R_new)
 
 
