@@ -170,11 +170,11 @@ class DBMFialaBank():
 
     def update_known_params(self, omega_w=None, dFz = None):
         if omega_w:
-            self.known_params = self.known_params.at[6].set(
+            self.known_params = self.known_params.at[5].set(
                 omega_w
             )
         if dFz:
-            self.known_params = self.known_params.at[7].set(
+            self.known_params = self.known_params.at[6].set(
                 dFz
             )
 
