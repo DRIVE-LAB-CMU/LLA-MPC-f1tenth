@@ -5,27 +5,27 @@ __author__ = 'Achin Jain'
 __email__ = 'achinj@seas.upenn.edu'
 import numpy as np
 
-def F110_sim():
-    return {
-        'mu': 1.0489, 
-        'C_Sf': 4.718, 
-        'C_Sr': 5.4562, 
-        'lf': 0.15875, 
-        'lr': 0.17145, 
-        'h': 0.074, 
-        'm': 3.74, 
-        'I': 0.04712, 
-        's_min': -0.4189, 
-        's_max': 0.4189, 
-        'sv_min': -3.2, 
-        'sv_max': 3.2, 
-        'v_switch': 7.319,
-        'a_max': 9.51,
-        'v_min':-5.0, 
-        'v_max': 20.0,
-        'width': 0.31,
-        'length': 0.58
-    }
+# def F110_sim():
+#     return {
+#         'mu': 1.0489, 
+#         'C_Sf': 4.718, 
+#         'C_Sr': 5.4562, 
+#         'lf': 0.15875, 
+#         'lr': 0.17145, 
+#         'h': 0.074, 
+#         'm': 3.74, 
+#         'I': 0.04712, 
+#         's_min': -0.4189, 
+#         's_max': 0.4189, 
+#         'sv_min': -3.2, 
+#         'sv_max': 3.2, 
+#         'v_switch': 7.319,
+#         'a_max': 9.51,
+#         'v_min':-5.0, 
+#         'v_max': 20.0,
+#         'width': 0.31,
+#         'length': 0.58
+#     }
 
 def F110():
     lf = 0.15875			# front tyres from center of gravity [m]
@@ -44,7 +44,6 @@ def F110():
     max_steer = 0.34 		# max steering angle [rad]
     min_steer = -0.34 	# min steering angle [rad]
     max_steer_vel = 3.2 	# max steering velocity [rad/s]
-    tau_k = .57
     
 
     # rw = .047
@@ -99,7 +98,6 @@ def F110():
         'gear_ratio': gear_ratio,
         'lambda':lam,
         'Rs': Rs,
-        'tau_k': tau_k
         }
     return params
 

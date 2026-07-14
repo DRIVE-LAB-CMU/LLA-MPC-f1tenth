@@ -270,6 +270,25 @@ class MPCNode(Node):
         self.lb_history.reset()
         self.get_logger().info("LLA BANK COMPILED")
 
+    def estimate_curvature_from_track(self, projidx):
+        s_arr = self.track.spline.s
+        s = s_arr[projidx % len(s_arr)]
+        kappa = self.track.spline.calc_curvature(s)
+        return abs(kappa)
+    
+    def friction_limited_speed(self, kappa, mu_est, g=9.81, safety_margin=0.85):
+        kappa = max(kappa, 1e-4)
+        return np.sqrt(safety_margin * mu_est * g / kappa)
+
+    def estimate_mu(self, selected_model_params):
+        Df, Dr = selected_model_params[4], selected_model_params[5]  # match your param order
+        mass, g = self.params_car['mass'], 9.81
+        Fz_f = mass * g * self.params_car['lr'] / (self.params_car['lf'] + self.params_car['lr'])
+        Fz_r = mass * g * self.params_car['lf'] / (self.params_car['lf'] + self.params_car['lr'])
+        mu_f = Df / Fz_f
+        mu_r = Dr / Fz_r
+        return min(mu_f, mu_r) 
+
     def pid_long_control(self, ref_v, vx):
         diff = self.max_pwm - self.min_pwm
         err = ref_v - vx
@@ -426,15 +445,18 @@ class MPCNode(Node):
             status = 0
             self.first_control = True
         else:
-            # filtered_state = self.current_state.copy()
-            # if( np.abs(self.current_state[3]) < 0.1):
-            #     filtered_state[3] = 0.1
             aug_state = np.concatenate([self.current_state, [self.last_control[1]]])
             self.dynamics_bank.update_known_params(self.current_state[3])
 
+            mu_est = self.estimate_mu(selected_model_params)
+            kappa = self.estimate_curvature_from_track(self.projidx)
+            v_cap = self.friction_limited_speed(kappa, mu_est)
+            v0 = min(v0, v_cap)
 
             # no need to copy states and trajectory in case of update b/c node is single thread
-            ref_segment, idx = get_reference_trajectory_segment(x0, v0, self.track, self.N+1, self.dt, self.projidx)
+            ref_segment, idx = get_reference_trajectory_segment(
+                x0, v0, self.track, self.N+1, self.dt, self.projidx, scaled_velocity=v_cap
+            )
 
             print("REF")
             self.projidx = idx
@@ -464,7 +486,7 @@ class MPCNode(Node):
                     self.solver.set(i, "x", aug_state)
             
             self.first_control = False
-            
+             
             status = self.solver.solve()
             delta = self.solver.get(1, "x")[-1] # delta
             d_ctrl = self.solver.get(0, "u")[:]

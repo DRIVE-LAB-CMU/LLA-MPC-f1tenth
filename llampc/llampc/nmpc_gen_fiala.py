@@ -26,6 +26,7 @@ def export_model(params_car, exact = False):
     Iw   = params_car['Iw']     # rear driveline rotational inertia [kg m^2]
     pole_pairs  = params_car['pole_pairs']
     gear_ratio  = params_car['gear_ratio']
+    lam = params_car['lambda']
     g    = 9.81
     hcg, L = params_car['h'], lf + lr
     c = 20      # dFz relaxation rate [1/s]
@@ -78,7 +79,7 @@ def export_model(params_car, exact = False):
         Fry =  Fr_total*ca.tan(alphar)/sigma_r
 
         # --- drive torque on rear wheel ---
-        tau_drive = 1.5 * pole_pairs * current
+        tau_drive = 1.5 * pole_pairs * lam *current
 
         # --- realized longitudinal chassis force drives load transfer ---
         Fx_chassis = Frx + Ffx*ca.cos(delta) - Ffy*ca.sin(delta)
@@ -135,7 +136,7 @@ def export_model(params_car, exact = False):
         Fry =  Fr_total*ca.tan(alphar)/sigma_r
 
         # --- drive torque on rear wheel ---
-        tau_drive = 1.5 * pole_pairs * current
+        tau_drive = gear_ratio * 1.5 * pole_pairs *lam* current
         
         # --- realized longitudinal chassis force drives load transfer ---
         Fx_chassis = Frx + Ffx*ca.cos(delta) - Ffy*ca.sin(delta)
@@ -185,7 +186,7 @@ def create_ocp(model, params_car, steps, horizon):
     w_xe = 0.0
     w_ye = 0.0
     w_theta = 0
-    w_vx = 0
+    w_vx = 0.1
 
     w_current = 0.0
     w_steer = 0.1
