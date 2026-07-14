@@ -207,7 +207,7 @@ class OptitrackSubscriber(Node):
         R_orig = quat_to_rot(q_orig)
 
 
-        theta = 0   # or -np.pi/2 -- sign found empirically, see below
+        theta = np.pi/2   # or -np.pi/2 -- sign found empirically, see below
         B = np.array([
             [ np.cos(theta), -np.sin(theta), 0],
             [ np.sin(theta),  np.cos(theta), 0],
@@ -221,7 +221,7 @@ class OptitrackSubscriber(Node):
             [ 0, 1, 0]])
 
         # Transform rotation matrix
-        R_new = P @ R_orig @ B      # not P @ R_orig @ P.T
+        R_new = B @ P @ R_orig      # not P @ R_orig @ P.T
         quaternion = rot_to_quat(R_new)
 
 
