@@ -141,7 +141,7 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'mocap_square2slow.npz')
+        self.declare_parameter('track_file_name', 'mocap_turnfast.npz')
         self.declare_parameter('odom_topic', '/odometry/filtered')
         #self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
@@ -201,11 +201,19 @@ class MPCNode(Node):
         params_car = F110()
         
 
+        # mean_dict = {
+        #     'Cf': 300,
+        #     'Cr': 150,
+        #     'muf': 0.27,
+        #     'mur': 0.27,
+        #     'Cro': 0.0,
+        # }
+
         mean_dict = {
             'Cf': 250,
             'Cr': 225,
-            'muf': 0.7,
-            'mur': 0.7,
+            'muf': 0.6,
+            'mur': 0.6,
             'Cro': 0.0,
         }
         
@@ -213,12 +221,12 @@ class MPCNode(Node):
         variation_dict = {
             'Cf': 75,   # 15% variation
             'Cr': 75,   # 15% variation
-            'muf': 0.4,   # 15% variation
-            'mur': 0.4,   # 15% variation
+            'muf': 0.5,   # 15% variation
+            'mur': 0.5,   # 15% variation
             'Cro': 0.0, # 15% variation
         }
         
-        cost_weights = np.array([0.0, 0.0, 20.0, 5.0, 10.0, 0.01])# x, y, theta, vx, vy, omega
+        cost_weights = np.array([0.0, 0.0, 20.0, 1.0, 10.0, 0.01])# x, y, theta, vx, vy, omega
         # x, y, theta, vx, vy, omega
         
         # grid discretization
@@ -474,6 +482,8 @@ class MPCNode(Node):
 
         self.checkpoint[3] = time.perf_counter_ns()
         d_ctrl = []
+        mpc_states = []
+        mpc_controls = []
         if self.current_state[3] < 0.1:
             ref_point, idx = get_lookahead_point(self.current_state, self.track, self.projidx, lookahead_dist = 1.2)
             self.projidx = idx
@@ -508,7 +518,7 @@ class MPCNode(Node):
             if self.publish_trajectories:
                 record_ref_trajectory = ref_segment.T
                 # self.publish_ref_trajectory(ref_segment)
-                # print(f"REF: {ref_segment}")
+            print(f"REF: {ref_segment}")
 
             
             self.prepare_solve()
@@ -543,27 +553,27 @@ class MPCNode(Node):
             self.current_mode = True
 
 
+            print(f"CONTROL: {u_opt}")       
+        
+            if(self.publish_trajectories):
+                for i in range(self.N + 1):
+                    x_pred = self.solver.get(i, "x")[:]
+                    mpc_states.append(x_pred[:6])
+                    
+                    c_pred = self.solver.get(i, "x")[-2:]
+                    mpc_controls.append(c_pred)
+
+                    # print(x_pred, c_pred)
+
+                print(f"PREDICTED STATES: {mpc_states}")
+                # print(f"PREDICTED CONTROLS: {predicted_controls}")
+                    
+                self.publish_predicted_trajectory(mpc_states) # Publish predicted trajectory
+
+
         self.checkpoint[4] = time.perf_counter_ns()
 
-        print(f"CONTROL: {u_opt}")
-
-        mpc_states = []
-        mpc_controls = []
         
-        if(self.publish_trajectories):
-            for i in range(self.N + 1):
-                x_pred = self.solver.get(i, "x")[:6]
-                mpc_states.append(x_pred)
-                
-                c_pred = self.solver.get(i, "x")[-2:]
-                mpc_controls.append(c_pred)
-
-                #print(x_pred, c_pred)
-
-            # print(f"PREDICTED STATES: {mpc_states}")
-            # print(f"PREDICTED CONTROLS: {predicted_controls}")
-                
-            self.publish_predicted_trajectory(mpc_states) # Publish predicted trajectory
 
         
         if(not ok_time):

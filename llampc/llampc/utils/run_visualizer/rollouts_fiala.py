@@ -86,7 +86,7 @@ def build_bank(params_bank, params_car, num_models):
     """params_bank: (num_models, 10) in BANK_ORDER."""
     p = params_bank
     return dynamics.DBMFialaBank(
-        params_car['lf'], params_car['lr'], 
+        params_car['lf'], params_car['lr'],
         params_car['mass'], params_car['Iz'],
         params_car['rw'],
         p[:, 0], p[:, 1],   # Cf, Cr,
@@ -96,22 +96,95 @@ def build_bank(params_bank, params_car, num_models):
     )
 
 
+def _make_known_params_stepper(bank, dt, logged_kp):
+    """Build a per-step known_params provider that is IDENTICAL in semantics
+    to the one used by the LLA simulators: each row of `logged_kp` is treated
+    as an already-resolved known_params value and substituted directly for
+    the integrator argument, with no call to bank.update_known_params().
+
+    This bypasses history_no_record.LBHistory's own known_params handling
+    entirely so that a single shared model + identical logged_kp produces
+    numerically identical steps to simulate_lla_rollout/simulate_lla_one_step
+    (previously the general-model path pushed [omega_w, dFz] through
+    bank.update_known_params(...) while the LLA path substituted the
+    already-derived get_known_params()-shaped value directly into the
+    integrator - two different, non-interchangeable interpretations of the
+    same logged array, and update_known_params may not even propagate into
+    an already-traced/jitted integrator).
+
+    Returns (integrator, static_known_params, get_kp_for_step) where
+    get_kp_for_step(t) -> the known_params argument to pass at absolute step
+    t (falls back to static_known_params past the end of logged_kp, or when
+    logged_kp is None).
+    """
+    integrator = rk6Factory(jax.device_put(bank.param_bank), dynamics.diffequation, dt)
+    static_known_params = bank.get_known_params()
+
+    def get_kp_for_step(t):
+        if logged_kp is not None and t < len(logged_kp):
+            return logged_kp[t]
+        return static_known_params
+
+    return integrator, static_known_params, get_kp_for_step
+
+
 def simulate_general_models(total, recording, general_params_bank, params_car,
                             dt, ol_reset_interval, cost_weights,
-                            full_open_loop=False):
+                            full_open_loop=False, known_params_over_time=None):
     """Simulate N fixed models in parallel; each keeps its OWN params all run.
 
     general_params_bank: (num_models, 10) in BANK_ORDER.
     Returns (traj_open_loop, traj_one_step), each (total, num_models, state_dim).
+
+    known_params_over_time: optional (total, ...) array of the EXACT
+    known_params logged by the real-time node at each control tick (same
+    array, same semantics as passed to simulate_lla_rollout /
+    simulate_lla_one_step). If given, step t substitutes
+    known_params_over_time[t] DIRECTLY as the integrator's known_params
+    argument - the same low-level rk6Factory integrator the LLA path uses,
+    called the same way - instead of going through
+    history_no_record.LBHistory/bank.update_known_params(). This guarantees
+    that a general-model run sharing a single model + the same logged
+    known_params as an LLA run produces numerically identical steps, since
+    both paths now do the exact same thing with the array.
+
+    If known_params_over_time is None, falls back to the original
+    LBHistory-based path (bank's default/static known_params for the whole
+    run), preserving prior behavior for callers that don't pass logged data.
     """
     num_models = len(general_params_bank)
     print(f"[rollout] general models: {num_models} fixed banks, {total} steps")
 
     bank = build_bank(general_params_bank, params_car, num_models)
-    lb = history_no_record.LBHistory(
-        num_models, dt, np.asarray(cost_weights),
-        6, rk6Factory, bank, dynamics.diffequation, buffer_size=[0, 0]
-    )
+
+    logged_kp = None
+    if known_params_over_time is not None:
+        logged_kp = np.asarray(known_params_over_time)
+        print(f"[rollout] general models: using logged known_params {logged_kp.shape} "
+              f"at each step, substituted directly into the integrator "
+              f"(same semantics as the LLA path) instead of a single static "
+              f"bank value")
+
+    lb = None
+    integrator = static_known_params = get_kp_for_step = None
+    if logged_kp is not None:
+        integrator, static_known_params, get_kp_for_step = _make_known_params_stepper(
+            bank, dt, logged_kp)
+    else:
+        # No per-step known_params supplied: preserve the original behavior
+        # (bank's own static/default known_params for the whole run).
+        lb = history_no_record.LBHistory(
+            num_models, dt, np.asarray(cost_weights),
+            6, rk6Factory, bank, dynamics.diffequation, buffer_size=[0, 0]
+        )
+
+    def _predict(state_batch, ctrl_t, t):
+        """Advance (num_models, state_dim) one step -> (num_models, state_dim)."""
+        if logged_kp is not None:
+            kp_t = get_kp_for_step(t)
+            return np.array(integrator(kp_t, state_batch, ctrl_t))
+        lb.predict_states(state_batch, ctrl_t)
+        return np.array(lb.last_predicted_states)
 
     state0 = recording["state"][0]
 
@@ -120,8 +193,8 @@ def simulate_general_models(total, recording, general_params_bank, params_car,
     # one_step[t] comparable to truth[t] at the same index (no off-by-one).
     one_step = [np.tile(state0, (num_models, 1))]
     for t in range(total):
-        lb.predict_states(recording["state"][t], recording["ctrl"][t])
-        one_step.append(np.array(lb.last_predicted_states))
+        pred = _predict(recording["state"][t], recording["ctrl"][t], t)
+        one_step.append(pred)
     traj_one_step = np.array(one_step[:total])
 
     # OPEN LOOP: store the model state AT time t. At each reset the state is
@@ -133,8 +206,7 @@ def simulate_general_models(total, recording, general_params_bank, params_car,
         if not full_open_loop and t % ol_reset_interval == 0:
             current = np.tile(recording["state"][t], (num_models, 1))   # anchor = truth[t]
         open_loop.append(np.array(current))                             # state AT time t
-        lb.predict_states(current, recording["ctrl"][t])                # advance t -> t+1
-        current = np.array(lb.last_predicted_states)
+        current = _predict(current, recording["ctrl"][t], t)            # advance t -> t+1
     traj_open_loop = np.array(open_loop)
 
     return traj_open_loop, traj_one_step
@@ -237,7 +309,7 @@ def simulate_lla_one_step(total, recording, lla_params_over_time, params_car, dt
 
 def simulate_general_m_step(total, recording, general_params_bank, params_car,
                             dt, M, cost_form, mode, ol_reset_interval,
-                            full_open_loop=False):
+                            full_open_loop=False, known_params_over_time=None):
     """For each start time t, roll each fixed model forward up to M steps and
     accumulate the cost_form-weighted squared error vs truth over the horizon.
 
@@ -247,6 +319,18 @@ def simulate_general_m_step(total, recording, general_params_bank, params_car,
                      (no internal re-anchor if full_open_loop)
     Each horizon STARTS from truth[t].
 
+    known_params_over_time: optional (total, ...) array of the EXACT
+    known_params logged by the real-time node (same array/semantics as
+    simulate_lla_m_step). If given, horizon step ti substitutes
+    known_params_over_time[ti] DIRECTLY into the same low-level integrator
+    the LLA path uses, instead of going through
+    history_no_record.LBHistory/bank.update_known_params(). This keeps a
+    single-model general M-step run numerically identical to the equivalent
+    LLA M-step run.
+
+    If known_params_over_time is None, falls back to the original
+    LBHistory-based path.
+
     Returns (total, num_models, state_dim): per-dim weighted error summed over
     the horizon, kept separable so the cost-term checkboxes still work.
     """
@@ -254,10 +338,29 @@ def simulate_general_m_step(total, recording, general_params_bank, params_car,
     print(f"[rollout] general M-step ({mode}): {num_models} models, "
           f"{total} starts x M={M}")
     bank = build_bank(general_params_bank, params_car, num_models)
-    lb = history_no_record.LBHistory(
-        num_models, dt, np.asarray(cost_form),
-        6, rk6Factory, bank, dynamics.diffequation, buffer_size=[0, 0]
-    )
+
+    logged_kp = None
+    if known_params_over_time is not None:
+        logged_kp = np.asarray(known_params_over_time)
+
+    lb = None
+    integrator = static_known_params = get_kp_for_step = None
+    if logged_kp is not None:
+        integrator, static_known_params, get_kp_for_step = _make_known_params_stepper(
+            bank, dt, logged_kp)
+    else:
+        lb = history_no_record.LBHistory(
+            num_models, dt, np.asarray(cost_form),
+            6, rk6Factory, bank, dynamics.diffequation, buffer_size=[0, 0]
+        )
+
+    def _predict(state_batch, ctrl_t, ti):
+        if logged_kp is not None:
+            kp_ti = get_kp_for_step(ti)
+            return np.array(integrator(kp_ti, state_batch, ctrl_t))
+        lb.predict_states(state_batch, ctrl_t)
+        return np.array(lb.last_predicted_states)
+
     truth = recording["state"]
     ctrl = recording["ctrl"]
     w = np.asarray(cost_form, dtype=float)
@@ -276,8 +379,7 @@ def simulate_general_m_step(total, recording, general_params_bank, params_car,
                     not full_open_loop and ti % ol_reset_interval == 0)
                 if reset:
                     state = np.tile(truth[ti], (num_models, 1))
-            lb.predict_states(state, ctrl[ti])
-            state = np.array(lb.last_predicted_states)
+            state = _predict(state, ctrl[ti], ti)
             err = truth[ti + 1] - state
             err[:, 2] = (err[:, 2] + np.pi) % (2 * np.pi) - np.pi
             comp[t] += (err ** 2) * w[None, :]

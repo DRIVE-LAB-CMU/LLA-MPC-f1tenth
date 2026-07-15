@@ -32,8 +32,6 @@ def F110():
     lr = 0.17145			# read tyres from center of gravity [m]
     mass = 3.74 			# vehicle mass [kg]
     Iz = 0.04712 			# moment of inertia [kgm^2]
-    Csf = 4.718
-    Csr = 5.4562
     hcog = 0.074
     mu = 0.523
     min_v = -1.0
@@ -74,8 +72,6 @@ def F110():
         'lr': lr,
         'mass': mass,
         'Iz': Iz,
-        'Csf': Csf,
-        'Csr': Csr,
         'h': hcog,
         'mu': mu,
         'min_v': min_v,

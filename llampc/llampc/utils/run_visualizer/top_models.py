@@ -14,12 +14,13 @@ from collections import Counter
 # ---------------------------------------------------------------------------
 # Configuration — edit these before running
 # ---------------------------------------------------------------------------
-NPZ_PATH   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lla8.npz")
+NPZ_PATH   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nomf4.npz")
 TOP_N      = 5            # how many top models to report
 USE_MEDIAN = False        # True = use median params, False = use mean
 
 # Must match the visualizer's DEFAULT_LOG_ORDER (order params are stored in npz)
-LOG_ORDER  = ['Bf', 'Br', 'Cf', 'Cr', 'Df', 'Dr', 'Cro', 'Cd', 'Ce', 'Cm']
+# LOG_ORDER  = ['Bf', 'Br', 'Cf', 'Cr', 'Df', 'Dr', 'Cro', 'Cd', 'Ce', 'Cm']
+LOG_ORDER  = ['Cf', 'Cr', 'muf','mur','Cro']
 
 
 # ---------------------------------------------------------------------------

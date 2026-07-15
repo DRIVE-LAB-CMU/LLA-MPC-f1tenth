@@ -181,20 +181,20 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.cost.cost_type = 'NONLINEAR_LS'
     ocp.cost.cost_type_e = 'NONLINEAR_LS'
 
-    w_x = 2.0
-    w_y = 2.0
+    w_x = 9.0
+    w_y = 9.0
     w_xe = 0.0
     w_ye = 0.0
     w_theta = 0
-    w_vx = 1.0
+    w_vx = 40.0
 
-    w_current = 10.0
+    w_current = 0.01
     w_steer = 0.1
     w_slew = 0.0
     w_steer_v = 0.01
     
       
-    Q_flat = [w_x, w_y, w_theta, w_vx, 0, 0,  w_current, w_steer]
+    Q_flat = [w_x, w_y, w_theta, w_vx, 0.0, 0.0,  w_current, w_steer]
 
     # vx, vy, omega
     R_flat = [w_slew, w_steer_v]
@@ -252,18 +252,18 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.constraints.idxbx = np.array([3, 4,5, 8, 9])
     ocp.constraints.lbx = np.array([-0.5, 
                                 -4,
-                                -2 * np.pi,
+                                - np.pi,
                                 -25, 
                                params_car['min_steer']])
 
     ocp.constraints.ubx = np.array([params_car['max_v'], 
                                     4,
-                                    2* np.pi,
+                                    np.pi,
                                     50, 
                                     params_car['max_steer']])
     
-    ocp.constraints.lbu = np.array([-30, -params_car['max_steer_vel']])
-    ocp.constraints.ubu = np.array([30, params_car['max_steer_vel']])
+    ocp.constraints.lbu = np.array([-300, -params_car['max_steer_vel']])
+    ocp.constraints.ubu = np.array([300, params_car['max_steer_vel']])
     ocp.constraints.idxbu = np.array([0, 1]) # 0 is slew rate, 1 is steer_vel
 
     # slack on constraints

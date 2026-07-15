@@ -351,10 +351,13 @@ class StateVisualizer:
         elif self.compute_rollouts and _ROLLOUT_OK and self.general_models and self.rollout_total > 0:
             names = list(self.general_models.keys())
             bank = np.stack([dict_to_bank_vec(self.general_models[n]) for n in names])
+            kp_slice = (self.known_params[:self.rollout_total]
+                        if self.known_params is not None else None)          # <-- add this
             ol, os_arr = simulate_general_models(
                 self.rollout_total, self.recording, bank, self.params_car,
                 self.dt, self.ol_reset_interval, self.cost_weights,
-                full_open_loop=self.full_open_loop
+                full_open_loop=self.full_open_loop,
+                known_params_over_time=kp_slice                                # <-- add this
             )
             # ol, os_arr: (total, M, state) -> store per model as (total, state)
             for i, name in enumerate(names):
@@ -479,11 +482,15 @@ class StateVisualizer:
         names = [n for n in self.general_order if n in self.general_models]
         if names:
             bank = np.stack([dict_to_bank_vec(self.general_models[n]) for n in names])
+            kp_slice = (self.known_params[:T]
+                        if self.known_params is not None else None)          # <-- add this
             for mode in modes:
                 comp = simulate_general_m_step(
                     T, self.recording, bank, self.params_car,
                     self.dt, M, self.cost_form, mode, self.ol_reset_interval,
-                    full_open_loop=self.full_open_loop)
+                    full_open_loop=self.full_open_loop,
+                    known_params_over_time=kp_slice                            # <-- add this
+                )
                 for i, name in enumerate(names):
                     self.gen_m_step_components.setdefault(name, {})[mode] = comp[:T, i, :]
 
@@ -1882,7 +1889,7 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'fiala10.npz')
+    filepath = os.path.join(dir_path, 'nomf4.npz')
 
     ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_turnfast.npz')
 
@@ -1908,10 +1915,54 @@ def main():
     "nominal": {
         'Cf': 250,
         'Cr': 225,
-        'muf': 0.9,
-        'mur': 0.9,
+        'muf': 0.6,
+        'mur': 0.6,
         'Cro': 0.0,
     },
+        # rank 1  |  model index 842  |  selected 252x (14.9%)
+        # rank 1  |  model index 842  |  selected 252x (14.9%)
+    # "model_842": {
+    #     'Cf': 225.000000,  # std=0.0000
+    #     'Cr': 225.000000,  # std=0.0000
+    #     'muf': 0.266667,  # std=0.0000
+    #     'mur': 0.266667,  # std=0.0000
+    #     'Cro': 0.000000,  # std=0.0000
+    # },
+    # # rank 2  |  model index 9  |  selected 217x (12.8%)
+    # "model_9": {
+    #     'Cf': 175.000000,  # std=0.0000
+    #     'Cr': 150.000000,  # std=0.0000
+    #     'muf': 0.266667,  # std=0.0000
+    #     'mur': 0.266667,  # std=0.0000
+    #     'Cro': 0.000000,  # std=0.0000
+    # },
+    # # rank 3  |  model index 310  |  selected 141x (8.3%)
+    # "model_310": {
+    #     'Cf': 175.000000,  # std=0.0000
+    #     'Cr': 300.000000,  # std=0.0000
+    #     'muf': 0.433333,  # std=0.0000
+    #     'mur': 0.266667,  # std=0.0000
+    #     'Cro': 0.000000,  # std=0.0000
+    # },
+    # # rank 4  |  model index 303  |  selected 109x (6.4%)
+    # "model_303": {
+    #     'Cf': 175.000000,  # std=0.0000
+    #     'Cr': 300.000000,  # std=0.0000
+    #     'muf': 0.266667,  # std=0.0000
+    #     'mur': 0.266667,  # std=0.0000
+    #     'Cro': 0.000000,  # std=0.0000
+    # },
+    # # rank 5  |  model index 1724  |  selected 102x (6.0%)
+    # "model_1724": {
+    #     'Cf': 300.000000,  # std=0.0000
+    #     'Cr': 150.000000,  # std=0.0000
+    #     'muf': 0.266667,  # std=0.0000
+    #     'mur': 0.266667,  # std=0.0000
+    #     'Cro': 0.000000,  # std=0.0000
+    # },
+
+
+
     }
 
 
@@ -1929,18 +1980,18 @@ def main():
         ol_reset_interval=5,
         full_open_loop=False,
         window_P=40,
-        cost_form=np.array([10.0, 10.0, 20.0, 0.0, 10.0, 0.01]),
-        compute_m_step=False,    # set False to skip the slow M-step computation
+        cost_form=np.array([10.0, 10.0, 20.0, 5.0, 10.0, 0.01]),
+        compute_m_step=True,    # set False to skip the slow M-step computation
         m_step_M=10,
         # Weights for the accumulated-MPC-error graph: actual state vs.
         # reference node 0 (x, y, theta, vx, vy, omega), NMPC solves only.
-        mpc_state_weights=np.array([2.0, 2.0, 0.0, 0.0, 0.0, 0.0]),
+        mpc_state_weights=np.array([4.0, 4.0, 0.0, 50.0, 0.0, 0.0]),
         # Weight per control-rate channel in d_ctrl (e.g. [slew_rate,
         # steer_vel]); defaults to 1.0 each if left as None.
-        mpc_ctrl_weights=[0.01],
+        mpc_ctrl_weights=[0, 0.01],
         # Weight per actual-applied-control channel (accel, steer); defaults
         # to 1.0 each if left as None.
-        mpc_last_ctrl_weights=[0.0, 0.1],
+        mpc_last_ctrl_weights=[0.01, 0.1],
     )
     visualizer.show()
 
