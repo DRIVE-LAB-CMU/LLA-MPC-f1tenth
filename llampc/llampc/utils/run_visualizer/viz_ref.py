@@ -1873,7 +1873,7 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'fiala.npz')
+    filepath = os.path.join(dir_path, 'nom13.npz')
 
     ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_turnfast.npz')
 
@@ -1991,7 +1991,7 @@ def main():
         full_open_loop=False,
         window_P=40,
         cost_form=np.array([10.0, 10.0, 20.0, 0.0, 10.0, 0.01]),
-        compute_m_step=False,    # set False to skip the slow M-step computation
+        compute_m_step=True,    # set False to skip the slow M-step computation
         m_step_M=10,
         # Weights for the accumulated-MPC-error graph: actual state vs.
         # reference node 0 (x, y, theta, vx, vy, omega), NMPC solves only.

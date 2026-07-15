@@ -50,14 +50,14 @@ def diffequation(bank_params, known_params, x, u):
     Fr_total = jnp.where(sigma_r < sigmar_max, brush(Cr, sigma_r, Frmax), Frmax)
 
     # --- front: lateral only ---
-    Ffy = -Ff_total * jnp.tan(alphaf) / sigma_f
-    Ffx =  Ff_total * kappa           / sigma_f
+    Ffy = Ff_total * jnp.tan(alphaf) / sigma_f
+    Ffx = Ff_total * kappa           / sigma_f
 
     # --- rear: lateral and longitudinal share Fr_total via sigma_r ---
     v_eps = 0.5
     F_roll = Cro * Frz * jnp.tanh(vx / v_eps)
     Frx = Fr_total*kappa/sigma_r - F_roll
-    Fry = -Fr_total*jnp.tan(alphar)/sigma_r
+    Fry = Fr_total*jnp.tan(alphar)/sigma_r
 
     # --- chassis-frame dynamics (6 states only) ---
     dx0 = vx*jnp.cos(psi) - vy*jnp.sin(psi)
