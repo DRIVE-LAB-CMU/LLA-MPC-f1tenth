@@ -54,8 +54,8 @@ def export_model(params_car, exact = False):
         kappa = (rw*omega_w- x[3]) / vx_dyn
 
         # --- combined slips ---
-        sigma_f = ca.sqrt(ca.tan(alphaf)**2 + kappa**2 + 1e-9)               # front free-rolling
-        sigma_r = ca.sqrt(ca.tan(alphar)**2 + kappa**2 + 1e-9)
+        sigma_f = ca.sqrt(ca.tan(alphaf)**2 + kappa**2 + 1e-2)               # front free-rolling
+        sigma_r = ca.sqrt(ca.tan(alphar)**2 + kappa**2 + 1e-2)
         
         sigmaf_max = 3*Ffmax/Cf
         sigmar_max = 3*Frmax/Cr
@@ -79,7 +79,7 @@ def export_model(params_car, exact = False):
         Fry =  Fr_total*ca.tan(alphar)/sigma_r
 
         # --- drive torque on rear wheel ---
-        tau_drive = 1.5 * pole_pairs * lam *current
+        tau_drive = gear_ratio * 1.5 * pole_pairs * lam *current
 
         # --- realized longitudinal chassis force drives load transfer ---
         Fx_chassis = Frx + Ffx*ca.cos(delta) - Ffy*ca.sin(delta)
@@ -181,14 +181,14 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.cost.cost_type = 'NONLINEAR_LS'
     ocp.cost.cost_type_e = 'NONLINEAR_LS'
 
-    w_x = 4.0
-    w_y = 4.0
+    w_x = 2.0
+    w_y = 2.0
     w_xe = 0.0
     w_ye = 0.0
     w_theta = 0
-    w_vx = 0.1
+    w_vx = 1.0
 
-    w_current = 0.0
+    w_current = 10.0
     w_steer = 0.1
     w_slew = 0.0
     w_steer_v = 0.01
@@ -262,9 +262,9 @@ def create_ocp(model, params_car, steps, horizon):
                                     50, 
                                     params_car['max_steer']])
     
-    ocp.constraints.lbu = np.array([-params_car['max_steer_vel']])
-    ocp.constraints.ubu = np.array([params_car['max_steer_vel']])
-    ocp.constraints.idxbu = np.array([1]) # 0 is slew rate, 1 is steer_vel
+    ocp.constraints.lbu = np.array([-30, -params_car['max_steer_vel']])
+    ocp.constraints.ubu = np.array([30, params_car['max_steer_vel']])
+    ocp.constraints.idxbu = np.array([0, 1]) # 0 is slew rate, 1 is steer_vel
 
     # slack on constraints
     w_slack = 100.0       # L2 slack penalty (quadratic)

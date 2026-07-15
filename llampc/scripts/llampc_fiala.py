@@ -18,7 +18,7 @@ jax.config.update('jax_persistent_cache_min_compile_time_secs', 0)
 import jax.numpy as jnp
 
 from llampc.nmpc_gen_fiala import setup_mpc
-from llampc.params import F110, F110_sim, get_param_dict_random, get_param_dict_grid, param_validate_ptm
+from llampc.params import F110, get_param_dict_random, get_param_dict_grid, param_validate_ptm
 from llampc.planner import get_reference_trajectory_segment, get_lookahead_point
 from llampc.utils import Track
 
@@ -77,6 +77,8 @@ class MPCNode(Node):
         track_name = self.get_parameter('track_file_name').get_parameter_value().string_value
 
         self.track = Track(track_name)
+
+
 
 
         self.odom_subscriber = self.create_subscription(
@@ -139,7 +141,7 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'mocap_square2fast.npz')
+        self.declare_parameter('track_file_name', 'mocap_square2slow.npz')
         self.declare_parameter('odom_topic', '/odometry/filtered')
         #self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
@@ -202,8 +204,8 @@ class MPCNode(Node):
         mean_dict = {
             'Cf': 250,
             'Cr': 225,
-            'muf': 0.9,
-            'mur': 0.9,
+            'muf': 0.7,
+            'mur': 0.7,
             'Cro': 0.0,
         }
         
@@ -211,8 +213,8 @@ class MPCNode(Node):
         variation_dict = {
             'Cf': 75,   # 15% variation
             'Cr': 75,   # 15% variation
-            'muf': 0.2,   # 15% variation
-            'mur': 0.2,   # 15% variation
+            'muf': 0.4,   # 15% variation
+            'mur': 0.4,   # 15% variation
             'Cro': 0.0, # 15% variation
         }
         
@@ -630,7 +632,7 @@ class MPCNode(Node):
             selected_model_params, 
             selected_model_index, 
             known_params, 
-            self.time_history[-1, self.count], 
+            self.time_history[-1, self.count]*1e-6, 
             d_ctrl,
             mpc_states, 
             record_ref_trajectory)
