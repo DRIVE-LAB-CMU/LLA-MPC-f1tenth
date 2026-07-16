@@ -142,6 +142,7 @@ class MPCNode(Node):
             out_file =  self.get_parameter('out_file').get_parameter_value().string_value
 
             self.lla_logger = LLALogger(out_file)
+            self.get_logger().info(f"Logging MPC data to {out_file}")
     
     def regular_setup(self):
         self.get_logger().info("Regular MPC Initialized")

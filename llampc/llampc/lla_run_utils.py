@@ -1,5 +1,6 @@
 import os
 import time
+from llampc.params import F110
 import numpy as np
 
 class LLASolver():
@@ -19,6 +20,8 @@ class LLASolver():
         self.lla_p = lla_p
 
         self.first_control = True
+
+        self.params_car = F110()
 
     def print_mpc_failed(self):
         self.solver.print_statistics()
@@ -171,7 +174,6 @@ class LLALogger():
                 "known_params": [],   # NEW
                 "solve_time": [],     # NEW
             }
-            self.get_logger().info(f"Logging MPC data to {self.log_file}")
 
 
     def log_lla_data(self, params, model_index, known_params, solve_time, delta_u=[],

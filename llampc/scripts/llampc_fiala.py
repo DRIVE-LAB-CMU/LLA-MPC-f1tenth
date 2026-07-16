@@ -281,8 +281,7 @@ class MPCNode(Node):
         omega = msg.twist.twist.angular.z
 
         self.current_state = np.array([x, y, phi, vx, vy, omega])
-
-        # self.get_logger().info(f"Logging State {self.current_state}")
+        self.get_logger().info(f"Logging MPC data to {self.log_file}")
 
     def sensor_callback(self, msg):
         erpm = msg.state.speed
