@@ -6,7 +6,7 @@ class LLASolver():
     def __init__(self, mpc_solver, lla_p):
         self.solver = mpc_solver
 
-        self.min_pwm = 0.1
+        self.min_pwm = 0.05
         self.max_pwm = 0.25
 
         self.max_v = 3.0

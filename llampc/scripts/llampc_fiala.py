@@ -22,7 +22,7 @@ from llampc.params import F110, get_param_dict_grid, param_validate_ptm
 from llampc.planner import get_reference_trajectory_segment, get_lookahead_point
 from llampc.utils import Track
 
-from llampc.lla_utils import LLASolver, LLALogger
+from llampc.lla_run_utils import LLASolver, LLALogger
 
 import llampc.rollout.history as history
 import llampc.rollout.dynamic_sim as dynamics_sim
@@ -376,7 +376,6 @@ class MPCNode(Node):
                 # self.publish_ref_trajectory(ref_segment)
             print(f"REF: {ref_segment}")
 
-            
             self.lla_solver.prepare_mpc_solve()
 
             full_params = self.lla_solver.construct_params(
@@ -450,6 +449,7 @@ class MPCNode(Node):
             self.get_logger().warn(f"MPC solver failed with status: {status}")
 
             self.current_mode = False
+            self.lla_solver.first_control = True
 
         self.checkpoint[6] = time.perf_counter_ns()
         self.count = (self.count + 1) % self.time_window

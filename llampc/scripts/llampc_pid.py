@@ -20,7 +20,7 @@ import jax.numpy as jnp
 
 
 from llampc.nmpc_gen_pid import setup_mpc
-from llampc.params import F110, F110_sim, get_param_dict_random, get_param_dict_grid, param_validate_ptm
+from llampc.params import F110, get_param_dict_random, get_param_dict_grid, param_validate_ptm
 from llampc.planner import get_reference_trajectory_segment, get_lookahead_point
 from llampc.utils import Track
 
@@ -30,6 +30,8 @@ import llampc.rollout.dynamic_lateral as dynamics_lateral
 import llampc.rollout.dynamic_rp as dynamics_rp
 import llampc.rollout.dynamic_full as dynamics_full
 from llampc.rollout.rk6 import rk4Factory
+
+from llampc.lla_run_utils import LLALogger, LLASolver
 
 
 from nav_msgs.msg import Odometry, Path
@@ -133,43 +135,13 @@ class MPCNode(Node):
         self.lla_reset_interval = 4
         self.lla_reset_counter = 0
 
-        self.min_pwm = 0.05
-        self.max_pwm = 0.25
-
-
         self.params_car = F110()
-
-        self.kd = 0.01
-        self.ki = 0.001
-        self.kp = 0.1
 
         # TODO: Implement thresholding to prevent hysteresis
         if(self.log_data):
             out_file =  self.get_parameter('out_file').get_parameter_value().string_value
 
-            ros_log_root = os.path.expanduser("~/.ros/log")
-            os.makedirs(ros_log_root, exist_ok=True)
-            
-            timestamp = int(time.time() * 1e6)
-            self.log_file = os.path.join(ros_log_root, f"{out_file}_{timestamp}.npz")
-            self.log_buffer = {
-                "time": [],
-                "state": [],
-                "params": [],
-                "model_idx": [],
-                "ctrl": [],
-                "d_ctrl":[],
-                "cmd":[],
-                "mpc_rollout":[],
-                "ref_trajectory":[],
-                "ok_time":[],
-                "predicted_state": [],
-                "one_step_cost": [],
-                "running_cost":[],
-                "known_params": [],   # NEW
-                "solve_time": [],     # NEW
-            }
-            self.get_logger().info(f"Logging MPC data to {self.log_file}")
+            self.lla_logger = LLALogger(out_file)
     
     def regular_setup(self):
         self.get_logger().info("Regular MPC Initialized")
@@ -256,7 +228,9 @@ class MPCNode(Node):
 
         # start solver
         self.current_state = None
-        self.solver = setup_mpc(self.N, self.Tf, build=True)
+        self.lla_solver = LLASolver(
+            setup_mpc(self.N, self.Tf, build=True), 6
+            )
         self.get_logger().info("SOLVER COMPILED, WARM STARTING")
         
         self.lb_history.predict_states(
@@ -289,63 +263,6 @@ class MPCNode(Node):
         mu_r = Dr / Fz_r
         return min(mu_f, mu_r) 
 
-    def pid_long_control(self, ref_v, vx):
-        diff = self.max_pwm - self.min_pwm
-        err = ref_v - vx
-
-        d_term = self.kd * (err - self.last_v) if self.last_v is not None else 0.0
-
-        # compute unsaturated pid using CURRENT integral (don't add err yet)
-        pid_unsat = self.kp * err + self.ki * self.v_int_err - d_term
-
-        # check whether we're already at the limits
-        saturated_high = pid_unsat > diff
-        saturated_low = pid_unsat < 0
-
-        # only integrate if not saturated in a way that this err would worsen
-        if not ((saturated_high and err > 0) or (saturated_low and err < 0)):
-            self.v_int_err += err
-
-        # TODO: Potentially need to use leaky integrator here
-
-        pid = self.kp * err + self.ki * self.v_int_err - d_term
-        self.last_v = vx
-        
-        print(f"ERR {err} {ref_v} {vx}")
-
-        return max(min(pid, diff) + self.min_pwm, 0)
-
-    def pure_pursuit_control(self, state, ref_point):
-        x, y, psi  = state[0], state[1], state[2]
-
-        dx = ref_point[0] - x
-        dy = ref_point[1] - y
-
-        # Transform goal to vehicle local frame
-        local_x =  np.cos(psi) * dx + np.sin(psi) * dy
-        local_y = -np.sin(psi) * dx + np.cos(psi) * dy
-
-        goal_dist = np.sqrt(local_x**2 + local_y**2)
-
-        if goal_dist < 0.1:
-            steer = 0.0
-        else:
-            wheelbase   = self.params_car['lf']+self.params_car['lr']
-            numerator   = 2.0 * wheelbase * local_y
-            denominator = goal_dist**2
-
-            steer = float(np.clip(
-                np.arctan2(numerator, denominator),
-                self.params_car['min_steer'], self.params_car['max_steer']
-            ))
-
-        # velocity-scaled pwm: slow down on sharp turns
-        # scale = self.max_v - self.min_v   # note: velocity range, not PWM range
-        # ref_v = self.min_v + scale * np.sqrt(1.0 - abs(steer / self.params_car['max_steer']))
-
-        pwm = self.pid_long_control(ref_point[3], state[3])
-        return np.array([pwm, steer])
-
     def odom_callback(self, msg):    
         x = msg.pose.pose.position.x
         y = msg.pose.pose.position.y
@@ -366,33 +283,6 @@ class MPCNode(Node):
 
         self.current_state = np.array([x, y, phi, vx, vy, omega])
 
-    def prepare_solve(self):
-        if self.first_control:
-            return
-        
-        for i in range(0, self.N - 1):
-            x_next = self.solver.get(i + 1, "x")
-            u_next = self.solver.get(i + 1, "u")
-            self.solver.set(i, "x", x_next)
-            self.solver.set(i, "u", u_next)
-
-        # For the very last node, just duplicate the second-to-last node 
-        # (the Levenberg-Marquardt damping will fix the slight error here)
-        self.solver.set(self.N - 1, "u", self.solver.get(self.N - 2, "u"))
-        self.solver.set(self.N, "x", self.solver.get(self.N - 1, "x"))
-        
-        for i in range(self.N):
-            # Overwrite the saved dual variables for the dynamics
-            num_pi = len(self.solver.get(i, "pi"))
-            self.solver.set(i, "pi", np.zeros(num_pi))
-            
-            # Overwrite the saved dual variables for the bounds/constraints
-            num_lam = len(self.solver.get(i, "lam"))
-            self.solver.set(i, "lam", np.zeros(num_lam))
-            
-        # Terminal node constraints
-        num_lam_e = len(self.solver.get(self.N, "lam"))
-        self.solver.set(self.N, "lam", np.zeros(num_lam_e))
     
     def control_callback(self):
         self.checkpoint[0] = time.perf_counter_ns()
@@ -436,14 +326,14 @@ class MPCNode(Node):
 
         ref_point, idx = get_lookahead_point(self.current_state, self.track, self.projidx, lookahead_dist = 1.2)
         d_ctrl = []
-        if self.current_state[3] < 0.3:
+        if self.current_state[3] < 0.1:
             self.projidx = idx
 
             record_ref_trajectory = [ref_point]
 
-            u_opt = self.pure_pursuit_control(self.current_state, ref_point)
+            u_opt = self.lla_solver.pure_pursuit_control(self.current_state, ref_point)
             status = 0
-            self.first_control = True
+            self.lla_solver.first_control = True
         else:
             aug_state = np.concatenate([self.current_state, [self.last_control[1]]])
             self.dynamics_bank.update_known_params(self.current_state[3])
@@ -465,62 +355,40 @@ class MPCNode(Node):
             if self.publish_trajectories:
                 record_ref_trajectory = ref_segment.T
             
-            self.prepare_solve()
-            
-            #print(f"aug state: {aug_state}")
-            self.solver.set(0, "lbx", aug_state)
-            self.solver.set(0, "ubx", aug_state)
-            def construct_params(N, selected_model_params, ref_segment):
-                full_params = np.zeros((N+1, 13), np.float64)
-                full_params[:, :6] = selected_model_params
-                # self.get_logger().info(f"{full_params}")
-                full_params[:, 6:6+6] = ref_segment[:6, :N+1].T #reference x, y, theta
-                return full_params
-            
-            full_params = construct_params(self.N, selected_model_params, ref_segment)
+            self.lla_solver.prepare_mpc_solve()
 
-            for i in range(self.N+1):
-                self.solver.set(i, "p", full_params[i])
-
-                if(i == 0 or self.first_control):
-                    self.solver.set(i, "x", aug_state)
+            full_params = self.lla_solver.construct_params(
+                self.N, selected_model_params, ref_segment)
             
-            self.first_control = False
-             
-            status = self.solver.solve()
-            delta = self.solver.get(1, "x")[-1] # delta
-            d_ctrl = self.solver.get(0, "u")[:]
+            mpc_solver, status = self.lla_solver.mpc_solve(aug_state, full_params)
+            delta = mpc_solver.get(1, "x")[-1] # delta
+            d_ctrl = mpc_solver.get(0, "u")[:]
 
-            pwm = self.pid_long_control(
+            pwm = self.lla_solver.pid_long_control(
                 ref_segment[3][1], self.current_state[3]
             )
 
             u_opt = np.array([pwm, delta])
 
-
         self.checkpoint[4] = time.perf_counter_ns()
-
         print(f"CONTROL: {u_opt}")
 
         mpc_states = []
         mpc_controls = []
-        
         if(self.publish_trajectories):
             for i in range(self.N + 1):
-                x_pred = self.solver.get(i, "x")[:6]
+                x_pred = mpc_solver.get(i, "x")[:6]
                 mpc_states.append(x_pred)
                 
-                c_pred = self.solver.get(i, "x")[-2:]
+                c_pred = mpc_solver.get(i, "x")[-2:]
                 mpc_controls.append(c_pred)
 
                 #print(x_pred, c_pred)
 
             # print(f"PREDICTED STATES: {mpc_states}")
             # print(f"PREDICTED CONTROLS: {predicted_controls}")
-                
             self.publish_predicted_trajectory(mpc_states) # Publish predicted trajectory
 
-        
         if(not ok_time):
             self.lla_reset_counter = 0
 
@@ -529,7 +397,7 @@ class MPCNode(Node):
 
         #########################################
         ### PUBLISH MPC DATA
-        residuals = self.solver.get_residuals()
+        residuals = mpc_solver.get_residuals()
         res_eq = residuals[1]
         vx = self.current_state[3]
         # eq_tol = 1e-2 if vx > 0.1 else 0.1   # much looser at low speed
@@ -551,15 +419,7 @@ class MPCNode(Node):
         else:
             print(f"\n--- SOLVER FAILED WITH STATUS {status} ---")
 
-            self.solver.print_statistics()
-            residuals = self.solver.get_residuals()
-            print(f"Max Residuals (stat, eq, ineq, comp): {residuals}")
-            
-            N = self.solver.acados_ocp.dims.N
-            print("\n--- NODE TRAJECTORY DUMP ---")
-            for i in range(N + 1):
-                x_i = self.solver.get(i, "x")
-                print(f"Node {i} | State: {np.round(x_i, 3)}")
+            self.lla_solver.print_mpc_failed()
             print("-----------------------------------\n")
 
             drive_msg = AckermannDriveStamped()
@@ -571,7 +431,7 @@ class MPCNode(Node):
             self.last_control = [0.0, 0.0]
             self.get_logger().warn(f"MPC solver failed with status: {status}")
 
-            self.first_control = True
+            self.lla_solver.first_control = True
 
         self.checkpoint[6] = time.perf_counter_ns()
 
@@ -582,7 +442,7 @@ class MPCNode(Node):
             print(np.max(self.time_history*1e-6, axis = 1))
 
         known_params = np.array(self.dynamics_bank.get_known_params())
-        self.log_lla_data(
+        self.lla_logger.log_lla_data(
             selected_model_params, 
             selected_model_index, 
             known_params, 
@@ -615,24 +475,10 @@ class MPCNode(Node):
         pwm = float(u_opt[0])
         steer = float(u_opt[1])
         
-        #print("PWM")
-        #print(pwm)
-
-        # sensor_velocity = np.sqrt(self.current_state[3] **2 + self.current_state[4]**2)
-        
         # Create Ackermann drive message
         drive_msg = AckermannDriveStamped()
         drive_msg.header.stamp = self.get_clock().now().to_msg()
         drive_msg.header.frame_id = "base_link"
-
-        # print(f"ORIGINAL {self.last_drive_command[0] + accel * self.dt}")
-        # print(f"NEW {desired_v}")
-        # print(f"NEW_INT {self.current_state[3] + accel * self.dt}")
-        # new_int = self.current_state[3] + accel * self.dt
-        # old = self.last_drive_command[0] + accel * self.dt
-        
-        # Convert acceleration to speed command (simple integration)
-        # desired_speed = max(0.0, new_int)
 
         drive_msg.drive.speed = 0.0
         drive_msg.drive.jerk = 1.0
@@ -642,7 +488,6 @@ class MPCNode(Node):
         self.cmd_pub.publish(drive_msg) 
 
         self.last_drive_command = [pwm, steer]
-        # print( acceleration * self.dt)
         self.last_control = [pwm, steer]
         
 
@@ -664,55 +509,14 @@ class MPCNode(Node):
             pose_unstamped.orientation.z = np.sin(yaw / 2.0)
             
             path_msg.poses.append(pose_unstamped)
-
-        # print(f"{predicted_states}")
         
         self.predicted_path_pub.publish(path_msg)
 
-    def log_lla_data(self, params, model_index, known_params, solve_time, delta_u=[],
-                  mpc_rollout=[], ref_trajectory=[]):
-        if self.log_data:
-            now_ns = time.perf_counter_ns()
-            self.log_buffer["time"].append(now_ns)
-            self.log_buffer["state"].append(self.current_state.copy())
-            self.log_buffer["params"].append(params.copy())
-            self.log_buffer["model_idx"].append(model_index)
-            self.log_buffer["ctrl"].append(self.last_control.copy())
-            self.log_buffer["d_ctrl"].append(delta_u)
-            self.log_buffer["cmd"].append(self.last_drive_command.copy())
-            self.log_buffer["mpc_rollout"].append(np.array(mpc_rollout))
-            self.log_buffer["ref_trajectory"].append(np.array(ref_trajectory))
-            self.log_buffer["known_params"].append(np.array(known_params))  # NEW
-            self.log_buffer["solve_time"].append(solve_time)                # NEW
-
-    def log_rollout_data(self, lb_history, one_step_cost, ok_time):
-        if(self.log_data):
-            self.log_buffer["ok_time"].append(ok_time)
-            # self.log_buffer["predicted_state"].append(lb_history.last_predicted_states.copy())
-            # self.log_buffer["one_step_cost"].append(one_step_cost)
-            # self.log_buffer["running_cost"].append(lb_history.running_cost.copy())
-
+    
     def destroy_node(self):
         if(self.log_data):
             self.get_logger().info(f"Saving data to {self.log_file}")
-            np.savez(
-                self.log_file,
-                time=np.array(self.log_buffer["time"]),
-                state=np.array(self.log_buffer["state"]),
-                params=np.array(self.log_buffer["params"]),
-                model_index=np.array(self.log_buffer["model_idx"]),
-                ctrl=np.array(self.log_buffer["ctrl"]), 
-                d_ctrl=np.array(self.log_buffer["d_ctrl"]), 
-                states=np.array(self.log_buffer["predicted_state"]),
-                mpc_rollout=np.array(self.log_buffer["mpc_rollout"]),
-                ref_trajectory=np.array(self.log_buffer["ref_trajectory"]),
-                one_step_cost=np.array(self.log_buffer["one_step_cost"]),
-                running_cost=np.array(self.log_buffer["running_cost"]),
-                ok_time = np.array(self.log_buffer["ok_time"]),
-                cmd = np.array(self.log_buffer["cmd"]),
-                known_params = np.array(self.log_buffer["known_params"]),
-                solve_time = np.array(self.log_buffer["solve_time"])
-            )
+            self.lla_logger.save_log()
         super().destroy_node()
 
 
