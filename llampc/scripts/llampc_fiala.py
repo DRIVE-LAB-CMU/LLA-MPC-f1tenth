@@ -313,7 +313,7 @@ class MPCNode(Node):
             self.current_state
         )
 
-        self.log_rollout_data(self.lb_history, one_step_cost, ok_time)
+        self.lla_logger.log_rollout_data(self.lb_history, one_step_cost, ok_time)
 
         x0 = self.current_state[:2]
         v0 = self.current_state[3]

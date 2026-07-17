@@ -288,6 +288,12 @@ class MPCNode(Node):
     def control_callback(self):
         self.checkpoint[0] = time.perf_counter_ns()
         print(f"CURSTATE: {self.current_state}")
+
+        if self.track is None or self.current_state is None:
+            return
+        
+        self.checkpoint[0] = time.perf_counter_ns()
+        print(f"CURSTATE: {self.current_state}")
         if self.track is None or self.current_state is None:
             return
         
@@ -296,11 +302,11 @@ class MPCNode(Node):
         one_step_cost = None
         # ok_time = self.time_history[-1, self.count] * 1e-6 < 2 * self.dt * 1000
         ok_time = True
-
         one_step_cost = self.lb_history.update_lookback_error(
             self.current_state
         )
-        self.log_rollout_data(self.lb_history, one_step_cost, ok_time)
+
+        self.lla_logger.log_rollout_data(self.lb_history, one_step_cost, ok_time)
 
         x0 = self.current_state[:2]
         v0 = self.current_state[3]
@@ -311,15 +317,11 @@ class MPCNode(Node):
         ### GET REF TRAJECTORY AND MODEL FOR ROLLOUT
 
         selected_model_params = None
-
+        
         selected_model_index = self.lb_history.get_best_model()
         selected_model_params = self.dynamics_bank.get_model_params_arr(selected_model_index)
         
-        # print(f"SELECTED PARAMS {selected_model_params}")
         
-        ########################################################
-        #### SETUP AND SOLVE MPC
-
         self.checkpoint[2] = time.perf_counter_ns()
 
         self.checkpoint[3]= time.perf_counter_ns()
