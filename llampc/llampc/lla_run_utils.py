@@ -4,7 +4,7 @@ from llampc.params import F110
 import numpy as np
 
 class LLASolver():
-    def __init__(self, mpc_solver, lla_p):
+    def __init__(self, mpc_solver, lla_p, N):
         self.solver = mpc_solver
 
         self.min_pwm = 0.05
@@ -26,6 +26,8 @@ class LLASolver():
 
         self.last_v_err = None
         self.v_int_err = 0
+
+        self.N = N 
     
 
     def print_mpc_failed(self):
@@ -39,11 +41,11 @@ class LLASolver():
             x_i = self.solver.get(i, "x")
             print(f"Node {i} | State: {np.round(x_i, 3)}")
 
-    def construct_params(self, N, selected_model_params, ref_segment):
-        full_params = np.zeros((N+1, self.lla_p+6), np.float64)
+    def construct_params(self, selected_model_params, ref_segment):
+        full_params = np.zeros((self.N+1, self.lla_p+6), np.float64)
         full_params[:, :self.lla_p] = selected_model_params
         # self.get_logger().info(f"{full_params}")
-        full_params[:, self.lla_p:self.lla_p+6] = ref_segment[:6, :N+1].T #reference x, y, theta
+        full_params[:, self.lla_p:self.lla_p+6] = ref_segment[:6, :self.N+1].T #reference x, y, theta
         return full_params
     
     def mpc_solve(self, state, params):
@@ -52,7 +54,7 @@ class LLASolver():
         
 
         for i in range(self.N+1):
-            self.solver.set(i, "p", params)
+            self.solver.set(i, "p", params[i])
 
             if(i == 0 or self.first_control):
                 self.solver.set(i, "x", state)

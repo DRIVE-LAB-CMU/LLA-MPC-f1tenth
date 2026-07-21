@@ -240,7 +240,7 @@ class MPCNode(Node):
         self.dFz = 0
 
         self.lla_solver = LLASolver(
-            setup_mpc(self.N, self.Tf, build=True), lla_p=5)
+            setup_mpc(self.N, self.Tf, build=True), lla_p=5, N = self.N)
         self.get_logger().info("SOLVER COMPILED, WARM STARTING")
         
         self.lb_history.predict_states(
@@ -338,6 +338,8 @@ class MPCNode(Node):
         mpc_states = []
         mpc_controls = []
 
+        self.current_state[3] = 0.2
+
         mu_est = min(selected_model_params[2], selected_model_params[3])
         if self.current_state[3] < 0.1:
             ref_point, idx = get_lookahead_point(
@@ -379,7 +381,7 @@ class MPCNode(Node):
             self.lla_solver.prepare_mpc_solve()
 
             full_params = self.lla_solver.construct_params(
-                self.N, selected_model_params, ref_segment)
+                selected_model_params, ref_segment)
             
             mpc_solver, status = self.lla_solver.mpc_solve(aug_state, full_params)
             u_opt = mpc_solver.get(1, "x")[-2:] # pwm, delta
