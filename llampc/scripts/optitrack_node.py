@@ -194,7 +194,7 @@ class OptitrackSubscriber(Node):
 
     def mocap_callback(self, msg):
         timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        position = np.array([-msg.pose.position.x, msg.pose.position.z, msg.pose.position.y,])
+        position = np.array([-msg.pose.position.x, -msg.pose.position.y, msg.pose.position.z])
 
         q_orig = np.array([
             msg.pose.orientation.x,
