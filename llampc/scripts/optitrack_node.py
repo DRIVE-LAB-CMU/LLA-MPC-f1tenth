@@ -217,8 +217,8 @@ class OptitrackSubscriber(Node):
         # Axis permutation matrix
         P = np.array([
             [-1, 0, 0],
-            [ 0, 0, 1],
-            [ 0, 1, 0]])
+            [ 0, -1, 0],
+            [ 0, 0, 1]])
 
         # Transform rotation matrix
         R_new = B @ P @ R_orig      # not P @ R_orig @ P.T
