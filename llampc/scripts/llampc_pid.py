@@ -120,8 +120,8 @@ class MPCNode(Node):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
         self.declare_parameter('track_file_name', 'mocap_turnfast.npz')
-        self.declare_parameter('odom_topic', '/odometry/filtered')
-        #self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        # self.declare_parameter('odom_topic', '/odometry/filtered')
+        self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
@@ -227,7 +227,7 @@ class MPCNode(Node):
         # start solver
         self.current_state = None
         self.lla_solver = LLASolver(
-            setup_mpc(self.N, self.Tf, build=True), 6
+            setup_mpc(self.N, self.Tf, build=True), 6, self.N
             )
         self.get_logger().info("SOLVER COMPILED, WARM STARTING")
         
@@ -367,24 +367,27 @@ class MPCNode(Node):
 
             u_opt = np.array([pwm, delta])
 
+
+            if(self.publish_trajectories):
+                for i in range(self.N + 1):
+                    x_pred = mpc_solver.get(i, "x")[:6]
+                    mpc_states.append(x_pred)
+                    
+                    c_pred = mpc_solver.get(i, "x")[-2:]
+                    mpc_controls.append(c_pred)
+
+                    #print(x_pred, c_pred)
+
+                # print(f"PREDICTED STATES: {mpc_states}")
+                # print(f"PREDICTED CONTROLS: {predicted_controls}")
+                self.publish_predicted_trajectory(mpc_states) # Publish predicted trajectory
+
         self.checkpoint[4] = time.perf_counter_ns()
         print(f"CONTROL: {u_opt}")
 
         mpc_states = []
         mpc_controls = []
-        if(self.publish_trajectories):
-            for i in range(self.N + 1):
-                x_pred = mpc_solver.get(i, "x")[:6]
-                mpc_states.append(x_pred)
-                
-                c_pred = mpc_solver.get(i, "x")[-2:]
-                mpc_controls.append(c_pred)
 
-                #print(x_pred, c_pred)
-
-            # print(f"PREDICTED STATES: {mpc_states}")
-            # print(f"PREDICTED CONTROLS: {predicted_controls}")
-            self.publish_predicted_trajectory(mpc_states) # Publish predicted trajectory
 
         if(not ok_time):
             self.lla_reset_counter = 0
@@ -394,9 +397,9 @@ class MPCNode(Node):
 
         #########################################
         ### PUBLISH MPC DATA
-        residuals = mpc_solver.get_residuals()
-        res_eq = residuals[1]
-        vx = self.current_state[3]
+        # residuals = mpc_solver.get_residuals()
+        # res_eq = residuals[1]
+        # vx = self.current_state[3]
         # eq_tol = 1e-2 if vx > 0.1 else 0.1   # much looser at low speed
         
 
@@ -428,6 +431,8 @@ class MPCNode(Node):
             self.get_logger().warn(f"MPC solver failed with status: {status}")
 
             self.lla_solver.first_control = True
+
+            
 
         self.checkpoint[6] = time.perf_counter_ns()
 
@@ -511,7 +516,7 @@ class MPCNode(Node):
     
     def destroy_node(self):
         if(self.log_data):
-            self.get_logger().info(f"Saving data to {self.log_file}")
+            # self.get_logger().info(f"Saving data to {self.log_file}")
             self.lla_logger.save_log()
         super().destroy_node()
 
