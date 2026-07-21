@@ -20,8 +20,13 @@ class LLASolver():
         self.lla_p = lla_p
 
         self.first_control = True
+        self.current_mode = False
 
         self.params_car = F110()
+
+        self.last_v_err = None
+        self.v_int_err = 0
+    
 
     def print_mpc_failed(self):
         self.solver.print_statistics()
@@ -176,32 +181,34 @@ class LLALogger():
             }
 
 
-    def log_lla_data(self, params, model_index, known_params, solve_time, delta_u=[],
+    def log_lla_data(self, current_state, params, model_index, last_control,
+                     known_params, last_drive_command, solve_time, delta_u=[],
                   mpc_rollout=[], ref_trajectory=[]):
-        if self.log_data:
-            now_ns = time.perf_counter_ns()
-            self.log_buffer["time"].append(now_ns)
-            self.log_buffer["state"].append(self.current_state.copy())
-            self.log_buffer["params"].append(params.copy())
-            self.log_buffer["model_idx"].append(model_index)
-            self.log_buffer["ctrl"].append(self.last_control.copy())
-            self.log_buffer["d_ctrl"].append(delta_u)
-            self.log_buffer["cmd"].append(self.last_drive_command.copy())
-            self.log_buffer["mpc_rollout"].append(np.array(mpc_rollout))
-            self.log_buffer["ref_trajectory"].append(np.array(ref_trajectory))
-            self.log_buffer["known_params"].append(np.array(known_params))  # NEW
-            self.log_buffer["solve_time"].append(solve_time)                # NEW
+        
+        now_ns = time.perf_counter_ns()
+        self.log_buffer["time"].append(now_ns)
+        self.log_buffer["state"].append(current_state.copy())
+        self.log_buffer["params"].append(params.copy())
+        self.log_buffer["model_idx"].append(model_index)
+        self.log_buffer["ctrl"].append(last_control.copy())
+        self.log_buffer["d_ctrl"].append(delta_u)
+        self.log_buffer["cmd"].append(last_drive_command.copy())
+        self.log_buffer["mpc_rollout"].append(np.array(mpc_rollout))
+        self.log_buffer["ref_trajectory"].append(np.array(ref_trajectory))
+        self.log_buffer["known_params"].append(np.array(known_params))  # NEW
+        self.log_buffer["solve_time"].append(solve_time)                # NEW
 
 
     def log_rollout_data(self, lb_history, one_step_cost, ok_time):
-        if(self.log_data):
-            self.log_buffer["ok_time"].append(ok_time)
-            # self.log_buffer["predicted_state"].append(lb_history.last_predicted_states.copy())
-            # self.log_buffer["one_step_cost"].append(one_step_cost)
-            # self.log_buffer["running_cost"].append(lb_history.running_cost.copy())
+        
+        self.log_buffer["ok_time"].append(ok_time)
+        # self.log_buffer["predicted_state"].append(lb_history.last_predicted_states.copy())
+        # self.log_buffer["one_step_cost"].append(one_step_cost)
+        # self.log_buffer["running_cost"].append(lb_history.running_cost.copy())
 
 
     def save_log(self):
+        print(f"Saving data to {self.log_file}")
         np.savez(
             self.log_file,
             time=np.array(self.log_buffer["time"]),

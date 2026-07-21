@@ -20,15 +20,12 @@ import jax.numpy as jnp
 
 
 from llampc.nmpc_gen_pid import setup_mpc
-from llampc.params import F110, get_param_dict_random, get_param_dict_grid, param_validate_ptm
+from llampc.params import F110, get_param_dict_grid
 from llampc.planner import get_reference_trajectory_segment, get_lookahead_point
 from llampc.utils import Track
 
 import llampc.rollout.history as history
-import llampc.rollout.dynamic_sim as dynamics_sim
 import llampc.rollout.dynamic_lateral as dynamics_lateral
-import llampc.rollout.dynamic_rp as dynamics_rp
-import llampc.rollout.dynamic_full as dynamics_full
 from llampc.rollout.rk6 import rk4Factory
 
 from llampc.lla_run_utils import LLALogger, LLASolver
@@ -251,18 +248,6 @@ class MPCNode(Node):
         kappa = self.track.spline.calc_curvature(s)
         return abs(kappa)
     
-    def friction_limited_speed(self, kappa, mu_est, g=9.81, safety_margin=0.85):
-        kappa = max(kappa, 1e-4)
-        return np.sqrt(safety_margin * mu_est * g / kappa)
-
-    def estimate_mu(self, selected_model_params):
-        Df, Dr = selected_model_params[4], selected_model_params[5]  # match your param order
-        mass, g = self.params_car['mass'], 9.81
-        Fz_f = mass * g * self.params_car['lr'] / (self.params_car['lf'] + self.params_car['lr'])
-        Fz_r = mass * g * self.params_car['lf'] / (self.params_car['lf'] + self.params_car['lr'])
-        mu_f = Df / Fz_f
-        mu_r = Dr / Fz_r
-        return min(mu_f, mu_r) 
 
     def odom_callback(self, msg):    
         x = msg.pose.pose.position.x
@@ -283,6 +268,16 @@ class MPCNode(Node):
         omega = msg.twist.twist.angular.z
 
         self.current_state = np.array([x, y, phi, vx, vy, omega])
+
+
+    def estimate_mu(self, selected_model_params):
+        Df, Dr = selected_model_params[4], selected_model_params[5]  # match your param order
+        mass, g = self.params_car['mass'], 9.81
+        Fz_f = mass * g * self.params_car['lr'] / (self.params_car['lf'] + self.params_car['lr'])
+        Fz_r = mass * g * self.params_car['lf'] / (self.params_car['lf'] + self.params_car['lr'])
+        mu_f = Df / Fz_f
+        mu_r = Dr / Fz_r
+        return min(mu_f, mu_r) 
 
     
     def control_callback(self):
@@ -320,6 +315,7 @@ class MPCNode(Node):
         
         selected_model_index = self.lb_history.get_best_model()
         selected_model_params = self.dynamics_bank.get_model_params_arr(selected_model_index)
+        mu_est = self.estimate_mu(selected_model_params)
         
         
         self.checkpoint[2] = time.perf_counter_ns()
@@ -327,7 +323,10 @@ class MPCNode(Node):
         self.checkpoint[3]= time.perf_counter_ns()
 
 
-        ref_point, idx = get_lookahead_point(self.current_state, self.track, self.projidx, lookahead_dist = 1.2)
+        ref_point, idx = get_lookahead_point(self.current_state, 
+                                             self.track, self.projidx, 
+                                             lookahead_dist = 1.2, 
+                                             mu_est=mu_est)
         d_ctrl = []
         if self.current_state[3] < 0.1:
             self.projidx = idx
@@ -339,16 +338,11 @@ class MPCNode(Node):
             self.lla_solver.first_control = True
         else:
             aug_state = np.concatenate([self.current_state, [self.last_control[1]]])
-            self.dynamics_bank.update_known_params(self.current_state[3])
 
-            mu_est = self.estimate_mu(selected_model_params)
-            kappa = self.estimate_curvature_from_track(self.projidx)
-            v_cap = self.friction_limited_speed(kappa, mu_est)
-            v0 = min(v0, v_cap)
-
+            
             # no need to copy states and trajectory in case of update b/c node is single thread
             ref_segment, idx = get_reference_trajectory_segment(
-                x0, v0, self.track, self.N+1, self.dt, self.projidx, scaled_velocity=v_cap
+                x0, v0, self.track, self.N+1, self.dt, self.projidx, mu_est=mu_est
             )
 
             print("REF")
@@ -413,11 +407,10 @@ class MPCNode(Node):
             # self.get_logger().info(f"Logging control {u_opt}")
 
             #version for our dynamics
-           
+            self.dynamics_bank.update_known_params(self.current_state[3])
             self.lb_history.predict_states(
                 self.current_state, u_opt, self.lla_reset_counter == 0
             )
-
             
         else:
             print(f"\n--- SOLVER FAILED WITH STATUS {status} ---")
@@ -473,7 +466,7 @@ class MPCNode(Node):
     def apply_control(self, u_opt):
         """Apply optimal control to the vehicle"""
         # acceleration = float(u_opt[0])
-        desired_v = self.solver.get(1, 'x')[3]
+        # desired_v = self.lla_solver.get(1, 'x')[3]
 
         pwm = float(u_opt[0])
         steer = float(u_opt[1])

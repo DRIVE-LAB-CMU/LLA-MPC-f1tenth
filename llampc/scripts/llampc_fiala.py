@@ -18,17 +18,14 @@ jax.config.update('jax_persistent_cache_min_compile_time_secs', 0)
 import jax.numpy as jnp
 
 from llampc.nmpc_gen_fiala import setup_mpc
-from llampc.params import F110, get_param_dict_grid, param_validate_ptm
+from llampc.params import F110, get_param_dict_grid
 from llampc.planner import get_reference_trajectory_segment, get_lookahead_point
 from llampc.utils import Track
 
 from llampc.lla_run_utils import LLASolver, LLALogger
 
 import llampc.rollout.history as history
-import llampc.rollout.dynamic_sim as dynamics_sim
 import llampc.rollout.dynamic_fiala as dynamics_fiala
-import llampc.rollout.dynamic_rp as dynamics_rp
-import llampc.rollout.dynamic_full as dynamics_full
 from llampc.rollout.rk6 import rk4Factory
 
 
@@ -71,9 +68,6 @@ class MPCNode(Node):
         self.maxtime = np.zeros(self.checkpoints)
         self.checkpoint = np.empty(self.checkpoints)
 
-        self.last_v_err = None
-        self.v_int_err = 0
-        self.current_mode = False
 
         # dictionary, prefereably npy, which has waypoints_x, waypoints_y, and velocity
         track_name = self.get_parameter('track_file_name').get_parameter_value().string_value
@@ -142,8 +136,8 @@ class MPCNode(Node):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
         self.declare_parameter('track_file_name', 'mocap_turnfast.npz')
-        self.declare_parameter('odom_topic', '/odometry/filtered')
-        #self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        # self.declare_parameter('odom_topic', '/odometry/filtered')
+        self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
@@ -281,7 +275,7 @@ class MPCNode(Node):
         omega = msg.twist.twist.angular.z
 
         self.current_state = np.array([x, y, phi, vx, vy, omega])
-        self.get_logger().info(f"Logging MPC data to {self.log_file}")
+        # self.get_logger().info(f"Logging MPC data to {self.log_file}")
 
     def sensor_callback(self, msg):
         erpm = msg.state.speed
@@ -313,7 +307,9 @@ class MPCNode(Node):
             self.current_state
         )
 
-        self.lla_logger.log_rollout_data(self.lb_history, one_step_cost, ok_time)
+        if(self.log_data):
+
+            self.lla_logger.log_rollout_data(self.lb_history, one_step_cost, ok_time)
 
         x0 = self.current_state[:2]
         v0 = self.current_state[3]
@@ -341,8 +337,12 @@ class MPCNode(Node):
         d_ctrl = []
         mpc_states = []
         mpc_controls = []
+
+        mu_est = min(selected_model_params[2], selected_model_params[3])
         if self.current_state[3] < 0.1:
-            ref_point, idx = get_lookahead_point(self.current_state, self.track, self.projidx, lookahead_dist = 1.2)
+            ref_point, idx = get_lookahead_point(
+                self.current_state, self.track, self.projidx, 
+                lookahead_dist = 1.2, mu_est = mu_est)
             self.projidx = idx
 
             record_ref_trajectory = [ref_point]
@@ -353,7 +353,7 @@ class MPCNode(Node):
             self.mpc_dfz_pub.publish(Float64MultiArray(
                 data=[0.0, 0.0]
             ))
-            self.current_mode = False
+            self.lla_solver.current_mode = False
 
             self.lla_solver.first_control=True
         else:
@@ -363,10 +363,11 @@ class MPCNode(Node):
                  self.last_control]
             )
 
-            self.dynamics_bank.update_known_params(self.omega_w, self.dFz)
 
             # no need to copy states and trajectory in case of update b/c node is single thread
-            ref_segment, idx = get_reference_trajectory_segment(x0, v0, self.track, self.N+1, self.dt, self.projidx)
+            ref_segment, idx = get_reference_trajectory_segment(
+                x0, v0, self.track, self.N+1, self.dt, 
+                self.projidx, mu_est = mu_est)
             self.projidx = idx
 
             record_ref_trajectory = []
@@ -388,7 +389,7 @@ class MPCNode(Node):
                 data=[float(mpc_solver.get(1, "x")[7]), 1.0]
             ))
 
-            self.current_mode = True
+            self.lla_solver.current_mode = True
 
 
             print(f"CONTROL: {u_opt}")       
@@ -407,6 +408,10 @@ class MPCNode(Node):
                     
                 self.publish_predicted_trajectory(mpc_states) # Publish predicted trajectory
 
+            # residuals = mpc_solver.get_residuals()
+            # res_eq = residuals[1]
+            # vx = self.current_state[3]
+
 
         self.checkpoint[4] = time.perf_counter_ns()
         
@@ -418,9 +423,8 @@ class MPCNode(Node):
 
         #########################################
         ### PUBLISH MPC DATA
-        residuals = mpc_solver.get_residuals()
-        res_eq = residuals[1]
-        vx = self.current_state[3]
+        
+        
         # eq_tol = 1e-2 if vx > 0.1 else 0.1   # much looser at low speed
         
         self.checkpoint[5] = time.perf_counter_ns()
@@ -428,7 +432,8 @@ class MPCNode(Node):
         if status == 0 or (status == 2):  # Success
             # Get optimal control
             self.apply_control(u_opt) # Apply control
-            
+
+            self.dynamics_bank.update_known_params(self.omega_w, self.dFz)            
             self.lb_history.predict_states(
                 self.current_state, u_opt, self.lla_reset_counter == 0
             )
@@ -447,8 +452,9 @@ class MPCNode(Node):
             self.last_control = np.array([0.0, 0.0])
             self.get_logger().warn(f"MPC solver failed with status: {status}")
 
-            self.current_mode = False
+            self.lla_solver.current_mode = False
             self.lla_solver.first_control = True
+            
 
         self.checkpoint[6] = time.perf_counter_ns()
         self.count = (self.count + 1) % self.time_window
@@ -459,15 +465,18 @@ class MPCNode(Node):
             print(np.max(self.time_history*1e-6, axis = 1))
 
         known_params = np.array(self.dynamics_bank.get_known_params())
-        
-        self.lla_logger.log_lla_data(
-            selected_model_params, 
-            selected_model_index, 
-            known_params, 
-            self.time_history[-1, self.count]*1e-6, 
-            d_ctrl,
-            mpc_states, 
-            record_ref_trajectory)
+
+        if self.log_data:
+            self.lla_logger.log_lla_data(
+                self.current_state,
+                selected_model_params, 
+                selected_model_index, 
+                self.last_control,
+                known_params, 
+                self.time_history[-1, self.count]*1e-6, 
+                d_ctrl,
+                mpc_states, 
+                record_ref_trajectory)
 
     def publish_ref_trajectory(self, ref_trajectory):
         ref_msg = PoseArray()
@@ -495,7 +504,7 @@ class MPCNode(Node):
         drive_msg.header.frame_id = "base_link"
 
         drive_msg.drive.speed = 0.0
-        drive_msg.drive.jerk = 2.0 if self.current_mode else 1.0
+        drive_msg.drive.jerk = 2.0 if self.lla_solver.current_mode else 1.0
         drive_msg.drive.acceleration = cur
         drive_msg.drive.steering_angle = steer
 
@@ -528,7 +537,6 @@ class MPCNode(Node):
 
     def destroy_node(self):
         if(self.log_data):
-            self.get_logger().info(f"Saving data to {self.log_file}")
             self.lla_logger.save_log()
             
         super().destroy_node()
