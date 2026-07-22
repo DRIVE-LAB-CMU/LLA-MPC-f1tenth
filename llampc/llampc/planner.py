@@ -9,6 +9,9 @@ import numpy as np
 from llampc.utils import Spline2D
 
 
+def ema_filter(val, l_val, alpha):
+    return val * alpha + (1-alpha) * l_val
+
 def _speed_at(track, s, mu_est=None):
     """Resolve reference speed at arc-length s, handling both track modes.
 

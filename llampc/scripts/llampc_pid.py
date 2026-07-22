@@ -21,7 +21,7 @@ import jax.numpy as jnp
 
 from llampc.nmpc_gen_pid import setup_mpc
 from llampc.params import F110, get_param_dict_grid
-from llampc.planner import get_reference_trajectory_segment, get_lookahead_point
+from llampc.planner import get_reference_trajectory_segment, get_lookahead_point, ema_filter
 from llampc.utils import Track
 
 import llampc.rollout.history as history
@@ -70,6 +70,8 @@ class MPCNode(Node):
 
         self.last_v = None
         self.v_int_err = 0
+
+        self.last_mu_est = None
 
         # dictionary, prefereably npy, which has waypoints_x, waypoints_y, and velocity
         track_name = self.get_parameter('track_file_name').get_parameter_value().string_value
@@ -315,7 +317,11 @@ class MPCNode(Node):
         
         selected_model_index = self.lb_history.get_best_model()
         selected_model_params = self.dynamics_bank.get_model_params_arr(selected_model_index)
-        mu_est = self.estimate_mu(selected_model_params)
+
+        mu_est = min(selected_model_params[2], selected_model_params[3])
+        if self.last_mu_est is None:
+            self.last_mu_est = mu_est
+        mu_est = ema_filter(mu_est, self.last_mu_est, 0.5)
         
         
         self.checkpoint[2] = time.perf_counter_ns()
@@ -450,7 +456,8 @@ class MPCNode(Node):
             self.time_history[-1, self.count], 
             d_ctrl,
             mpc_states, 
-            record_ref_trajectory)
+            record_ref_trajectory,
+            mu_est)
         
 
     def publish_ref_trajectory(self, ref_trajectory):

@@ -180,13 +180,13 @@ class LLALogger():
                 "running_cost":[],
                 "known_params": [],   # NEW
                 "solve_time": [],     # NEW
+                "mu_est": [],
             }
 
 
     def log_lla_data(self, current_state, params, model_index, last_control,
                      known_params, last_drive_command, solve_time, delta_u=[],
-                  mpc_rollout=[], ref_trajectory=[]):
-        
+                  mpc_rollout=[], ref_trajectory=[], mu_est = 0.0):
         now_ns = time.perf_counter_ns()
         self.log_buffer["time"].append(now_ns)
         self.log_buffer["state"].append(current_state.copy())
@@ -198,11 +198,11 @@ class LLALogger():
         self.log_buffer["mpc_rollout"].append(np.array(mpc_rollout))
         self.log_buffer["ref_trajectory"].append(np.array(ref_trajectory))
         self.log_buffer["known_params"].append(np.array(known_params))  # NEW
-        self.log_buffer["solve_time"].append(solve_time)                # NEW
+        self.log_buffer["solve_time"].append(solve_time)    
+        self.log_buffer["mu_est"].append(mu_est)            # NEW
 
 
     def log_rollout_data(self, lb_history, one_step_cost, ok_time):
-        
         self.log_buffer["ok_time"].append(ok_time)
         # self.log_buffer["predicted_state"].append(lb_history.last_predicted_states.copy())
         # self.log_buffer["one_step_cost"].append(one_step_cost)
@@ -227,5 +227,6 @@ class LLALogger():
             ok_time = np.array(self.log_buffer["ok_time"]),
             cmd = np.array(self.log_buffer["cmd"]),
             known_params = np.array(self.log_buffer["known_params"]),
-            solve_time = np.array(self.log_buffer["solve_time"])
+            solve_time = np.array(self.log_buffer["solve_time"]),
+            mu_est = np.array(self.log_buffer["mu_est"])
         )

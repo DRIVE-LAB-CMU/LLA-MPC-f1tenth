@@ -230,7 +230,7 @@ class StateVisualizer:
         self.mpc_rollout = None
         if "mpc_rollout" in data:
             rollout_data = data["mpc_rollout"]
-            if len(rollout_data) > 0 and len(rollout_data[0]) > 0:
+            if len(rollout_data) > 0 and any(len(r) > 0 for r in rollout_data):
                 self.mpc_rollout = rollout_data
 
         self.ref_trajectory = None
@@ -1889,7 +1889,7 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'stuff.npz')
+    filepath = os.path.join(dir_path, 'what.npz')
 
     ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_turnfast.npz')
 
@@ -1977,7 +1977,7 @@ def main():
         general_models=general_models,
         compute_rollouts=True,
         dt=1.0 / 25.0,
-        ol_reset_interval=5,
+        ol_reset_interval=4,
         full_open_loop=False,
         window_P=40,
         cost_form=np.array([10.0, 10.0, 20.0, 5.0, 10.0, 0.01]),
@@ -1985,7 +1985,7 @@ def main():
         m_step_M=10,
         # Weights for the accumulated-MPC-error graph: actual state vs.
         # reference node 0 (x, y, theta, vx, vy, omega), NMPC solves only.
-        mpc_state_weights=np.array([4.0, 4.0, 0.0, 50.0, 0.0, 0.0]),
+        mpc_state_weights=np.array([9.0, 9.0, 0.0, 40.0, 0.0, 0.0]),
         # Weight per control-rate channel in d_ctrl (e.g. [slew_rate,
         # steer_vel]); defaults to 1.0 each if left as None.
         mpc_ctrl_weights=[0, 0.01],

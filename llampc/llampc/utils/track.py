@@ -17,6 +17,7 @@ class Track:
         file_path = os.path.join(os.path.dirname(__file__), 'tracks', file_name)
         raceline = np.load(file_path, allow_pickle=True)
         n_samples = raceline['x'].size
+        print(list(raceline.keys()))
         self._load_raceline(
                 wx=raceline['x'],
                 wy=raceline['y'],
@@ -55,7 +56,7 @@ class Track:
                 # print(len(vi))
                 # print(len(theta))
                 self.spline_v.append(Spline(theta, vi))
-                
+
         if v is not None:
             self.v = v
 

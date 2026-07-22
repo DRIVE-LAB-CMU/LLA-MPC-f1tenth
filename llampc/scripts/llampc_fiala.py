@@ -19,7 +19,7 @@ import jax.numpy as jnp
 
 from llampc.nmpc_gen_fiala import setup_mpc
 from llampc.params import F110, get_param_dict_grid
-from llampc.planner import get_reference_trajectory_segment, get_lookahead_point
+from llampc.planner import get_reference_trajectory_segment, get_lookahead_point, ema_filter
 from llampc.utils import Track
 
 from llampc.lla_run_utils import LLASolver, LLALogger
@@ -56,6 +56,7 @@ class MPCNode(Node):
         self.last_control = np.array([0.0, 0.0]) #acceleration, steer
         self.rates = np.array([0.0, 0.0])
         self.first_control = True
+        self.last_mu_est = None
         
         self.projidx = 0
 
@@ -135,7 +136,7 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'mocap_turnfastbank.npz')
+        self.declare_parameter('track_file_name', 'mocap_square2fast.npz')
         self.declare_parameter('odom_topic', '/odometry/filtered')
         # self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
@@ -167,6 +168,7 @@ class MPCNode(Node):
             'mur': 0.6,
             'Cro': 0.0,
         }
+
         
         variation_dict = {
             'Cf': 75,   
@@ -183,14 +185,14 @@ class MPCNode(Node):
         discretization_dict = {
             'Cf': 7,   
             'Cr': 7,   
-            'muf': 7,  
-            'mur': 7,  
+            'muf': 10,  
+            'mur': 10,  
             'Cro': 0.0,
         }
 
         param_dict = get_param_dict_grid(mean_dict, variation_dict, 
                                          discretization=discretization_dict, ground_truth=True,
-                                         noadapt=True)
+                                         noadapt=False)
         num_models = len(param_dict['Cf'])
         self.get_logger().info("Dynamics bank starting")
         
@@ -238,6 +240,8 @@ class MPCNode(Node):
         self.current_state = None
         self.omega_w = 0
         self.dFz = 0
+
+        
 
         self.lla_solver = LLASolver(
             setup_mpc(self.N, self.Tf, build=True), lla_p=5, N = self.N)
@@ -341,7 +345,10 @@ class MPCNode(Node):
         # self.current_state[3] = 0.2
 
         mu_est = min(selected_model_params[2], selected_model_params[3])
-        mu_est = None
+        if self.last_mu_est is None:
+            self.last_mu_est = mu_est
+        mu_est = ema_filter(mu_est, self.last_mu_est, 0.5)
+
         if self.current_state[3] < 0.1:
             ref_point, idx = get_lookahead_point(
                 self.current_state, self.track, self.projidx, 
@@ -480,7 +487,8 @@ class MPCNode(Node):
                 self.time_history[-1, self.count]*1e-6, 
                 d_ctrl,
                 mpc_states, 
-                record_ref_trajectory)
+                record_ref_trajectory,
+                mu_est)
 
     def publish_ref_trajectory(self, ref_trajectory):
         ref_msg = PoseArray()
