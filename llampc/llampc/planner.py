@@ -22,7 +22,7 @@ def _speed_at(track, s, mu_est=None):
         if mu_est is None:
             # no live estimate -> fall back to the most conservative (slowest)
             # profile, which is the smallest mu.
-            return track.spline_v[0].calc(s)
+            return track.v
         if mu_est <= mus[0]:
             return track.spline_v[0].calc(s)
         if mu_est >= mus[-1]:

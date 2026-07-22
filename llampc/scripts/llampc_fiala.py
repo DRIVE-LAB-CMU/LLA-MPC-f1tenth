@@ -135,9 +135,9 @@ class MPCNode(Node):
     def declare_params(self):
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'mocap_turnfast.npz')
-        # self.declare_parameter('odom_topic', '/odometry/filtered')
-        self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        self.declare_parameter('track_file_name', 'mocap_turnfastbank.npz')
+        self.declare_parameter('odom_topic', '/odometry/filtered')
+        # self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
 
         self.N = 20 #steps (for nmpc)
@@ -190,7 +190,7 @@ class MPCNode(Node):
 
         param_dict = get_param_dict_grid(mean_dict, variation_dict, 
                                          discretization=discretization_dict, ground_truth=True,
-                                         noadapt=False)
+                                         noadapt=True)
         num_models = len(param_dict['Cf'])
         self.get_logger().info("Dynamics bank starting")
         
@@ -338,9 +338,10 @@ class MPCNode(Node):
         mpc_states = []
         mpc_controls = []
 
-        self.current_state[3] = 0.2
+        # self.current_state[3] = 0.2
 
         mu_est = min(selected_model_params[2], selected_model_params[3])
+        mu_est = None
         if self.current_state[3] < 0.1:
             ref_point, idx = get_lookahead_point(
                 self.current_state, self.track, self.projidx, 
@@ -475,6 +476,7 @@ class MPCNode(Node):
                 selected_model_index, 
                 self.last_control,
                 known_params, 
+                self.last_drive_command,
                 self.time_history[-1, self.count]*1e-6, 
                 d_ctrl,
                 mpc_states, 

@@ -22,6 +22,8 @@ class Track:
                 wy=raceline['y'],
                 n_samples=n_samples,
                 v=raceline['speed'],
+                vs = raceline["vs"],
+                mus = raceline["mus"]
             )
 
 
@@ -53,10 +55,9 @@ class Track:
                 # print(len(vi))
                 # print(len(theta))
                 self.spline_v.append(Spline(theta, vi))
-        elif v is not None:
-            self.v_raceline = v
-            # self.t_raceline = t
-            self.spline_v = Spline(theta, v)
+                
+        if v is not None:
+            self.v = v
 
     def _fit_cubic_splines(self, wx, wy, n_samples):
         """	fit cubic splines on waypoints
