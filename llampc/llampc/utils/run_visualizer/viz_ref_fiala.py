@@ -274,6 +274,14 @@ class StateVisualizer:
         if self.n_params_to_show is None:
             self.n_params_to_show = [x for x in range(len(self.params))]
 
+        # Optional per-timestep friction estimate (mu_est), logged by the
+        # real-time node. Shown as its own time-series panel.
+        self.mu_est = None
+        if "mu_est" in data:
+            me = data["mu_est"]
+            if len(me) > 0:
+                self.mu_est = np.asarray(me, dtype=float)
+
     def load_ref_data(self):
         """Load reference raceline data if provided."""
         self.ref_x = None
@@ -813,6 +821,39 @@ class StateVisualizer:
             else:
                 ax_p.set_ylim(param_data.min() - 0.1, param_data.max() + 0.1)
 
+        # ---- mu_est time-series panel (its own row under the params) ----
+        self.ax_mu = None
+        self.mu_vline = None
+        self.mu_point = None
+        if self.mu_est is not None:
+            # Place it in the first param column, one row below the last
+            # param panel (falls back to a new row if the column is full).
+            n_show = len(self.n_params_to_show)
+            mu_col = (n_show) // self.params_per_column
+            mu_row = (n_show) % self.params_per_column
+            if mu_col + 1 <= n_param_cols:
+                self.ax_mu = self.fig.add_subplot(gs[mu_row, mu_col + 1])
+            else:
+                # No free cell in the existing grid; put it under the main
+                # trajectory axis by stealing a thin axes region instead.
+                self.ax_mu = self.fig.add_axes([0.08, 0.10, 0.35, 0.13])
+
+            t = self.time[:len(self.mu_est)]
+            self.ax_mu.plot(t, self.mu_est, '-', color='teal',
+                            linewidth=1.5, alpha=0.9)
+            self.ax_mu.set_xlabel('Time (s)', fontsize=9)
+            self.ax_mu.set_ylabel('mu_est', fontsize=9)
+            self.ax_mu.grid(True, alpha=0.3)
+            self.ax_mu.tick_params(labelsize=8)
+            if len(t) > 1:
+                self.ax_mu.set_xlim(t[0], t[-1])
+            mr = np.ptp(self.mu_est)
+            if mr > 0:
+                m = 0.1 * mr
+                self.ax_mu.set_ylim(self.mu_est.min() - m, self.mu_est.max() + m)
+            else:
+                self.ax_mu.set_ylim(self.mu_est.min() - 0.1, self.mu_est.max() + 0.1)
+
     def setup_cost_figure(self):
         """Diagnostics window:
         row 0 = sliding-window cost (mode-aware)
@@ -1025,6 +1066,12 @@ class StateVisualizer:
             self.param_points.append(point)
 
         self._setup_cost_artists()
+
+        # mu_est scrubbing cursor + dot
+        if getattr(self, "ax_mu", None) is not None:
+            self.mu_vline = self.ax_mu.axvline(x=0, color='red', linestyle='--',
+                                               linewidth=1.5, alpha=0.7, zorder=3)
+            self.mu_point, = self.ax_mu.plot([], [], 'ro', markersize=6, zorder=4)
 
     def _setup_cost_artists(self):
         self.cost_line_lla = None
@@ -1752,6 +1799,14 @@ class StateVisualizer:
         self.fig.canvas.draw_idle()
         if getattr(self, "fig_diag", None) is not None:
             self.fig_diag.canvas.draw_idle()
+
+        # mu_est cursor + dot
+        if getattr(self, "ax_mu", None) is not None and self.mu_est is not None:
+            self.mu_vline.set_xdata([current_time, current_time])
+            if frame_idx < len(self.mu_est):
+                self.mu_point.set_data([current_time], [self.mu_est[frame_idx]])
+            else:
+                self.mu_point.set_data([], [])
 
     def setup_controls(self):
         """Create interactive controls."""
