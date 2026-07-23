@@ -1942,7 +1942,7 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, '35.npz')
+    filepath = os.path.join(dir_path, 'llaovalrubber4m.npz')
 
     ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square2fast.npz')
 
