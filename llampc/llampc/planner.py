@@ -41,7 +41,7 @@ def _speed_at(track, s, mu_est=None):
 
 
 def get_reference_trajectory_segment(x0, v0, track, N, Ts, projidx, scale=1.,
-                                     wrap=True, skip=2, max_accel=9.51,
+                                     wrap=True, skip=1, max_accel=9.51,
                                      mu_est=None):
     raceline = track.raceline
     num_pts = raceline.shape[1]
