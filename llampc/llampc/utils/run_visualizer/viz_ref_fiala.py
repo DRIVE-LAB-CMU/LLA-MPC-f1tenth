@@ -747,10 +747,14 @@ class StateVisualizer:
         n_param_cols = int(np.ceil(len(self.n_params_to_show) / self.params_per_column))
         n_param_rows = min(self.params_per_column, len(self.n_params_to_show))
 
-        self.fig = plt.figure(figsize=(8 + n_param_cols * 4, max(9, 4 + n_param_rows * 1.8)))
+        n_extra_rows = 1 if self.mu_est is not None else 0
+        self.fig = plt.figure(figsize=(8 + n_param_cols * 4,
+                                       max(9, 4 + (n_param_rows + n_extra_rows) * 1.8)))
 
+        # One extra row at the bottom for the mu_est panel, if present.
+        n_extra_rows = 1 if self.mu_est is not None else 0
         gs = self.fig.add_gridspec(
-            n_param_rows, 1 + n_param_cols,
+            n_param_rows + n_extra_rows, 1 + n_param_cols,
             left=0.08, right=0.96, bottom=0.30, top=0.95,
             wspace=0.35, hspace=0.4,
             width_ratios=[1.8] + [1] * n_param_cols
@@ -826,17 +830,8 @@ class StateVisualizer:
         self.mu_vline = None
         self.mu_point = None
         if self.mu_est is not None:
-            # Place it in the first param column, one row below the last
-            # param panel (falls back to a new row if the column is full).
-            n_show = len(self.n_params_to_show)
-            mu_col = (n_show) // self.params_per_column
-            mu_row = (n_show) % self.params_per_column
-            if mu_col + 1 <= n_param_cols:
-                self.ax_mu = self.fig.add_subplot(gs[mu_row, mu_col + 1])
-            else:
-                # No free cell in the existing grid; put it under the main
-                # trajectory axis by stealing a thin axes region instead.
-                self.ax_mu = self.fig.add_axes([0.08, 0.10, 0.35, 0.13])
+            # Dedicated bottom row of the grid, spanning the param columns.
+            self.ax_mu = self.fig.add_subplot(gs[n_param_rows, 1:])
 
             t = self.time[:len(self.mu_est)]
             self.ax_mu.plot(t, self.mu_est, '-', color='teal',
@@ -1793,6 +1788,15 @@ class StateVisualizer:
             param_val = self.params[idx][frame_idx]
             point.set_data([current_time], [param_val])
 
+
+         # mu_est cursor + dot
+        if getattr(self, "ax_mu", None) is not None and self.mu_est is not None:
+            self.mu_vline.set_xdata([current_time, current_time])
+            if frame_idx < len(self.mu_est):
+                self.mu_point.set_data([current_time], [self.mu_est[frame_idx]])
+            else:
+                self.mu_point.set_data([], [])
+
         # Sliding-window cost cursor + value dots
         self._update_cost_cursor(frame_idx)
 
@@ -1800,13 +1804,7 @@ class StateVisualizer:
         if getattr(self, "fig_diag", None) is not None:
             self.fig_diag.canvas.draw_idle()
 
-        # mu_est cursor + dot
-        if getattr(self, "ax_mu", None) is not None and self.mu_est is not None:
-            self.mu_vline.set_xdata([current_time, current_time])
-            if frame_idx < len(self.mu_est):
-                self.mu_point.set_data([current_time], [self.mu_est[frame_idx]])
-            else:
-                self.mu_point.set_data([], [])
+       
 
     def setup_controls(self):
         """Create interactive controls."""
@@ -1944,9 +1942,9 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'what.npz')
+    filepath = os.path.join(dir_path, '35.npz')
 
-    ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_turnfast.npz')
+    ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square2fast.npz')
 
     param_names = {
         0: 'Cf',

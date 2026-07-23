@@ -318,10 +318,17 @@ class MPCNode(Node):
         selected_model_index = self.lb_history.get_best_model()
         selected_model_params = self.dynamics_bank.get_model_params_arr(selected_model_index)
 
-        mu_est = min(selected_model_params[2], selected_model_params[3])
+
+        
+        Df, Dr = selected_model_params[2], selected_model_params[3]
+        m = self.params_car['mass']
+        g = 9.81
+        mu_est = (Df + Dr) / (m * g)
+
         if self.last_mu_est is None:
             self.last_mu_est = mu_est
-        mu_est = ema_filter(mu_est, self.last_mu_est, 0.5)
+        mu_est = ema_filter(mu_est, self.last_mu_est, 0.1)
+        self.last_mu_est = mu_est
         
         
         self.checkpoint[2] = time.perf_counter_ns()

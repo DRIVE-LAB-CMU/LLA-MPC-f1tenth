@@ -192,7 +192,7 @@ class MPCNode(Node):
 
         param_dict = get_param_dict_grid(mean_dict, variation_dict, 
                                          discretization=discretization_dict, ground_truth=True,
-                                         noadapt=False)
+                                         noadapt=True)
         num_models = len(param_dict['Cf'])
         self.get_logger().info("Dynamics bank starting")
         
@@ -344,10 +344,13 @@ class MPCNode(Node):
 
         # self.current_state[3] = 0.2
 
-        mu_est = min(selected_model_params[2], selected_model_params[3])
+        muf, mur = selected_model_params[2], selected_model_params[3]
+        lf, lr = self.params_car['lf'], self.params_car['lr']
+        mu_est =  (muf * lr + mur * lf) /( lf + lr)
         if self.last_mu_est is None:
             self.last_mu_est = mu_est
-        mu_est = ema_filter(mu_est, self.last_mu_est, 0.5)
+        mu_est = ema_filter(mu_est, self.last_mu_est, 0.1)
+        self.last_mu_est = mu_est
 
         if self.current_state[3] < 0.1:
             ref_point, idx = get_lookahead_point(
