@@ -183,8 +183,8 @@ def create_ocp(model, params_car, steps, horizon):
 
     w_x = 20.0
     w_y = 20.0
-    w_xe = 0.0
-    w_ye = 0.0
+    w_xe = 20.0
+    w_ye =  20.0
     w_theta = 0
     w_vx = 40.0
 
