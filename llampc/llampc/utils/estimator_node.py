@@ -105,25 +105,50 @@ class IwEstimator(Node):
         self.declare_parameter("pole_pairs", 2)                  # F110 params.py: poles/2 = 4/2
         self.declare_parameter("motor_flux_linkage", 0.000726)   # F110 params.py: lam
         self.declare_parameter("current_threshold", 1.0)         # [A] ignore near-idle noise (on avg_iq)
+        self.declare_parameter("max_current_slew", 200.0)         # [A/s] gate out hard current steps/transients
         self.declare_parameter("rls_forgetting_factor", 0.995)
         self.declare_parameter("deriv_filter_alpha", 0.2)        # EMA on domega/dt
         self.declare_parameter("Iw_filter_alpha", 0.1)           # EMA on displayed Iw
+        self.declare_parameter("burn_in_count", 5)               # consistent samples needed to seed Iw_est
+        self.declare_parameter("burn_in_tolerance", 2.0)         # max(samples) < min(samples)*tolerance to accept
+        self.declare_parameter("max_relative_step", 2.0)         # cap per-update multiplicative change once seeded
         self.declare_parameter("plot_window_sec", 10.0)
         # Nominal/CAD reference from F110 params.py: Iw = 0.9 * mw * r_Iw**2
-        # with mw = 4*0.1 = 0.4 kg, r_Iw = 0.043 m  ->  ~6.656e-4 kg*m^2
-        # Shown as a dashed reference line so you can compare the live
-        # estimate against the design value. Set to 0.0 to hide it.
-        self.declare_parameter("nominal_Iw_reference", 0.9 * (4 * 0.1) * (0.043 ** 2))
+        # with r_Iw = 0.043 m.
+        # IMPORTANT: params.py computed mw as `4 * 0.1`, i.e. it assumed
+        # 4 wheels' worth of mass contribute to this driveline inertia.
+        # That's only physically correct if your drivetrain is shaft-driven
+        # 4WD (one motor driving all 4 wheels). If your car is 2WD
+        # (rear-drive only -- the common 1/10 setup), only the driven
+        # wheel(s) actually couple into the `omega_w` state in your model
+        # (front wheels are free-spinning and don't appear in dx6 at all),
+        # so set `driven_wheel_count` to 1 or 2 instead of 4.
+        self.declare_parameter("single_wheel_mass", 0.1)   # [kg] mass per wheel, from params.py
+        self.declare_parameter("driven_wheel_count", 4)    # TODO: set to 1 or 2 for 2WD rear-drive
+        self.declare_parameter("wheel_gyration_radius", 0.043)  # [m] r_Iw from params.py
+        self.declare_parameter("wheel_inertia_factor", 0.9)     # from params.py
+        self.declare_parameter("nominal_Iw_reference", -1.0)    # -1 => auto-compute from the above
 
         gp = self.get_parameter
         self.gear_ratio = gp("gear_ratio").value
         self.pole_pairs = gp("pole_pairs").value
         self.lam_flux = gp("motor_flux_linkage").value
         self.i_thresh = gp("current_threshold").value
+        self.max_current_slew = gp("max_current_slew").value
         self.deriv_alpha = gp("deriv_filter_alpha").value
         self.Iw_alpha = gp("Iw_filter_alpha").value
+        self.burn_in_count = gp("burn_in_count").value
+        self.burn_in_tolerance = gp("burn_in_tolerance").value
+        self.max_relative_step = gp("max_relative_step").value
         self.plot_window = gp("plot_window_sec").value
-        self.nominal_Iw = gp("nominal_Iw_reference").value
+        _nominal_override = gp("nominal_Iw_reference").value
+        if _nominal_override >= 0.0:
+            self.nominal_Iw = _nominal_override
+        else:
+            mw = gp("driven_wheel_count").value * gp("single_wheel_mass").value
+            r_Iw = gp("wheel_gyration_radius").value
+            k = gp("wheel_inertia_factor").value
+            self.nominal_Iw = k * mw * r_Iw ** 2
 
         topic = gp("sensor_core_topic").value
         self.sub = self.create_subscription(
@@ -137,9 +162,11 @@ class IwEstimator(Node):
         self._prev_t = None
         self._prev_wheel_omega = None
         self._filt_wheel_alpha = 0.0
+        self._filt_iq = 0.0
 
         self.Iw_raw = None
         self.Iw_est = None  # smoothed, published/plotted value
+        self._burnin_buf = deque(maxlen=self.burn_in_count + 5)
 
         self.rls = RLS2(forgetting_factor=gp("rls_forgetting_factor").value)
         self.tau_per_amp = self.gear_ratio * 1.5 * self.pole_pairs * self.lam_flux
@@ -153,8 +180,8 @@ class IwEstimator(Node):
 
         self.get_logger().info(
             f"Subscribed to {topic}, gear_ratio fixed at {self.gear_ratio}, "
-            f"nominal Iw reference (CAD) = {self.nominal_Iw:.6g} kg*m^2, "
-            f"waiting for data..."
+            f"nominal Iw reference (CAD, assuming {gp('driven_wheel_count').value} "
+            f"driven wheel(s)) = {self.nominal_Iw:.6g} kg*m^2, waiting for data..."
         )
 
     def on_sensor_core(self, msg: VescStateStamped):
@@ -170,6 +197,7 @@ class IwEstimator(Node):
         if self._prev_t is None:
             self._prev_t = t
             self._prev_wheel_omega = wheel_omega
+            self._filt_iq = avg_iq
             return
 
         dt = t - self._prev_t
@@ -182,20 +210,70 @@ class IwEstimator(Node):
             + (1 - self.deriv_alpha) * self._filt_wheel_alpha
         )
 
+        # Filter avg_iq with the SAME time constant as the acceleration
+        # signal above, so a sudden current step doesn't get paired with
+        # a not-yet-caught-up (lagged) acceleration -- keeps u and y
+        # time-aligned instead of "instant input vs lagged output".
+        raw_iq_slew = abs(avg_iq - self._filt_iq) / dt
+        self._filt_iq = (
+            self.deriv_alpha * avg_iq + (1 - self.deriv_alpha) * self._filt_iq
+        )
+
         self._prev_t = t
         self._prev_wheel_omega = wheel_omega
 
-        # ---------------- Iw update (RLS), gated on avg_iq ----------------
-        if abs(avg_iq) > self.i_thresh:
-            a, _b = self.rls.update(avg_iq, self._filt_wheel_alpha)
+        # ---------------- Iw update (RLS), gated on filtered current ----------------
+        # Two gates:
+        #   1) enough current to be above the noise floor
+        #   2) NOT mid-transient (large current slew rate) -- during a
+        #      step, u/y are momentarily misaligned regardless of
+        #      filtering, and the resulting `a` is unreliable.
+        if (
+            abs(self._filt_iq) > self.i_thresh
+            and raw_iq_slew < self.max_current_slew
+        ):
+            a, _b = self.rls.update(self._filt_iq, self._filt_wheel_alpha)
             if abs(a) > 1e-9:
                 Iw_hat = self.tau_per_amp / a
-                if Iw_hat > 0:  # reject non-physical sign flips during transients
+
+                # Absolute sanity bound: even before we trust anything,
+                # a raw single-sample estimate this far from the
+                # wheel-only reference is almost certainly a transient
+                # RLS artifact, not real physics -- discard outright.
+                abs_ok = Iw_hat > 0 and (
+                    self.nominal_Iw <= 0
+                    or 0.05 * self.nominal_Iw < Iw_hat < 20 * self.nominal_Iw
+                )
+
+                if abs_ok and self.Iw_est is None:
+                    # ---- burn-in: require several CONSISTENT raw samples
+                    # in a row before trusting the very first estimate.
+                    # A single high-leverage sample (e.g. right after a
+                    # hard current step) should not get to seed Iw_est.
+                    self._burnin_buf.append(Iw_hat)
+                    if len(self._burnin_buf) >= self.burn_in_count:
+                        lo, hi = min(self._burnin_buf), max(self._burnin_buf)
+                        if hi < lo * self.burn_in_tolerance:
+                            self.Iw_est = float(np.median(self._burnin_buf))
+                            self.Iw_raw = Iw_hat
+                        else:
+                            # not consistent yet -- drop the oldest and
+                            # keep collecting
+                            self._burnin_buf.popleft()
+
+                elif abs_ok:
+                    # ---- rate-limit how far a single update can move
+                    # the established estimate. This is what actually
+                    # stops one bad sample from teleporting Iw_est to an
+                    # implausible value it then gets "stuck" at during
+                    # the next low-current (no-update) stretch.
+                    lo = self.Iw_est / self.max_relative_step
+                    hi = self.Iw_est * self.max_relative_step
+                    Iw_hat_clamped = min(max(Iw_hat, lo), hi)
                     self.Iw_raw = Iw_hat
                     self.Iw_est = (
-                        Iw_hat
-                        if self.Iw_est is None
-                        else self.Iw_alpha * Iw_hat + (1 - self.Iw_alpha) * self.Iw_est
+                        self.Iw_alpha * Iw_hat_clamped
+                        + (1 - self.Iw_alpha) * self.Iw_est
                     )
 
         self.pub_wheel_omega.publish(Float64(data=wheel_omega))
