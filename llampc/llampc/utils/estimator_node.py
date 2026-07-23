@@ -202,6 +202,19 @@ class IwEstimator(Node):
         if self.Iw_est is not None:
             self.pub_Iw.publish(Float64(data=self.Iw_est))
 
+        # ---- periodic console print of the estimate (throttled to 1 Hz) ----
+        if self._t0 is not None:
+            if (t - self._t0) - getattr(self, "_last_print_t", -1e9) >= 1.0:
+                self._last_print_t = t - self._t0
+                if self.Iw_est is not None:
+                    print(f"[Iw estimate] t={t - self._t0:6.1f}s  "
+                          f"avg_iq={avg_iq:6.2f} A  "
+                          f"Iw_est={self.Iw_est:.6e} kg*m^2  "
+                          f"(nominal={self.nominal_Iw:.3e})")
+                else:
+                    print(f"[Iw estimate] t={t - self._t0:6.1f}s  "
+                          f"avg_iq={avg_iq:6.2f} A  Iw_est=not yet converged")
+
         with self._lock:
             if self._t0 is None:
                 self._t0 = t
@@ -240,6 +253,13 @@ def main():
         )
     ax2.legend(loc="upper right", fontsize=8)
 
+    # live text readout: raw estimate + how many "wheel-equivalents" it is
+    readout_text = ax2.text(
+        0.02, 0.95, "", transform=ax2.transAxes,
+        fontsize=10, verticalalignment="top", family="monospace",
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.8, edgecolor="gray"),
+    )
+
     def update(_frame):
         with node._lock:
             t = list(node.t_buf)
@@ -247,7 +267,7 @@ def main():
             Iw = list(node.Iw_buf)
 
         if not t:
-            return line_i, line_Iw
+            return line_i, line_Iw, readout_text
 
         t_end = t[-1]
         t_start = max(0.0, t_end - node.plot_window)
@@ -264,7 +284,21 @@ def main():
                 pad = 0.1 * (ymax - ymin + 1e-6)
                 ax.set_ylim(ymin - pad, ymax + pad)
 
-        return line_i, line_Iw
+        if node.Iw_est is not None:
+            if node.nominal_Iw > 0:
+                ratio = node.Iw_est / node.nominal_Iw
+                readout_text.set_text(
+                    f"Iw_est     = {node.Iw_est:.4e} kg*m^2\n"
+                    f"wheel-only = {node.nominal_Iw:.4e} kg*m^2\n"
+                    f"ratio      = {ratio:.2f}x wheel inertia\n"
+                    f"(reflected drivetrain adds ~{ratio - 1:.2f}x on top of the bare wheel)"
+                )
+            else:
+                readout_text.set_text(f"Iw_est = {node.Iw_est:.4e} kg*m^2")
+        else:
+            readout_text.set_text("Iw_est: not yet converged")
+
+        return line_i, line_Iw, readout_text
 
     ani = FuncAnimation(fig, update, interval=100, blit=False)
     plt.tight_layout()
