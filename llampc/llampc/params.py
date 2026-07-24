@@ -42,6 +42,8 @@ def F110():
     max_steer = 0.34 		# max steering angle [rad]
     min_steer = -0.34 	# min steering angle [rad]
     max_steer_vel = 3.2 	# max steering velocity [rad/s]
+
+
     
 
     # rw = .047
@@ -55,6 +57,10 @@ def F110():
     gear_ratio = 11.82
     lam = .000726
     Rs = .00954
+
+    motor_inertia = 5.5e-6
+    Im = gear_ratio * gear_ratio * motor_inertia
+        
 
     Iw = 0.9 * mw * r_Iw * r_Iw
 
@@ -90,6 +96,7 @@ def F110():
         'min_rates': min_rates,
         'rw': rw,
         'Iw': Iw,
+        'Im': Im, 
         'pole_pairs': poles/2,
         'gear_ratio': gear_ratio,
         'lambda':lam,

@@ -280,7 +280,12 @@ class StateVisualizer:
         if "mu_est" in data:
             me = data["mu_est"]
             if len(me) > 0:
-                self.mu_est = np.asarray(me, dtype=float)
+                # Entries can be None on some frames -> convert those to NaN so
+                # they simply don't plot instead of poisoning min/max/ptp.
+                me_clean = np.array(
+                    [np.nan if v is None else v for v in me], dtype=float
+                )
+            self.mu_est = me_clean if np.any(np.isfinite(me_clean)) else None
 
     def load_ref_data(self):
         """Load reference raceline data if provided."""
@@ -830,24 +835,28 @@ class StateVisualizer:
         self.mu_vline = None
         self.mu_point = None
         if self.mu_est is not None:
-            # Dedicated bottom row of the grid, spanning the param columns.
-            self.ax_mu = self.fig.add_subplot(gs[n_param_rows, 1:])
-
-            t = self.time[:len(self.mu_est)]
-            self.ax_mu.plot(t, self.mu_est, '-', color='teal',
-                            linewidth=1.5, alpha=0.9)
-            self.ax_mu.set_xlabel('Time (s)', fontsize=9)
-            self.ax_mu.set_ylabel('mu_est', fontsize=9)
-            self.ax_mu.grid(True, alpha=0.3)
-            self.ax_mu.tick_params(labelsize=8)
-            if len(t) > 1:
-                self.ax_mu.set_xlim(t[0], t[-1])
-            mr = np.ptp(self.mu_est)
-            if mr > 0:
-                m = 0.1 * mr
-                self.ax_mu.set_ylim(self.mu_est.min() - m, self.mu_est.max() + m)
+            finite_mu = self.mu_est[np.isfinite(self.mu_est)]
+            if finite_mu.size == 0:
+                self.mu_est = None  # nothing usable to plot
             else:
-                self.ax_mu.set_ylim(self.mu_est.min() - 0.1, self.mu_est.max() + 0.1)
+                self.ax_mu = self.fig.add_subplot(gs[n_param_rows, 1:])
+
+                t = self.time[:len(self.mu_est)]
+                self.ax_mu.plot(t, self.mu_est, '-', color='teal',
+                                linewidth=1.5, alpha=0.9)   # NaNs just leave gaps
+                self.ax_mu.set_xlabel('Time (s)', fontsize=9)
+                self.ax_mu.set_ylabel('mu_est', fontsize=9)
+                self.ax_mu.grid(True, alpha=0.3)
+                self.ax_mu.tick_params(labelsize=8)
+                if len(t) > 1:
+                    self.ax_mu.set_xlim(t[0], t[-1])
+
+                mr = np.ptp(finite_mu)
+                if mr > 0:
+                    m = 0.1 * mr
+                    self.ax_mu.set_ylim(finite_mu.min() - m, finite_mu.max() + m)
+                else:
+                    self.ax_mu.set_ylim(finite_mu.min() - 0.1, finite_mu.max() + 0.1)
 
     def setup_cost_figure(self):
         """Diagnostics window:
@@ -1942,7 +1951,7 @@ class StateVisualizer:
 def main():
     """Main entry point."""
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'llaovalrubber4m.npz')
+    filepath = os.path.join(dir_path, 'nomovalrubber4nonadapt.npz')
 
     ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square2fast.npz')
 

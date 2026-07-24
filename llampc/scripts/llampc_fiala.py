@@ -134,9 +134,12 @@ class MPCNode(Node):
         self.get_logger().info("F1tenth MPC Initialized")
 
     def declare_params(self):
+        self.with_lla = True
+        self.adaptive_planning = False
+
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'mocap_square2fast.npz')
+        self.declare_parameter('track_file_name', 'mocap_turnfastbank.npz')
         self.declare_parameter('odom_topic', '/odometry/filtered')
         # self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
@@ -192,7 +195,7 @@ class MPCNode(Node):
 
         param_dict = get_param_dict_grid(mean_dict, variation_dict, 
                                          discretization=discretization_dict, ground_truth=True,
-                                         noadapt=True)
+                                         noadapt=(not self.with_lla))
         num_models = len(param_dict['Cf'])
         self.get_logger().info("Dynamics bank starting")
         
@@ -351,6 +354,8 @@ class MPCNode(Node):
             self.last_mu_est = mu_est
         mu_est = ema_filter(mu_est, self.last_mu_est, 0.1)
         self.last_mu_est = mu_est
+
+        mu_est = None if not self.adaptive_planning else mu_est
 
         if self.current_state[3] < 0.1:
             ref_point, idx = get_lookahead_point(

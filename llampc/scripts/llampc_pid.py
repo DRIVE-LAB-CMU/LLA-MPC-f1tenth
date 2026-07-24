@@ -320,7 +320,7 @@ class MPCNode(Node):
 
 
         
-        Df, Dr = selected_model_params[2], selected_model_params[3]
+        Df, Dr = selected_model_params[4], selected_model_params[5mu_est]
         m = self.params_car['mass']
         g = 9.81
         mu_est = (Df + Dr) / (m * g)
