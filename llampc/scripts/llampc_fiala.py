@@ -135,7 +135,18 @@ class MPCNode(Node):
 
     def declare_params(self):
         self.with_lla = True
-        self.adaptive_planning = False
+        self.adaptive_planning = True
+        self.lla_reset_interval = 0
+        self.lla_window = 40
+
+
+        self.N = 20 #steps (for nmpc)
+        self.Tf = 0.8 # total time horizon (for nmpc)
+        self.dt = self.Tf / self.N
+        self.control_callback_speed = 0.04
+        self.lla_predict_horizon = 0.04
+
+
 
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
@@ -143,14 +154,8 @@ class MPCNode(Node):
         self.declare_parameter('odom_topic', '/odometry/filtered')
         # self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
-
-        self.N = 20 #steps (for nmpc)
-        self.Tf = 0.8 # total time horizon (for nmpc)
-        self.dt = self.Tf / self.N
-        self.control_callback_speed = 0.04
-        self.lla_predict_horizon = 0.04
-        self.lla_reset_interval = 0
         self.lla_reset_counter = 0
+        
 
         # TODO: Implement thresholding to prevent hysteresis
 
@@ -212,7 +217,7 @@ class MPCNode(Node):
         
         self.get_logger().info("History starting")
         
-        history_length=40
+        history_length=self.lla_window
         self.lb_history = history.LBHistory(
             num_models, history_length,
             self.lla_predict_horizon, cost_weights,

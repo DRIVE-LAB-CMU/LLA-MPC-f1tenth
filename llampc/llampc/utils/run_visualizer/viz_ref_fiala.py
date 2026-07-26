@@ -62,6 +62,7 @@ plt.rcParams.update({
     'lines.linewidth': 2.0
 })
 
+import argparse
 import os
 import sys
 
@@ -86,6 +87,7 @@ if _ROLLOUT_OK:
     from rollouts_lateral import F110
 else:
     F110 = None
+
 
 
 # ===========================================================================
@@ -119,30 +121,10 @@ class StateVisualizer:
         self.ol_reset_interval = ol_reset_interval
         self.cost_weights = (np.array([1.0, 1.0, 0.0, 0.0, 0, 0])
                              if cost_weights is None else np.asarray(cost_weights))
-        # Weighting for the sliding-window cost graph (yaw wrapped at index 2),
-        # analogous to grid search's cost_form. Defaults to cost_weights.
         self.cost_form = (self.cost_weights if cost_form is None
                           else np.asarray(cost_form, dtype=float))
-        # Which state-dimension cost components are summed into the displayed
-        # total cost. Each dim's cost is always computed across the full run;
-        # this mask only controls what gets added together for display.
-        # Defaults to whichever dims have nonzero weight in cost_form.
         self.active_cost_dims = [bool(w != 0) for w in self.cost_form]
 
-        # Weights for the "accumulated MPC error" diagnostic: squared error
-        # (yaw wrapped at index 2) between the ACTUAL recorded state at
-        # frame t and the FIRST node of the reference segment the real MPC
-        # solved against at that step (logged as ref_trajectory[t][0]), plus
-        # a weighted control-effort term from the logged per-step control
-        # rate (d_ctrl), plus a weighted term for the actual applied control
-        # itself (last_ctrl, i.e. the recorded [accel, steer] command, as
-        # distinct from its rate). Summed CUMULATIVELY (not windowed) over
-        # the whole run, and only for frames where the NMPC solver actually
-        # ran (the low-speed pure-pursuit fallback contributes zero, see
-        # _compute_mpc_error_curve). The control dimensions aren't known
-        # until d_ctrl/ctrl are loaded, so the combined weight vector is
-        # resolved lazily in _compute_mpc_error_curve; these are just the
-        # raw user-provided pieces (state weights default to x,y only).
         self._mpc_state_weights_init = (None if mpc_state_weights is None
                                         else np.asarray(mpc_state_weights, dtype=float))
         self._mpc_ctrl_weights_init = (None if mpc_ctrl_weights is None
@@ -158,26 +140,23 @@ class StateVisualizer:
         self.log_order = log_order or DEFAULT_LOG_ORDER
         self.params_car = F110() if _ROLLOUT_OK else None
 
-        # M-step lookahead config (expensive: ~total * M integrator calls).
         self.compute_m_step = bool(compute_m_step)
         self.m_step_M = int(m_step_M)
         self.show_m_step = True
         self._has_m_step = False
 
-        # Rollout state (filled by prepare_rollouts)
-        self.lla_traj = None           # open-loop (or periodically-reset) dynamic traj
-        self.lla_one_step_traj = None  # one-step traj for LLA
+        self.lla_traj = None
+        self.lla_one_step_traj = None
         self.lla_params_over_time = None
-        self.general_trajs = {}     # name -> {'open_loop': arr, 'one_step': arr}
+        self.general_trajs = {}
         self.general_order = []
         self.rollout_len = 0
 
-        # Display toggles (defaults so early update_frame calls are safe)
-        self.show_lla = True            # LLA dynamic rollout on/off
-        self.show_general = True        # general fixed-param models on/off
-        self.show_velocity = True       # velocity/accel state-indicator arrows on/off
-        self.model_mode = "open_loop"   # 'open_loop' or 'one_step' (applies to LLA + general)
-        self.window_P = int(window_P)   # length of the model evaluation window
+        self.show_lla = True
+        self.show_general = True
+        self.show_velocity = True
+        self.model_mode = "open_loop"
+        self.window_P = int(window_P)
 
         self.load_data(filepath)
         self.load_ref_data()
@@ -191,7 +170,6 @@ class StateVisualizer:
         self.setup_controls()
 
     def load_data(self, filepath):
-        """Load trajectory data from npz file."""
         data = np.load(filepath, allow_pickle=True)
         self._raw = data
         self.time = np.asarray(data["time"], dtype=float)
@@ -223,7 +201,6 @@ class StateVisualizer:
         self.accel = ctrl[:, 0]
         self.steer = ctrl[:, 1]
 
-        # Recording view used by the rollout simulators.
         self.recording = {"state": state, "ctrl": ctrl, "time": self.time}
         self.rollout_total = max(0, len(self.time) - 1)
 
@@ -240,31 +217,18 @@ class StateVisualizer:
             if len(ref_traj_data) > 0 and len(ref_traj_data[0]) > 0:
                 self.ref_trajectory = ref_traj_data
 
-        # Optional per-timestep known_params logged by the real-time node
-        # (e.g. dynamics_bank.update_known_params(vx) -> get_known_params()).
-        # When present, the LLA rollout simulators use the EXACT logged value
-        # at each step instead of a single static value recomputed once for
-        # the whole replay.
         self.known_params = None
         if "known_params" in data:
             kp = data["known_params"]
             if len(kp) > 0:
                 self.known_params = kp
 
-        # Optional per-timestep solver solve time (ms), logged alongside the
-        # rest of the control-loop data. Shown in the on-frame info text.
         self.solve_time = None
         if "solve_time" in data:
             st = data["solve_time"]
             if len(st) > 0:
                 self.solve_time = np.asarray(st, dtype=float)
 
-        # Optional per-timestep control-rate command (d_ctrl), logged by the
-        # real-time node. Ragged: empty ([]) on frames handled by the
-        # low-speed pure-pursuit fallback, a real array (e.g. [slew_rate,
-        # steer_vel]) on frames the NMPC solver actually ran. Used to (a)
-        # detect and exclude pure-pursuit frames from the accumulated
-        # MPC-error diagnostic, and (b) fold control effort into that cost.
         self.d_ctrl = None
         if "d_ctrl" in data:
             dctrl_data = data["d_ctrl"]
@@ -274,21 +238,16 @@ class StateVisualizer:
         if self.n_params_to_show is None:
             self.n_params_to_show = [x for x in range(len(self.params))]
 
-        # Optional per-timestep friction estimate (mu_est), logged by the
-        # real-time node. Shown as its own time-series panel.
         self.mu_est = None
         if "mu_est" in data:
             me = data["mu_est"]
             if len(me) > 0:
-                # Entries can be None on some frames -> convert those to NaN so
-                # they simply don't plot instead of poisoning min/max/ptp.
                 me_clean = np.array(
                     [np.nan if v is None else v for v in me], dtype=float
                 )
             self.mu_est = me_clean if np.any(np.isfinite(me_clean)) else None
 
     def load_ref_data(self):
-        """Load reference raceline data if provided."""
         self.ref_x = None
         self.ref_y = None
 
@@ -301,21 +260,13 @@ class StateVisualizer:
                 print(f"Warning: Failed to load reference trajectory from {self.ref_filepath}: {e}")
 
     def prepare_rollouts(self):
-        """Build the LLA dynamic/one-step rollouts and the general fixed-model rollouts.
-
-        Priority: (1) use precomputed arrays already in the npz (e.g. from
-        replay_lla.py); (2) otherwise compute from the log if the backend is
-        importable. Degrades to "recorded run only" if neither is possible.
-        """
         raw = self._raw
         files = set(getattr(raw, "files", []))
 
-        # ---------------- LLA trajectories ----------------
         if "lla_dynamic_trajectory" in files:
             self.lla_traj = np.asarray(raw["lla_dynamic_trajectory"], dtype=float)
             if "lla_optimal_params" in files:
                 self.lla_params_over_time = np.asarray(raw["lla_optimal_params"], dtype=float)
-            # One-step may also be precomputed.
             if "lla_one_step_trajectory" in files:
                 self.lla_one_step_traj = np.asarray(raw["lla_one_step_trajectory"], dtype=float)
         elif self.compute_rollouts and _ROLLOUT_OK and "params" in files and self.rollout_total > 0:
@@ -324,7 +275,6 @@ class StateVisualizer:
             lla_params = remap_to_bank_order(logged[:lla_total], self.log_order)
             self.lla_params_over_time = lla_params
 
-            # Slice the logged known_params to match the rollout length, if present.
             kp_slice = None
             if self.known_params is not None:
                 kp_slice = self.known_params[:lla_total]
@@ -339,8 +289,6 @@ class StateVisualizer:
                 known_params_over_time=kp_slice
             )
 
-        # If we have the dynamic LLA traj but no one-step yet (e.g. loaded from npz
-        # without the precomputed field), try to compute it now.
         if (self.lla_traj is not None and self.lla_one_step_traj is None
                 and self.lla_params_over_time is not None
                 and self.compute_rollouts and _ROLLOUT_OK):
@@ -352,10 +300,9 @@ class StateVisualizer:
                 self.params_car, self.dt, known_params_over_time=kp_slice
             )
 
-        # ---------------- General fixed-param models ----------------
         if "traj_open_loop" in files and "model_names" in files:
             names = [str(n) for n in raw["model_names"]]
-            ol = np.asarray(raw["traj_open_loop"], dtype=float)     # (M, total, state)
+            ol = np.asarray(raw["traj_open_loop"], dtype=float)
             os_arr = (np.asarray(raw["traj_one_step"], dtype=float)
                       if "traj_one_step" in files else ol)
             for i, name in enumerate(names):
@@ -365,19 +312,17 @@ class StateVisualizer:
             names = list(self.general_models.keys())
             bank = np.stack([dict_to_bank_vec(self.general_models[n]) for n in names])
             kp_slice = (self.known_params[:self.rollout_total]
-                        if self.known_params is not None else None)          # <-- add this
+                        if self.known_params is not None else None)
             ol, os_arr = simulate_general_models(
                 self.rollout_total, self.recording, bank, self.params_car,
                 self.dt, self.ol_reset_interval, self.cost_weights,
                 full_open_loop=self.full_open_loop,
-                known_params_over_time=kp_slice                                # <-- add this
+                known_params_over_time=kp_slice
             )
-            # ol, os_arr: (total, M, state) -> store per model as (total, state)
             for i, name in enumerate(names):
                 self.general_trajs[name] = {"open_loop": ol[:, i, :], "one_step": os_arr[:, i, :]}
                 self.general_order.append(name)
 
-        # Common rollout length for safe frame clamping.
         lens = []
         if self.lla_traj is not None:
             lens.append(len(self.lla_traj))
@@ -390,21 +335,11 @@ class StateVisualizer:
             print(f"[visualizer] Rollout backend unavailable ({_ROLLOUT_ERR}); "
                   f"showing recorded trajectory only.")
 
-        # Sliding-window cost curves for the cost subplot.
         self._compute_cost_curves()
-        # M-step lookahead error (gated by compute_m_step; expensive).
         self._compute_m_step_curves()
-        # Accumulated tracking error of the ACTUAL state vs. the reference
-        # the real controller solved against (first node of the logged
-        # reference segment for that step), plus control-effort cost.
         self._compute_mpc_error_curve()
 
     def _step_cost_components(self, traj):
-        """Per-timestep, per-state-dimension weighted squared error vs truth,
-        yaw wrapped at index 2 (matches grid search get_lookback_error).
-        traj: (T, state). Returns (T, state) - one column per cost component,
-        UNSUMMED, so each dimension's contribution stays separable.
-        """
         T = min(len(traj), self.rollout_len)
         tr = np.asarray(traj[:T], dtype=float)
         truth = np.asarray(self.state[:T], dtype=float)
@@ -414,12 +349,6 @@ class StateVisualizer:
         return (err ** 2) * w[None, :]
 
     def _sliding_window(self, step_cost):
-        """Running sum of step_cost over the trailing window_P samples
-        (the cost_history/running_cost queue, length P).
-
-        step_cost: (T,) for a single series, or (T, D) for D components at
-        once (each column windowed independently). Returns same shape.
-        """
         P = max(1, int(self.window_P))
         step_cost = np.asarray(step_cost, dtype=float)
         csum = np.concatenate([np.zeros((1,) + step_cost.shape[1:]),
@@ -429,8 +358,6 @@ class StateVisualizer:
         return csum[idx + 1] - csum[lo]
 
     def _combine_active(self, component_curves):
-        """Sum the windowed per-component curves for only the currently-active
-        cost dimensions. component_curves: (T, D). Returns (T,)."""
         mask = np.asarray(self.active_cost_dims, dtype=float)
         if not np.any(mask):
             return np.zeros(component_curves.shape[0])
@@ -438,10 +365,10 @@ class StateVisualizer:
 
     def _compute_cost_curves(self):
         self.cost_time = None
-        self.lla_cost_components = {}      # mode -> (T, D) windowed
-        self.gen_cost_components = {}      # name -> {mode: (T, D) windowed}
-        self.lla_onestep_components = None # (T, D) un-windowed, one-step traj
-        self.gen_onestep_components = {}   # name -> (T, D) un-windowed
+        self.lla_cost_components = {}
+        self.gen_cost_components = {}
+        self.lla_onestep_components = None
+        self.gen_onestep_components = {}
         if self.rollout_len == 0:
             return
 
@@ -466,11 +393,8 @@ class StateVisualizer:
                 self.general_trajs[name]['one_step'])
 
     def _compute_m_step_curves(self):
-        """Per-dim, per-start-time M-step lookahead error for LLA + general
-        models, for BOTH modes (so the mode toggle just switches arrays).
-        Gated by compute_m_step; requires the rollout backend."""
-        self.lla_m_step_components = {}     # mode -> (T, D)
-        self.gen_m_step_components = {}     # name -> {mode: (T, D)}
+        self.lla_m_step_components = {}
+        self.gen_m_step_components = {}
         if not self.compute_m_step or self.rollout_len == 0:
             return
         if not _ROLLOUT_OK:
@@ -496,35 +420,20 @@ class StateVisualizer:
         if names:
             bank = np.stack([dict_to_bank_vec(self.general_models[n]) for n in names])
             kp_slice = (self.known_params[:T]
-                        if self.known_params is not None else None)          # <-- add this
+                        if self.known_params is not None else None)
             for mode in modes:
                 comp = simulate_general_m_step(
                     T, self.recording, bank, self.params_car,
                     self.dt, M, self.cost_form, mode, self.ol_reset_interval,
                     full_open_loop=self.full_open_loop,
-                    known_params_over_time=kp_slice                            # <-- add this
+                    known_params_over_time=kp_slice
                 )
                 for i, name in enumerate(names):
                     self.gen_m_step_components.setdefault(name, {})[mode] = comp[:T, i, :]
 
         self._has_m_step = bool(self.lla_m_step_components or self.gen_m_step_components)
 
-    # ------------------------------------------------------------------
-    # Accumulated MPC tracking error: ACTUAL state vs. reference, NMPC-only
-    # ------------------------------------------------------------------
     def _extract_first_ref_node(self):
-        """Return an (T, 6) array: the first node of the logged reference
-        segment at each control step (i.e. what the real MPC solved
-        against at k=0, roughly "where the controller currently wants to
-        be"). Returns None if no reference segments were logged.
-
-        Indexed directly against the recorded run (T = n_frames), not
-        against any model rollout, since this diagnostic no longer depends
-        on rollouts at all. Segments can be ragged (pure-pursuit frames log
-        a single point, NMPC frames log the full N+1-length segment), so
-        each frame is normalized independently and short rows are
-        zero-padded up to 6 columns (x, y, theta, vx, vy, omega).
-        """
         if self.ref_trajectory is None:
             return None
 
@@ -545,24 +454,9 @@ class StateVisualizer:
         return first_nodes
 
     def _compute_mpc_error_curve(self):
-        """Cumulative (running total, NOT a sliding window) tracking error
-        of the ACTUAL recorded state vs. the reference's first node, plus a
-        weighted control-effort term from the logged control rate (d_ctrl),
-        plus a weighted term for the actual applied control itself
-        (last_ctrl = the recorded [accel, steer] command at that frame, as
-        distinct from its rate).
-
-        Only frames where the NMPC solver actually ran are counted (frames
-        handled by the low-speed pure-pursuit fallback log an empty d_ctrl
-        and contribute exactly zero for that step, so the curve stays flat
-        across those stretches rather than accumulating error against a
-        reference the real controller never solved against). The last_ctrl
-        term is masked the same way, for consistency with the "NMPC solves
-        only" framing of this diagnostic.
-        """
         self.mpc_error_time = None
-        self.mpc_error_cumulative = None     # (T, n_dims) cumulative, weighted
-        self.mpc_error_valid = None          # (T,) bool, True where NMPC ran
+        self.mpc_error_cumulative = None
+        self.mpc_error_valid = None
         self.mpc_ctrl_dim = 0
         self.mpc_last_ctrl_dim = 0
 
@@ -572,8 +466,6 @@ class StateVisualizer:
 
         T = len(ref_first)
 
-        # Which frames were real NMPC solves (non-empty d_ctrl)? Excludes
-        # the pure-pursuit low-speed fallback frames from the accumulation.
         valid = np.zeros(T, dtype=bool)
         ctrl_dim = 0
         if self.d_ctrl is not None:
@@ -591,15 +483,8 @@ class StateVisualizer:
         self.mpc_ctrl_dim = ctrl_dim
         n_dims = 6 + ctrl_dim
 
-        # last_ctrl: the actual applied control (accel, steer) recorded every
-        # frame (self.ctrl), not ragged like d_ctrl. Dimension comes straight
-        # from the recorded control array.
         last_ctrl_dim = int(self.ctrl.shape[1]) if self.ctrl is not None else 0
 
-        # Resolve the combined weight vector / active mask / labels now that
-        # ctrl_dim and last_ctrl_dim are known (state weights default to
-        # x,y only; d_ctrl weights default to 1.0 per channel; last_ctrl
-        # weights default to 1.0 per channel too, unless the user passed one).
         state_w = (self._mpc_state_weights_init
                   if self._mpc_state_weights_init is not None
                   else np.array([1.0, 1.0, 0.0, 0.0, 0.0, 0.0]))
@@ -629,13 +514,11 @@ class StateVisualizer:
                                + [f"u{i}" for i in range(ctrl_dim)]
                                + last_ctrl_labels)
 
-        # --- state tracking error (yaw wrapped at index 2) ---
         truth = np.asarray(self.state[:T], dtype=float)
         err_state = ref_first - truth
         err_state[:, 2] = (err_state[:, 2] + np.pi) % (2 * np.pi) - np.pi
-        state_components = err_state ** 2                       # (T, 6), unweighted
+        state_components = err_state ** 2
 
-        # --- control-effort term from the logged control rate ---
         if ctrl_dim > 0:
             ctrl_components = np.zeros((T, ctrl_dim), dtype=float)
             if self.d_ctrl is not None:
@@ -648,7 +531,6 @@ class StateVisualizer:
         else:
             ctrl_components = np.zeros((T, 0), dtype=float)
 
-        # --- actual applied control term (last_ctrl: accel, steer) ---
         if last_ctrl_dim > 0:
             last_ctrl_components = np.asarray(self.ctrl[:T], dtype=float) ** 2
         else:
@@ -657,8 +539,6 @@ class StateVisualizer:
         components = np.concatenate(
             [state_components, ctrl_components, last_ctrl_components], axis=1)
         weighted = components * self.mpc_cost_form[None, :]
-        # Pure-pursuit frames contribute nothing (excluded), rather than
-        # being dropped from the timeline entirely.
         weighted[~valid] = 0.0
 
         self.mpc_error_time = np.asarray(self.time[:T], dtype=float)
@@ -666,8 +546,6 @@ class StateVisualizer:
         self.mpc_error_valid = valid
 
     def _mpc_error_curve(self):
-        """Sum the cumulative per-component curves for only the currently
-        active dims (state + control). Returns (T,) or None."""
         if self.mpc_error_cumulative is None:
             return None
         mask = np.asarray(self.active_mpc_cost_dims, dtype=float)
@@ -678,9 +556,6 @@ class StateVisualizer:
     @staticmethod
     def _shade_excluded_regions(ax, valid, times, color='gray', alpha=0.15,
                                 label='Pure pursuit (excluded)'):
-        """Shade contiguous stretches where `valid` is False (e.g. the
-        low-speed pure-pursuit fallback), so it's visually clear those
-        stretches contribute nothing to the accumulated curve."""
         if valid is None or times is None or len(valid) == 0:
             return
         n = len(valid)
@@ -701,29 +576,23 @@ class StateVisualizer:
                 i += 1
 
     def _iter_limit_trajs(self):
-        """Trajectories used to size the axes (the well-behaved ones)."""
         if self.lla_traj is not None:
             yield self.lla_traj
         for name in self.general_order:
             yield self.general_trajs[name]["one_step"]
 
     def _active_lla_traj(self):
-        """Return the LLA trajectory array for the current model_mode."""
         if self.model_mode == 'one_step' and self.lla_one_step_traj is not None:
             return self.lla_one_step_traj
         return self.lla_traj
 
     def _lla_cost_curve(self):
-        """Return the LLA total cost curve (sum of active components) for the
-        current model_mode, or None if that mode's components aren't available."""
         comp = self.lla_cost_components.get(self.model_mode)
         if comp is None:
             return None
         return self._combine_active(comp)
 
     def _gen_cost_curve(self, name):
-        """Return a general model's total cost curve (sum of active
-        components) for the current model_mode."""
         comp = self.gen_cost_components[name][self.model_mode]
         return self._combine_active(comp)
 
@@ -748,7 +617,6 @@ class StateVisualizer:
         return self._combine_active(modes[self.model_mode])
 
     def setup_figure(self):
-        """Create figure with appropriate layout."""
         n_param_cols = int(np.ceil(len(self.n_params_to_show) / self.params_per_column))
         n_param_rows = min(self.params_per_column, len(self.n_params_to_show))
 
@@ -756,7 +624,6 @@ class StateVisualizer:
         self.fig = plt.figure(figsize=(8 + n_param_cols * 4,
                                        max(9, 4 + (n_param_rows + n_extra_rows) * 1.8)))
 
-        # One extra row at the bottom for the mu_est panel, if present.
         n_extra_rows = 1 if self.mu_est is not None else 0
         gs = self.fig.add_gridspec(
             n_param_rows + n_extra_rows, 1 + n_param_cols,
@@ -783,7 +650,6 @@ class StateVisualizer:
             min_y = min(min_y, p_obs[1] - reach)
             max_y = max(max_y, p_obs[1] + reach)
 
-        # Include (well-behaved) rollout trajectories so they stay in view.
         for traj in self._iter_limit_trajs():
             if traj is None or len(traj) == 0:
                 continue
@@ -830,20 +696,19 @@ class StateVisualizer:
             else:
                 ax_p.set_ylim(param_data.min() - 0.1, param_data.max() + 0.1)
 
-        # ---- mu_est time-series panel (its own row under the params) ----
         self.ax_mu = None
         self.mu_vline = None
         self.mu_point = None
         if self.mu_est is not None:
             finite_mu = self.mu_est[np.isfinite(self.mu_est)]
             if finite_mu.size == 0:
-                self.mu_est = None  # nothing usable to plot
+                self.mu_est = None
             else:
                 self.ax_mu = self.fig.add_subplot(gs[n_param_rows, 1:])
 
                 t = self.time[:len(self.mu_est)]
                 self.ax_mu.plot(t, self.mu_est, '-', color='teal',
-                                linewidth=1.5, alpha=0.9)   # NaNs just leave gaps
+                                linewidth=1.5, alpha=0.9)
                 self.ax_mu.set_xlabel('Time (s)', fontsize=9)
                 self.ax_mu.set_ylabel('mu_est', fontsize=9)
                 self.ax_mu.grid(True, alpha=0.3)
@@ -859,15 +724,6 @@ class StateVisualizer:
                     self.ax_mu.set_ylim(finite_mu.min() - 0.1, finite_mu.max() + 0.1)
 
     def setup_cost_figure(self):
-        """Diagnostics window:
-        row 0 = sliding-window cost (mode-aware)
-        row 1 = per-step one-step difference (always one-step)
-        row 2 = M-step lookahead error (mode-aware)  [only if computed]
-        row 3 = accumulated MPC tracking error: actual state vs. reference,
-                NMPC solves only (single curve, not per-model) [only if computed]
-        right = cost-component checkboxes (rows 0-2); a second panel below
-                controls the MPC-error weights (row 3).
-        """
         have_m = self._has_m_step
         have_mpc_err = self.mpc_error_cumulative is not None
         n_rows = 2 + int(have_m) + int(have_mpc_err)
@@ -923,7 +779,6 @@ class StateVisualizer:
             self.ax_mpc_error.grid(True, alpha=0.3)
             self.ax_mpc_error.tick_params(labelsize=8)
 
-        # X label only on the bottom-most subplot.
         bottom_ax = self.ax_mpc_error if self.ax_mpc_error is not None else \
             (self.ax_mstep if self.ax_mstep is not None else self.ax_onestep)
         bottom_ax.set_xlabel('Time (s)', fontsize=9)
@@ -942,7 +797,6 @@ class StateVisualizer:
             self.ax_mpc_cost_dims.axis('off')
 
     def setup_artists(self):
-        """Initialize plot elements."""
         if self.ref_x is not None and self.ref_y is not None:
             self.ax.plot(self.ref_x, self.ref_y, 'k--', alpha=0.4, linewidth=1.5, label='Raceline', zorder=1)
 
@@ -979,11 +833,10 @@ class StateVisualizer:
         self.rollout_yaw_arrows = []
         self.ref_traj_yaw_arrows = []
 
-        # ---- Model-rollout artists (LLA + general fixed models) ----
         self.lla_trail = None
         self.lla_point = None
         self.lla_heading = None
-        self.model_artists = {}   # name -> {'trail':.., 'point':.., 'color':.., 'heading':..}
+        self.model_artists = {}
 
         legend_elements = []
 
@@ -1003,31 +856,26 @@ class StateVisualizer:
             legend_elements.append(Line2D([0], [0], color='m', linestyle='--', marker='o',
                                           markersize=5, lw=1.5, label='MPC Rollout'))
 
-        # LLA dynamic rollout (per-timestep optimal params).
         if self.lla_traj is not None:
             self.lla_trail, = self.ax.plot([], [], '-', color='orange', alpha=0.55,
                                            linewidth=1.8, zorder=3)
             self.lla_point, = self.ax.plot([], [], 'o', color='orange', mec='k',
                                            markersize=9, zorder=6)
-            # Predicted-orientation bar (like the black heading bar, in orange).
             self.lla_heading, = self.ax.plot([], [], '-', color='orange',
                                              linewidth=2, zorder=6)
             legend_elements.append(Line2D([0], [0], color='orange', marker='o', lw=1.8,
                                           label='LLA (per-step params)'))
 
-        # General fixed-parameter models.
         cmap = plt.get_cmap('tab10')
         for i, name in enumerate(self.general_order):
             color = cmap(i % 10)
             trail, = self.ax.plot([], [], '-', color=color, alpha=0.45, linewidth=1.3, zorder=2)
             point, = self.ax.plot([], [], 's', color=color, mec='k', markersize=7, zorder=5)
-            # Predicted-orientation bar (like the black heading bar, in model color).
             heading, = self.ax.plot([], [], '-', color=color, linewidth=2, zorder=5)
             self.model_artists[name] = {"trail": trail, "point": point,
                                         "color": color, "heading": heading}
             legend_elements.append(Line2D([0], [0], color=color, marker='s', lw=1.3, label=str(name)))
 
-        # ---- "Last P points" evaluation-window artists ----
         self.window_true, = self.ax.plot([], [], 'o-', color='navy', markersize=4,
                                           linewidth=2.0, alpha=0.9, zorder=4)
         self.window_lla = None
@@ -1071,7 +919,6 @@ class StateVisualizer:
 
         self._setup_cost_artists()
 
-        # mu_est scrubbing cursor + dot
         if getattr(self, "ax_mu", None) is not None:
             self.mu_vline = self.ax_mu.axvline(x=0, color='red', linestyle='--',
                                                linewidth=1.5, alpha=0.7, zorder=3)
@@ -1116,7 +963,6 @@ class StateVisualizer:
             self.os_lines_gen[name] = oline
             self.os_dots_gen[name] = odot
 
-        # ---- M-step lookahead lines/dots (only if computed) ----
         if getattr(self, "ax_mstep", None) is not None:
             if self.lla_m_step_components:
                 self.ms_line_lla, = self.ax_mstep.plot([], [], '-', color='orange',
@@ -1134,7 +980,6 @@ class StateVisualizer:
                 self.ms_lines_gen[name] = mline
                 self.ms_dots_gen[name] = mdot
 
-        # ---- Accumulated MPC-error line/dot (single curve, only if computed) ----
         if getattr(self, "ax_mpc_error", None) is not None and self.mpc_error_cumulative is not None:
             self.mpc_error_line, = self.ax_mpc_error.plot(
                 [], [], '-', color='purple', linewidth=1.8, label='Actual state (NMPC only)')
@@ -1143,8 +988,6 @@ class StateVisualizer:
             self._shade_excluded_regions(
                 self.ax_mpc_error, self.mpc_error_valid, self.mpc_error_time)
 
-        # Red shaded trailing-window span on the one-step subplot, marking the
-        # same trailing P-sample window under the cursor.
         self.cost_window_span = self.ax_onestep.axvspan(
             0, 0, color='red', alpha=0.12, zorder=1, linewidth=0)
 
@@ -1176,10 +1019,6 @@ class StateVisualizer:
         self._refresh_cost_lines()
 
     def _setup_cost_dim_checkboxes(self):
-        """Checkboxes to toggle which state-dimension cost components are
-        summed into the displayed total cost. Each dimension's windowed cost
-        is already computed across the full run (see _compute_cost_curves);
-        toggling here only changes the on-the-fly recombination, no recompute."""
         if getattr(self, "ax_cost_dims", None) is None:
             self.cost_dim_checks = None
             return
@@ -1191,8 +1030,6 @@ class StateVisualizer:
         self.cost_dim_checks.on_clicked(self.on_cost_dim_toggle)
 
     def on_cost_dim_toggle(self, label):
-        """Flip one cost-component's active flag and redraw the recombined
-        total cost curves (LLA + general models) and the live cursor dots."""
         i = COST_DIM_LABELS.index(label)
         self.active_cost_dims[i] = not self.active_cost_dims[i]
         self._refresh_cost_lines()
@@ -1201,10 +1038,6 @@ class StateVisualizer:
             self.fig_diag.canvas.draw_idle()
 
     def _setup_mpc_cost_dim_checkboxes(self):
-        """Checkboxes to toggle which state-dimension components are summed
-        into the accumulated MPC-error curves (row 3). Independent from the
-        lookback-cost checkboxes above; same on-the-fly recombination
-        pattern (no recompute of the underlying cumulative sums)."""
         if getattr(self, "ax_mpc_cost_dims", None) is None or self.mpc_dim_labels is None:
             self.mpc_cost_dim_checks = None
             return
@@ -1216,8 +1049,6 @@ class StateVisualizer:
         self.mpc_cost_dim_checks.on_clicked(self.on_mpc_cost_dim_toggle)
 
     def on_mpc_cost_dim_toggle(self, label):
-        """Flip one MPC-error component's active flag (state dim or control
-        channel) and redraw the recombined accumulated curve + cursor dot."""
         i = self.mpc_dim_labels.index(label)
         self.active_mpc_cost_dims[i] = not self.active_mpc_cost_dims[i]
         self._refresh_mpc_error_lines()
@@ -1227,15 +1058,6 @@ class StateVisualizer:
 
     @staticmethod
     def _autoscale_axis_y(ax, lines, pad_frac=0.08, floor_zero=True):
-        """Manually rescale an axis's y-limits from a set of Line2D artists.
-
-        ax.relim()/autoscale_view() can silently fail to grow the view when
-        a line's data contains NaNs, or when it's transiently empty (e.g.
-        right after a model is toggled off), leaving stale/cramped limits.
-        This walks the actual y-data, ignoring NaNs and empty series, and
-        sets explicit limits with a fractional margin so curves never get
-        clipped at the top after new data comes in.
-        """
         vals = []
         for line in lines:
             if line is None:
@@ -1268,7 +1090,6 @@ class StateVisualizer:
         if getattr(self, "ax_cost", None) is None or self.cost_time is None:
             return
 
-        # --- windowed cost (mode-aware) ---
         if self.cost_line_lla is not None:
             curve = self._lla_cost_curve()
             if self.show_lla and curve is not None:
@@ -1285,7 +1106,6 @@ class StateVisualizer:
             [self.cost_line_lla, *self.cost_lines_gen.values()]
         )
 
-        # --- one-step difference (always one-step traj) ---
         if self.os_line_lla is not None:
             curve = self._lla_onestep_curve()
             if self.show_lla and curve is not None:
@@ -1302,7 +1122,6 @@ class StateVisualizer:
             [self.os_line_lla, *self.os_lines_gen.values()]
         )
 
-        # --- M-step lookahead (mode-aware) ---
         if getattr(self, "ax_mstep", None) is not None:
             if self.ms_line_lla is not None:
                 curve = self._lla_m_step_curve()
@@ -1321,13 +1140,9 @@ class StateVisualizer:
                 [self.ms_line_lla, *self.ms_lines_gen.values()]
             )
 
-        # --- Accumulated MPC error vs. reference (mode-aware) ---
         self._refresh_mpc_error_lines()
 
     def _refresh_mpc_error_lines(self):
-        """Single actual-state-vs-reference curve; independent of the
-        model_mode / show_lla / show_general toggles, since it doesn't
-        involve any model rollout."""
         if getattr(self, "ax_mpc_error", None) is None or self.mpc_error_time is None:
             return
         if self.mpc_error_line is None:
@@ -1348,8 +1163,6 @@ class StateVisualizer:
 
         self.cost_cursor.set_xdata([ct, ct])
 
-        # Shade [t - P + 1, t] in time on the one-step subplot, matching the
-        # sliding window that produced the windowed-cost value under the cursor.
         rs = max(0, ridx - self.window_P + 1)
         t_start = float(self.time[rs])
         self.cost_window_span.set_x(t_start)
@@ -1367,7 +1180,6 @@ class StateVisualizer:
             else:
                 dot.set_data([], [])
 
-        # one-step subplot
         self.onestep_cursor.set_xdata([ct, ct])
         if self.os_dot_lla is not None:
             curve = self._lla_onestep_curve()
@@ -1381,7 +1193,6 @@ class StateVisualizer:
             else:
                 dot.set_data([], [])
 
-        # M-step subplot
         if getattr(self, "ax_mstep", None) is not None and self.mstep_cursor is not None:
             self.mstep_cursor.set_xdata([ct, ct])
             if self.ms_dot_lla is not None:
@@ -1397,7 +1208,6 @@ class StateVisualizer:
                 else:
                     dot.set_data([], [])
 
-        # Accumulated MPC-error subplot
         self._update_mpc_error_cursor(frame_idx)
 
     def _update_mpc_error_cursor(self, frame_idx):
@@ -1420,7 +1230,6 @@ class StateVisualizer:
 
     @staticmethod
     def _as_points(arr):
-        """Normalize ref/rollout data to an (N, state) array with N >= 1."""
         arr = np.asarray(arr, dtype=float)
 
         if arr.ndim == 1:
@@ -1433,21 +1242,19 @@ class StateVisualizer:
         state_widths = (2, 3)
 
         if cols in state_widths:
-            return arr        # already (N, state)
+            return arr
         if rows in state_widths:
-            return arr.T      # (state, N) -> (N, state)
+            return arr.T
 
         return arr
 
     def _clear_yaw_arrows(self, arrow_list):
-        """Remove all arrows in a list from the axes."""
         for arrow in arrow_list:
             if arrow in self.ax.patches:
                 arrow.remove()
         arrow_list.clear()
 
     def _draw_yaw_arrows(self, arr, color, arrow_list, yaw_len=0.15):
-        """Draw yaw arrows at each node of a trajectory array."""
         pts = self._as_points(arr)
         if pts.shape[1] < 3:
             return
@@ -1468,15 +1275,11 @@ class StateVisualizer:
             arrow_list.append(arrow)
 
     def _extract_xy(self, arr):
-        """Extract x, y from a single point or a list of points (any layout)."""
         pts = self._as_points(arr)
         return pts[:, 0], pts[:, 1]
 
     @staticmethod
     def _break_segments(pts, idx_start, interval):
-        """Return x, y for pts (absolute indices idx_start..), inserting a NaN
-        break before every re-anchor index so the polyline is not drawn across a
-        reset jump. interval None/<=0 -> no breaks (single connected line)."""
         if len(pts) == 0:
             return np.array([]), np.array([])
         xs = np.asarray(pts[:, 0], dtype=float)
@@ -1493,32 +1296,20 @@ class StateVisualizer:
         return np.asarray(out_x), np.asarray(out_y)
 
     def _lla_interval(self):
-        """Reset cadence for the LLA trajectory.
-
-        One-step always re-anchors to truth each step (continuous, no jumps);
-        dynamic open-loop resets every ol_reset_interval unless full_open_loop.
-        """
         if self.model_mode == 'one_step':
             return None
         return None if self.full_open_loop else self.ol_reset_interval
 
     def _gen_interval(self):
-        """Reset cadence of the general models. One-step re-anchors every step,
-        producing a near-truth continuous path (no jumps), so it is not broken;
-        open-loop jumps back to truth every OL_reset_interval."""
         if self.model_mode == "one_step":
             return None
         return None if self.full_open_loop else self.ol_reset_interval
 
     def _set_heading_bar(self, art, x, y, theta, length=0.5):
-        """Draw a short orientation bar from (x, y) along theta, mirroring the
-        black current-position heading bar but for a predicted model state."""
         art.set_data([x, x + length * np.cos(theta)],
                      [y, y + length * np.sin(theta)])
 
     def _update_model_overlays(self, frame_idx):
-        """Update LLA + general model rollout markers/trails for this frame.
-        Both LLA and general models respect self.model_mode."""
         if self.rollout_len == 0:
             if self.lla_point is not None:
                 self.lla_trail.set_data([], [])
@@ -1533,7 +1324,6 @@ class StateVisualizer:
 
         ridx = min(frame_idx, self.rollout_len - 1)
 
-        # ---- LLA rollout (mode-aware) ----
         if self.lla_traj is not None:
             traj = self._active_lla_traj()
             if self.show_lla and traj is not None:
@@ -1550,7 +1340,6 @@ class StateVisualizer:
                 if self.lla_heading is not None:
                     self.lla_heading.set_data([], [])
 
-        # ---- General fixed-parameter models ----
         for name, a in self.model_artists.items():
             if self.show_general:
                 traj = self.general_trajs[name][self.model_mode]
@@ -1565,15 +1354,8 @@ class StateVisualizer:
                 a["heading"].set_data([], [])
 
     def _update_window_overlays(self, frame_idx):
-        """Highlight the last P samples (the model evaluation window).
-
-        The recorded trajectory's window is always drawn as the comparison
-        baseline. Both LLA and general model windows follow model_mode and
-        their own on/off toggles.
-        """
         P = self.window_P
 
-        # Recorded trajectory: always show its last-P window (continuous truth).
         start = max(0, frame_idx - P + 1)
         self.window_true.set_data(self.x[start:frame_idx + 1], self.y[start:frame_idx + 1])
 
@@ -1586,7 +1368,6 @@ class StateVisualizer:
 
         ridx = min(frame_idx, self.rollout_len - 1)
 
-        # ---- LLA window (mode-aware) ----
         if self.lla_traj is not None and self.window_lla is not None:
             traj = self._active_lla_traj()
             if self.show_lla and traj is not None:
@@ -1597,7 +1378,6 @@ class StateVisualizer:
             else:
                 self.window_lla.set_data([], [])
 
-        # ---- General model windows ----
         for name, art in self.window_models.items():
             if self.show_general:
                 traj = self.general_trajs[name][self.model_mode]
@@ -1609,18 +1389,6 @@ class StateVisualizer:
                 art.set_data([], [])
 
     def _maybe_expand_trajectory_view(self):
-        """Grow (never shrink) the main trajectory axis limits to fit whatever
-        model overlay is currently visible.
-
-        setup_figure() only sizes the initial view from the LLA open-loop
-        trajectory and each general model's one-step trajectory
-        (_iter_limit_trajs). It does not account for the LLA one-step
-        trajectory or the general models' open-loop trajectories, so
-        switching model_mode (or toggling LLA's one-step view) can push
-        points outside the fixed initial bounds with no way back into view.
-        This checks the actually-visible trail/point artists each frame and
-        expands the view (only ever outward) to keep them on screen.
-        """
         xs_all, ys_all = [], []
 
         for art in (self.lla_trail, self.lla_point, self.window_lla):
@@ -1665,19 +1433,14 @@ class StateVisualizer:
             self.ax.set_ylim(new_ymin, new_ymax)
 
     def update_frame(self, frame_idx):
-        """Update visualization for given frame."""
         frame_idx = int(frame_idx)
         self.current_frame = frame_idx
 
         self.trail.set_data(self.x[:frame_idx + 1], self.y[:frame_idx + 1])
         self.point.set_data([self.x[frame_idx]], [self.y[frame_idx]])
 
-        # Model rollouts (LLA + general fixed models)
         self._update_model_overlays(frame_idx)
-        # Grow (never shrink) the view if the active overlay falls outside
-        # the initial fixed bounds (e.g. after switching model_mode).
         self._maybe_expand_trajectory_view()
-        # Last-P evaluation window on the true path + model rollouts
         self._update_window_overlays(frame_idx)
 
         self._clear_yaw_arrows(self.rollout_yaw_arrows)
@@ -1753,10 +1516,6 @@ class StateVisualizer:
             )
             self.ax.add_patch(self.accel_arrow)
 
-        # Solve-time stat for this frame, if it was logged. Guarded on both
-        # availability and index range so a shorter/missing solve_time array
-        # (e.g. logged before this field existed) just falls back to "n/a"
-        # rather than throwing.
         solve_time_str = "n/a"
         if self.solve_time is not None and frame_idx < len(self.solve_time):
             solve_time_str = f"{self.solve_time[frame_idx]:.2f} ms"
@@ -1797,8 +1556,6 @@ class StateVisualizer:
             param_val = self.params[idx][frame_idx]
             point.set_data([current_time], [param_val])
 
-
-         # mu_est cursor + dot
         if getattr(self, "ax_mu", None) is not None and self.mu_est is not None:
             self.mu_vline.set_xdata([current_time, current_time])
             if frame_idx < len(self.mu_est):
@@ -1806,18 +1563,14 @@ class StateVisualizer:
             else:
                 self.mu_point.set_data([], [])
 
-        # Sliding-window cost cursor + value dots
         self._update_cost_cursor(frame_idx)
 
         self.fig.canvas.draw_idle()
         if getattr(self, "fig_diag", None) is not None:
             self.fig_diag.canvas.draw_idle()
 
-       
-
     def setup_controls(self):
-        """Create interactive controls."""
-        plt.figure(self.fig.number)      # ensure controls land on the main window
+        plt.figure(self.fig.number)
         bottom_margin = 0.08
 
         ax_slider = plt.axes([0.2, bottom_margin + 0.02, 0.6, 0.02])
@@ -1840,13 +1593,10 @@ class StateVisualizer:
         self.btn_rollout.on_clicked(self.toggle_rollout)
         self.show_rollout = True
 
-        # State-indicator (velocity/accel arrows) show/hide. Independent of the
-        # MPC-rollout toggle above.
         ax_vel = plt.axes([0.52, bottom_margin - 0.03, 0.13, 0.03])
         self.btn_velocity = Button(ax_vel, 'Velocity: ON')
         self.btn_velocity.on_clicked(self.toggle_velocity)
 
-        # --- Model-rollout controls ---
         ax_lla = plt.axes([0.83, bottom_margin - 0.03, 0.13, 0.03])
         self.btn_lla = Button(ax_lla, 'LLA: ON')
         self.btn_lla.on_clicked(self.toggle_lla)
@@ -1860,7 +1610,6 @@ class StateVisualizer:
         self.btn_mode = Button(ax_mode, mode_label)
         self.btn_mode.on_clicked(self.toggle_mode)
 
-        # M-step show/hide (only if computed).
         if self._has_m_step:
             ax_mstep_btn = plt.axes([0.55, bottom_margin - 0.07, 0.12, 0.03])
             self.btn_m_step = Button(ax_mstep_btn, 'M-step: ON')
@@ -1873,9 +1622,6 @@ class StateVisualizer:
         self.update_frame(val)
 
     def toggle_velocity(self, event):
-        """Show/hide the velocity/accel state-indicator arrows (independent of
-        the MPC-rollout toggle). Arrows are cleared each frame and simply not
-        re-added while off, so this just redraws the current frame."""
         self.show_velocity = not self.show_velocity
         self.btn_velocity.label.set_text(
             'Velocity: ON' if self.show_velocity else 'Velocity: OFF')
@@ -1901,21 +1647,18 @@ class StateVisualizer:
         self.update_frame(self.current_frame)
 
     def toggle_lla(self, event):
-        """Show/hide the LLA rollout (independent of general models)."""
         self.show_lla = not self.show_lla
         self.btn_lla.label.set_text('LLA: ON' if self.show_lla else 'LLA: OFF')
         self._refresh_cost_lines()
         self.update_frame(self.current_frame)
 
     def toggle_general(self, event):
-        """Show/hide the general fixed-param models (independent of LLA)."""
         self.show_general = not self.show_general
         self.btn_general.label.set_text('Others: ON' if self.show_general else 'Others: OFF')
         self._refresh_cost_lines()
         self.update_frame(self.current_frame)
 
     def toggle_mode(self, event):
-        """Switch ALL models (LLA + general) between open-loop and one-step."""
         self.model_mode = 'one_step' if self.model_mode == 'open_loop' else 'open_loop'
         label = 'Mode: 1-step' if self.model_mode == 'one_step' else 'Mode: OL'
         self.btn_mode.label.set_text(label)
@@ -1923,7 +1666,6 @@ class StateVisualizer:
         self.update_frame(self.current_frame)
 
     def toggle_m_step(self, event):
-        """Show/hide the M-step lookahead curves (computation already done)."""
         self.show_m_step = not self.show_m_step
         self.btn_m_step.label.set_text(
             'M-step: ON' if self.show_m_step else 'M-step: OFF')
@@ -1948,12 +1690,48 @@ class StateVisualizer:
         plt.show()
 
 
+def _parse_args():
+    dir_path = os.path.dirname(os.path.abspath(__file__))
+    default_ref = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_turnfastbank.npz')
+
+    parser = argparse.ArgumentParser(
+        description="Interactive state-trajectory visualizer."
+    )
+    parser.add_argument(
+        "filepath",
+        nargs="?",
+        default=os.path.join(dir_path, 'nomovalrubber4nonadapt.npz'),
+        help="Path to the recorded trajectory .npz file to visualize "
+             "(default: nomovalrubber4nonadapt.npz next to this script).",
+    )
+    parser.add_argument(
+        "--ref",
+        "--ref-filepath",
+        dest="ref_filepath",
+        default=default_ref,
+        help="Path to the reference raceline .npz file "
+             "(default: tracks/mocap_square2fast.npz relative to this script's parent dir). "
+             "Pass an empty string to disable.",
+    )
+    args = parser.parse_args()
+    return args
+
 def main():
     """Main entry point."""
-    dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'nomovalrubber4nonadapt.npz')
+    args = _parse_args()
+    filepath = args.filepath
+    ref_filepath = args.ref_filepath or None
 
-    ref_filepath = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square2fast.npz')
+    if not os.path.exists(filepath):
+        dir_path = os.path.dirname(os.path.abspath(__file__))
+        candidate = os.path.join(dir_path, filepath)
+        if os.path.exists(candidate):
+            filepath = candidate
+        else:
+            raise FileNotFoundError(
+                f"Trajectory file not found: {filepath} "
+                f"(also checked {candidate})"
+            )
 
     param_names = {
         0: 'Cf',
