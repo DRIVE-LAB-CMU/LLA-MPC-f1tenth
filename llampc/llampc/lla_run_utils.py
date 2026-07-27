@@ -204,9 +204,9 @@ class LLALogger():
 
     def log_rollout_data(self, lb_history, one_step_cost, ok_time):
         self.log_buffer["ok_time"].append(ok_time)
-        # self.log_buffer["predicted_state"].append(lb_history.last_predicted_states.copy())
-        # self.log_buffer["one_step_cost"].append(one_step_cost)
-        # self.log_buffer["running_cost"].append(lb_history.running_cost.copy())
+        self.log_buffer["predicted_state"].append(lb_history.last_predicted_states.copy())
+        self.log_buffer["one_step_cost"].append(one_step_cost)
+        self.log_buffer["running_cost"].append(lb_history.running_cost.copy())
 
 
     def save_log(self):

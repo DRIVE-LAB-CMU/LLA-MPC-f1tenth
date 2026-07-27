@@ -134,8 +134,9 @@ class MPCNode(Node):
         self.get_logger().info("F1tenth MPC Initialized")
 
     def declare_params(self):
-        self.with_lla = True
+        self.with_lla = False
         self.adaptive_planning = False
+        self.adaptive_control = True
         self.lla_reset_interval = 0
         self.lla_window = 40
 
@@ -150,13 +151,13 @@ class MPCNode(Node):
 
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'mocap_square2fast.npz')
+        self.declare_parameter('track_file_name', 'mocap_turnfastbank.npz')
         self.declare_parameter('odom_topic', '/odometry/filtered')
         # self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
         self.lla_reset_counter = 0
         
-
+        
         # TODO: Implement thresholding to prevent hysteresis
 
         self.params_car = F110()
@@ -186,7 +187,7 @@ class MPCNode(Node):
             'Cro': 0.0, 
         }
         
-        cost_weights = np.array([0.0, 0.0, 20.0, 1.0, 10.0, 0.01])
+        cost_weights = np.array([0.0, 0.0, 20.0, 1.0, 10.0, 0.1])
         # x, y, theta, vx, vy, omega
         
         # grid discretization
@@ -225,6 +226,8 @@ class MPCNode(Node):
             self.dynamics_bank, dynamics_fiala.diffequation,
             buffer_size = [0, 0]
         )
+
+        self.mean_params = self.dynamics_bank.get_model_params_arr(0)
         
         self.get_logger().info("History generation complete")
 
@@ -362,7 +365,7 @@ class MPCNode(Node):
 
         mu_est = None if not self.adaptive_planning else mu_est
 
-        if self.current_state[3] < 0.1:
+        if self.current_state[3] < 0.3:
             ref_point, idx = get_lookahead_point(
                 self.current_state, self.track, self.projidx, 
                 lookahead_dist = 1.2, mu_est = mu_est)
@@ -401,8 +404,9 @@ class MPCNode(Node):
 
             self.lla_solver.prepare_mpc_solve()
 
+            control_params = selected_model_params if self.adaptive_control else self.mean_params
             full_params = self.lla_solver.construct_params(
-                selected_model_params, ref_segment)
+                control_params, ref_segment)
             
             mpc_solver, status = self.lla_solver.mpc_solve(aug_state, full_params)
             u_opt = mpc_solver.get(1, "x")[-2:] # pwm, delta
