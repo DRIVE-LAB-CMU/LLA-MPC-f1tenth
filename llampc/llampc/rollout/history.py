@@ -50,7 +50,8 @@ def find_best_model(running_cost):
 
 class LBHistory:
 
-    def __init__(self, num_models, history_length, dt, cost_weights, state_size, integrator_factory, dynamics_bank, diffeq,
+    def __init__(self, num_models, history_length, dt, 
+                 cost_weights, state_size, integrator_factory, dynamics_bank, diffeq,
                  buffer_size = None, control_size = 2):
         self.num_models = num_models
         self.history_length = history_length

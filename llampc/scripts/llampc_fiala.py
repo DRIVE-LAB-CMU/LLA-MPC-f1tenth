@@ -134,7 +134,7 @@ class MPCNode(Node):
         self.get_logger().info("F1tenth MPC Initialized")
 
     def declare_params(self):
-        self.with_lla = False
+        self.with_lla = True
         self.adaptive_planning = False
         self.adaptive_control = True
         self.lla_reset_interval = 0
@@ -151,7 +151,7 @@ class MPCNode(Node):
 
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'mocap_square2fast.npz')
+        self.declare_parameter('track_file_name', 'mocap_turnfastbank.npz')
         self.declare_parameter('odom_topic', '/odometry/filtered')
         # self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
@@ -400,7 +400,7 @@ class MPCNode(Node):
             if self.publish_trajectories:
                 record_ref_trajectory = ref_segment.T
                 # self.publish_ref_trajectory(ref_segment)
-            print(f"REF: {ref_segment}")
+            # print(f"REF: {ref_segment}")
 
             self.lla_solver.prepare_mpc_solve()
 
@@ -430,7 +430,7 @@ class MPCNode(Node):
                     mpc_controls.append(c_pred)
                     # print(x_pred, c_pred)
 
-                print(f"PREDICTED STATES: {mpc_states}")
+                # print(f"PREDICTED STATES: {mpc_states}")
                 # print(f"PREDICTED CONTROLS: {predicted_controls}")
                     
                 self.publish_predicted_trajectory(mpc_states) # Publish predicted trajectory
