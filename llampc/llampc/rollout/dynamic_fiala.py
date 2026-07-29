@@ -175,11 +175,11 @@ class DBMFialaBank():
         device=cpu)
 
     def update_known_params(self, omega_w=None, dFz = None):
-        if omega_w:
+        if not omega_w is None:
             self.known_params = self.known_params.at[5].set(
                 omega_w
             )
-        if dFz:
+        if not dFz is None:
             self.known_params = self.known_params.at[6].set(
                 dFz
             )
