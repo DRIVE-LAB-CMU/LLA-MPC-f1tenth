@@ -21,6 +21,8 @@ devel_isolated/
 *.pxd
 *.so
 
+*.npz
+
 
 *.log
 
@@ -58,5 +60,3 @@ qtcreator-*
 # Catkin custom files
 CATKIN_IGNORE
 .vscode/settings.json
-
-*.npz
