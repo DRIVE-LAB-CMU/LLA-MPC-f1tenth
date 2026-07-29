@@ -1,17 +1,29 @@
 import time
-from f110_gym.envs.base_classes import Integrator
-import yaml
-import gym
-import numpy as np
-from argparse import Namespace
+from typing import Tuple
 
+import gymnasium as gym
+import numpy as np
 from numba import njit
 
-from pyglet.gl import GL_POINTS
+from f1tenth_gym.envs.integrators import IntegratorType
+from f1tenth_gym.envs.dynamic_models import DynamicModel, F1TENTH_VEHICLE_PARAMETERS
+from f1tenth_gym.envs.observation import ObservationType
+from f1tenth_gym.envs.reset import ResetStrategy
+from f1tenth_gym.envs.env_config import (
+    ControlConfig,
+    EnvConfig,
+    ObservationConfig,
+    ResetConfig,
+    SimulationConfig,
+)
+from f1tenth_gym.envs.lidar import LiDARConfig
+from f1tenth_gym.envs.rendering import make_lidar_scan_callback
 
 """
 Planner Helpers
 """
+
+
 @njit(fastmath=False, cache=True)
 def nearest_point_on_trajectory(point, trajectory):
     """
@@ -26,28 +38,36 @@ def nearest_point_on_trajectory(point, trajectory):
     trajectory: Nx2 matrix of (x,y) trajectory waypoints
         - these must be unique. If they are not unique, a divide by 0 error will destroy the world
     """
-    diffs = trajectory[1:,:] - trajectory[:-1,:]
-    l2s   = diffs[:,0]**2 + diffs[:,1]**2
+    diffs = trajectory[1:, :] - trajectory[:-1, :]
+    l2s = diffs[:, 0] ** 2 + diffs[:, 1] ** 2
     # this is equivalent to the elementwise dot product
     # dots = np.sum((point - trajectory[:-1,:]) * diffs[:,:], axis=1)
-    dots = np.empty((trajectory.shape[0]-1, ))
+    dots = np.empty((trajectory.shape[0] - 1,))
     for i in range(dots.shape[0]):
         dots[i] = np.dot((point - trajectory[i, :]), diffs[i, :])
     t = dots / l2s
-    t[t<0.0] = 0.0
-    t[t>1.0] = 1.0
+    t[t < 0.0] = 0.0
+    t[t > 1.0] = 1.0
     # t = np.clip(dots / l2s, 0.0, 1.0)
-    projections = trajectory[:-1,:] + (t*diffs.T).T
+    projections = trajectory[:-1, :] + (t * diffs.T).T
     # dists = np.linalg.norm(point - projections, axis=1)
     dists = np.empty((projections.shape[0],))
     for i in range(dists.shape[0]):
         temp = point - projections[i]
-        dists[i] = np.sqrt(np.sum(temp*temp))
+        dists[i] = np.sqrt(np.sum(temp * temp))
     min_dist_segment = np.argmin(dists)
-    return projections[min_dist_segment], dists[min_dist_segment], t[min_dist_segment], min_dist_segment
+    return (
+        projections[min_dist_segment],
+        dists[min_dist_segment],
+        t[min_dist_segment],
+        min_dist_segment,
+    )
+
 
 @njit(fastmath=False, cache=True)
-def first_point_on_trajectory_intersecting_circle(point, radius, trajectory, t=0.0, wrap=False):
+def first_point_on_trajectory_intersecting_circle(
+    point, radius, trajectory, t=0.0, wrap=False
+):
     """
     starts at beginning of trajectory, and find the first point one radius away from the given point along the trajectory.
 
@@ -61,15 +81,24 @@ def first_point_on_trajectory_intersecting_circle(point, radius, trajectory, t=0
     first_i = None
     first_p = None
     trajectory = np.ascontiguousarray(trajectory)
-    for i in range(start_i, trajectory.shape[0]-1):
-        start = trajectory[i,:]
-        end = trajectory[i+1,:]+1e-6
-        V = np.ascontiguousarray(end - start)
+    for i in range(start_i, trajectory.shape[0] - 1):
+        start = trajectory[i, :]
+        end = trajectory[i + 1, :] + 1e-6
+        V = np.ascontiguousarray(end - start).astype(
+            np.float32
+        )  # NOTE: specify type or numba complains
 
-        a = np.dot(V,V)
-        b = 2.0*np.dot(V, start - point)
-        c = np.dot(start, start) + np.dot(point,point) - 2.0*np.dot(start, point) - radius*radius
-        discriminant = b*b-4*a*c
+        a = np.dot(V, V)
+        b = np.float32(2.0) * np.dot(
+            V, start - point
+        )  # NOTE: specify type or numba complains
+        c = (
+            np.dot(start, start)
+            + np.dot(point, point)
+            - np.float32(2.0) * np.dot(start, point)
+            - radius * radius
+        )
+        discriminant = b * b - 4 * a * c
 
         if discriminant < 0:
             continue
@@ -77,8 +106,8 @@ def first_point_on_trajectory_intersecting_circle(point, radius, trajectory, t=0
         # else:
         # if discriminant >= 0.0:
         discriminant = np.sqrt(discriminant)
-        t1 = (-b - discriminant) / (2.0*a)
-        t2 = (-b + discriminant) / (2.0*a)
+        t1 = (-b - discriminant) / (2.0 * a)
+        t2 = (-b + discriminant) / (2.0 * a)
         if i == start_i:
             if t1 >= 0.0 and t1 <= 1.0 and t1 >= start_t:
                 first_t = t1
@@ -103,20 +132,27 @@ def first_point_on_trajectory_intersecting_circle(point, radius, trajectory, t=0
     # wrap around to the beginning of the trajectory if no intersection is found1
     if wrap and first_p is None:
         for i in range(-1, start_i):
-            start = trajectory[i % trajectory.shape[0],:]
-            end = trajectory[(i+1) % trajectory.shape[0],:]+1e-6
-            V = end - start
+            start = trajectory[i % trajectory.shape[0], :]
+            end = trajectory[(i + 1) % trajectory.shape[0], :] + 1e-6
+            V = (end - start).astype(np.float32)
 
-            a = np.dot(V,V)
-            b = 2.0*np.dot(V, start - point)
-            c = np.dot(start, start) + np.dot(point,point) - 2.0*np.dot(start, point) - radius*radius
-            discriminant = b*b-4*a*c
+            a = np.dot(V, V)
+            b = np.float32(2.0) * np.dot(
+                V, start - point
+            )  # NOTE: specify type or numba complains
+            c = (
+                np.dot(start, start)
+                + np.dot(point, point)
+                - np.float32(2.0) * np.dot(start, point)
+                - radius * radius
+            )
+            discriminant = b * b - 4 * a * c
 
             if discriminant < 0:
                 continue
             discriminant = np.sqrt(discriminant)
-            t1 = (-b - discriminant) / (2.0*a)
-            t2 = (-b + discriminant) / (2.0*a)
+            t1 = (-b - discriminant) / (2.0 * a)
+            t2 = (-b + discriminant) / (2.0 * a)
             if t1 >= 0.0 and t1 <= 1.0:
                 first_t = t1
                 first_i = i
@@ -130,161 +166,235 @@ def first_point_on_trajectory_intersecting_circle(point, radius, trajectory, t=0
 
     return first_p, first_i, first_t
 
+
 @njit(fastmath=False, cache=True)
 def get_actuation(pose_theta, lookahead_point, position, lookahead_distance, wheelbase):
     """
     Returns actuation
     """
-    waypoint_y = np.dot(np.array([np.sin(-pose_theta), np.cos(-pose_theta)]), lookahead_point[0:2]-position)
+    waypoint_y = np.dot(
+        np.array([np.sin(-pose_theta), np.cos(-pose_theta)], dtype=np.float32),
+        lookahead_point[0:2] - position,
+    )
     speed = lookahead_point[2]
     if np.abs(waypoint_y) < 1e-6:
-        return speed, 0.
-    radius = 1/(2.0*waypoint_y/lookahead_distance**2)
-    steering_angle = np.arctan(wheelbase/radius)
+        return speed, 0.0
+    radius = 1 / (2.0 * waypoint_y / lookahead_distance**2)
+    steering_angle = np.arctan(wheelbase / radius)
     return speed, steering_angle
+
 
 class PurePursuitPlanner:
     """
     Example Planner
     """
-    def __init__(self, conf, wb):
+
+    def __init__(self, track, wb):
         self.wheelbase = wb
-        self.conf = conf
-        self.load_waypoints(conf)
-        self.max_reacquire = 20.
+        self.waypoints = np.stack(
+            [track.raceline.xs, track.raceline.ys, track.raceline.vxs]
+        ).T
+        self.max_reacquire = 20.0
 
         self.drawn_waypoints = []
+        self.lookahead_point = None
+        self.current_index = None
+
+        self.lookahead_point_render = None
+        self.local_plan_render = None
 
     def load_waypoints(self, conf):
         """
         loads waypoints
         """
-        self.waypoints = np.loadtxt(conf.wpt_path, delimiter=conf.wpt_delim, skiprows=conf.wpt_rowskip)
+        # NOTE: specify type or numba complains
+        self.waypoints = np.loadtxt(
+            conf.wpt_path, delimiter=conf.wpt_delim, skiprows=conf.wpt_rowskip
+        ).astype(np.float32)
 
-    def render_waypoints(self, e):
+    def render_lookahead_point(self, e):
+        """
+        Callback to render the lookahead point.
+        """
+        if self.lookahead_point is not None:
+            points = self.lookahead_point[:2][None]  # shape (1, 2)~
+            if self.lookahead_point_render is None:
+                self.lookahead_point_render = e.get_points_renderer(
+                    points, color=(228, 26, 28), size=10
+                )
+            else:
+                self.lookahead_point_render.update(points)
+
+    def render_local_plan(self, e):
         """
         update waypoints being drawn by EnvRenderer
         """
-
-        #points = self.waypoints
-
-        points = np.vstack((self.waypoints[:, self.conf.wpt_xind], self.waypoints[:, self.conf.wpt_yind])).T
-        
-        scaled_points = 50.*points
-
-        for i in range(points.shape[0]):
-            if len(self.drawn_waypoints) < points.shape[0]:
-                b = e.batch.add(1, GL_POINTS, None, ('v3f/stream', [scaled_points[i, 0], scaled_points[i, 1], 0.]),
-                                ('c3B/stream', [183, 193, 222]))
-                self.drawn_waypoints.append(b)
+        if self.current_index is not None:
+            points = self.waypoints[self.current_index : self.current_index + 10, :2]
+            if self.local_plan_render is None:
+                self.local_plan_render = e.get_lines_renderer(
+                    points, color=(255, 255, 51), size=5
+                )
             else:
-                self.drawn_waypoints[i].vertices = [scaled_points[i, 0], scaled_points[i, 1], 0.]
-        
-    def _get_current_waypoint(self, waypoints, lookahead_distance, position, theta):
+                self.local_plan_render.update(points)
+                
+    def get_render_callbacks(self):
+        return [self.render_lookahead_point, self.render_local_plan]
+
+    def _get_current_waypoint(
+        self, waypoints, lookahead_distance, position, theta
+    ) -> Tuple[np.ndarray, int]:
         """
-        gets the current waypoint to follow
+        Returns the current waypoint to follow given the current pose.
+
+        Args:
+            waypoints: The waypoints to follow (Nx3 array)
+            lookahead_distance: The lookahead distance [m]
+            position: The current position (2D array)
+            theta: The current heading [rad]
+
+        Returns:
+            waypoint: The current waypoint to follow (x, y, speed)
+            i: The index of the current waypoint
         """
-        wpts = np.vstack((self.waypoints[:, self.conf.wpt_xind], self.waypoints[:, self.conf.wpt_yind])).T
+        wpts = waypoints[:, :2]
+        lookahead_distance = np.float32(lookahead_distance)
         nearest_point, nearest_dist, t, i = nearest_point_on_trajectory(position, wpts)
         if nearest_dist < lookahead_distance:
-            lookahead_point, i2, t2 = first_point_on_trajectory_intersecting_circle(position, lookahead_distance, wpts, i+t, wrap=True)
-            if i2 == None:
-                return None
-            current_waypoint = np.empty((3, ))
+            t1 = np.float32(i + t)
+            lookahead_point, i2, t2 = first_point_on_trajectory_intersecting_circle(
+                position, lookahead_distance, wpts, t1, wrap=True
+            )
+            if i2 is None:
+                return None, None
+            current_waypoint = np.empty((3,), dtype=np.float32)
             # x, y
             current_waypoint[0:2] = wpts[i2, :]
             # speed
-            current_waypoint[2] = waypoints[i, self.conf.wpt_vind]
-            return current_waypoint
+            current_waypoint[2] = waypoints[i, -1]
+            return current_waypoint, i
         elif nearest_dist < self.max_reacquire:
-            return np.append(wpts[i, :], waypoints[i, self.conf.wpt_vind])
+            # NOTE: specify type or numba complains
+            return wpts[i, :], i
         else:
-            return None
+            return None, None
 
     def plan(self, pose_x, pose_y, pose_theta, lookahead_distance, vgain):
         """
         gives actuation given observation
         """
         position = np.array([pose_x, pose_y])
-        lookahead_point = self._get_current_waypoint(self.waypoints, lookahead_distance, position, pose_theta)
+        lookahead_point, i = self._get_current_waypoint(
+            self.waypoints, lookahead_distance, position, pose_theta
+        )
 
         if lookahead_point is None:
             return 4.0, 0.0
 
-        speed, steering_angle = get_actuation(pose_theta, lookahead_point, position, lookahead_distance, self.wheelbase)
+        # for rendering
+        self.lookahead_point = lookahead_point
+        self.current_index = i
+
+        # actuation
+        speed, steering_angle = get_actuation(
+            pose_theta,
+            self.lookahead_point,
+            position,
+            lookahead_distance,
+            self.wheelbase,
+        )
         speed = vgain * speed
 
         return speed, steering_angle
-
-
-class FlippyPlanner:
-    """
-    Planner designed to exploit integration methods and dynamics.
-    For testing only. To observe this error, use single track dynamics for all velocities >0.1
-    """
-    def __init__(self, speed=1, flip_every=1, steer=2):
-        self.speed = speed
-        self.flip_every = flip_every
-        self.counter = 0
-        self.steer = steer
-    
-    def render_waypoints(self, *args, **kwargs):
-        pass
-
-    def plan(self, *args, **kwargs):
-        if self.counter%self.flip_every == 0:
-            self.counter = 0
-            self.steer *= -1
-        return self.speed, self.steer
-
 
 def main():
     """
     main entry point
     """
 
-    work = {'mass': 3.463388126201571, 'lf': 0.15597534362552312, 'tlad': 0.82461887897713965, 'vgain': 1.375}#0.90338203837889}
+    work = {
+        "mass": 3.463388126201571,
+        "lf": 0.15597534362552312,
+        "tlad": 0.82461887897713965 * 1.5,
+        "vgain": 1.,
+    }
+    num_agents = 1
+    cfg = EnvConfig(
+        map_name="Spielberg",
+        map_scale=1.0,
+        num_agents=num_agents,
+        control_config=ControlConfig(steer_delay_steps=1),
+        simulation_config=SimulationConfig(
+            timestep=0.01,
+            integrator_timestep=0.01,
+            integrator=IntegratorType.RK4,
+            dynamics_model=DynamicModel.KS,
+            compute_frenet_frame=False,
+            max_laps=5,
+        ),
+        observation_config=ObservationConfig(type=ObservationType.KINEMATIC_STATE),
+        reset_config=ResetConfig(strategy=ResetStrategy.RL_RANDOM_STATIC),
+        # USE SICK TIM 571 CONFIGURATION (270° FOV)
+        lidar_config=LiDARConfig(
+            enabled=True,
+            num_beams=819,
+            angle_min=np.deg2rad(-135.0),  # Convert degrees to radians
+            angle_max=np.deg2rad(135.0),   # Convert degrees to radians
+            range_max=25.0,
+            range_min=0.05,
+            noise_std=0.01,
+            base_link_to_lidar_tf=(0.275, 0.0, 0.0),
+        )
+    )
+
+    env = gym.make(
+        "f1tenth_gym:f1tenth-v0",
+        config=cfg,
+        render_mode="unlimited", # "human", "human_fast", "unlimited"I want to add visualization of the lidar scan visualization as a "point cloud" similar to how I would see a scan in rviz. Can we add a render callback built-into the gym that someone can add after creating the gym? See how render callbacks are added in waypoint follow. The render callback for the scan would then be initialized per instance of the f1tenth gym (so we can visually confirm scans are working)
+    )
+    track = env.unwrapped.track
+
+    planner = PurePursuitPlanner(
+        track=track,
+        wb=(
+            F1TENTH_VEHICLE_PARAMETERS.lf
+            + F1TENTH_VEHICLE_PARAMETERS.lr
+        ),
+    )
+
+    track.raceline.render_waypoints(env.unwrapped.renderer)
+    for r in planner.get_render_callbacks():
+        env.unwrapped.add_render_callback(r)
     
-    with open('config_example_map.yaml') as file:
-        conf_dict = yaml.load(file, Loader=yaml.FullLoader)
-    conf = Namespace(**conf_dict)
+    # Add lidar scan visualization
+    lidar_callback = make_lidar_scan_callback("agent_0", cfg.lidar_config, color=(255, 0, 0), size=2)
+    env.unwrapped.add_render_callback(lidar_callback)
 
-    planner = PurePursuitPlanner(conf, (0.17145+0.15875)) #FlippyPlanner(speed=0.2, flip_every=1, steer=10)
-
-    def render_callback(env_renderer):
-        # custom extra drawing function
-
-        e = env_renderer
-
-        # update camera to follow car
-        x = e.cars[0].vertices[::2]
-        y = e.cars[0].vertices[1::2]
-        top, bottom, left, right = max(y), min(y), min(x), max(x)
-        e.score_label.x = left
-        e.score_label.y = top - 700
-        e.left = left - 800
-        e.right = right + 800
-        e.top = top + 800
-        e.bottom = bottom - 800
-
-        planner.render_waypoints(env_renderer)
-
-    env = gym.make('f110_gym:f110-v0', map=conf.map_path, map_ext=conf.map_ext, num_agents=1, timestep=0.01, integrator=Integrator.RK4)
-    env.add_render_callback(render_callback)
-    
-    obs, step_reward, done, info = env.reset(np.array([[conf.sx, conf.sy, conf.stheta]]))
+    frenet_start = np.array(env.unwrapped.track.frenet_to_cartesian(0.0, 0, 0))
+    frenet_start2 = np.array(env.unwrapped.track.frenet_to_cartesian(10, 0, 0))
+    init_poses = np.array([frenet_start, frenet_start2])
+    obs, info = env.reset(options={'poses':init_poses[:num_agents]})
+    done = False
     env.render()
 
     laptime = 0.0
     start = time.time()
-
     while not done:
-        speed, steer = planner.plan(obs['poses_x'][0], obs['poses_y'][0], obs['poses_theta'][0], work['tlad'], work['vgain'])
-        obs, step_reward, done, info = env.step(np.array([[steer, speed]]))
+        action = env.action_space.sample()
+        for i, agent_id in enumerate(obs.keys()):
+            speed, steer = planner.plan(
+                obs[agent_id]["pose_x"],
+                obs[agent_id]["pose_y"],
+                obs[agent_id]["pose_theta"],
+                work["tlad"],
+                work["vgain"],
+            )
+            action[i] = np.array([steer, speed])
+        obs, step_reward, done, truncated, info = env.step(action)
         laptime += step_reward
-        env.render(mode='human')
-        
-    print('Sim elapsed time:', laptime, 'Real elapsed time:', time.time()-start)
+        env.render()
 
-if __name__ == '__main__':
+    print("Sim elapsed time:", laptime, "Real elapsed time:", time.time() - start)
+
+if __name__ == "__main__":
     main()

@@ -1692,7 +1692,7 @@ class StateVisualizer:
 
 def _parse_args():
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    default_ref = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_square2fast.npz')
+    default_ref = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_turnfastbank.npz')
 
     parser = argparse.ArgumentParser(
         description="Interactive state-trajectory visualizer."

@@ -52,11 +52,15 @@ def export_model(params_car, exact = False):
         alphaf = delta - ca.atan2(x[5]*lf + x[4], vx_dyn)
         alphar = ca.atan2(x[5]*lr - x[4], vx_dyn)
 
-        kappa = (rw*omega_w- x[3]) / vx_dyn
+        vx_front = x[3]*ca.cos(delta) + (x[4] + lf*x[5])*ca.sin(delta)
+        vx_dyn_f = ca.sqrt(vx_front**2 + eps)
+
+        kappa_r = (rw*omega_w- x[3]) / vx_dyn
+        kappa_f = (rw*omega_w - vx_front) / vx_dyn_f
 
         # --- combined slips ---
-        sigma_f = ca.sqrt(ca.tan(alphaf)**2 + kappa**2 + 1e-2)               # front free-rolling
-        sigma_r = ca.sqrt(ca.tan(alphar)**2 + kappa**2 + 1e-2)
+        sigma_f = ca.sqrt(ca.tan(alphaf)**2 + kappa_f**2 + 1e-2)               # front free-rolling
+        sigma_r = ca.sqrt(ca.tan(alphar)**2 + kappa_r**2 + 1e-2)
         
         sigmaf_max = 3*Ffmax/Cf
         sigmar_max = 3*Frmax/Cr
@@ -71,12 +75,12 @@ def export_model(params_car, exact = False):
 
         # --- front: lateral only ---
         Ffy = Ff_total*ca.tan(alphaf)/sigma_f
-        Ffx = Ff_total*kappa       /sigma_f
+        Ffx = Ff_total*kappa_f       /sigma_f
         
         # --- rear: lateral and longitudinal share Fr_total via sigma_r ---
         v_eps = 0.5
         F_roll = Cro * Frz * ca.tanh(x[3] / v_eps)
-        Frx = Fr_total*kappa/sigma_r - F_roll
+        Frx = Fr_total*kappa_r/sigma_r - F_roll
         Fry =  Fr_total*ca.tan(alphar)/sigma_r
 
         # --- drive torque on rear wheel ---
@@ -111,11 +115,14 @@ def export_model(params_car, exact = False):
         alphar = ca.atan2(x[5]*lr - x[4], x[3])
 
         # --- rear longitudinal slip ratio from wheel speed (no guard) ---
-        kappa = (rw*omega_w - x[3]) / x[3]
+        kappa_r = (rw*omega_w - x[3]) / x[3]
+
+        vx_front = x[3]*ca.cos(delta) + (x[4] + lf*x[5])*ca.sin(delta)
+        kappa_f = (rw*omega_w - vx_front) / vx_front
 
         # --- combined slips ---
-        sigma_f = ca.sqrt(ca.tan(alphaf)**2 + kappa**2 + 1e-9)               # front free-rolling
-        sigma_r = ca.sqrt(ca.tan(alphar)**2 + kappa**2 + 1e-9)
+        sigma_f = ca.sqrt(ca.tan(alphaf)**2 + kappa_f**2 + 1e-9)               # front free-rolling
+        sigma_r = ca.sqrt(ca.tan(alphar)**2 + kappa_r**2 + 1e-9)
 
         sigmaf_max = 3*Ffmax/Cf
         sigmar_max = 3*Frmax/Cr
@@ -128,12 +135,12 @@ def export_model(params_car, exact = False):
         Fr_total = ca.if_else(sigma_r < sigmar_max, brush(Cr, sigma_r, Frmax), Frmax)
 
         Ffy = Ff_total*ca.tan(alphaf)/sigma_f
-        Ffx = Ff_total*kappa       /sigma_f
+        Ffx = Ff_total*kappa_f       /sigma_f
 
         # --- rear: lateral and longitudinal share Fr_total via sigma_r ---
         v_eps = 0.5
         F_roll = Cro * Frz * ca.tanh(x[3] / v_eps)
-        Frx = Fr_total*kappa/sigma_r - F_roll
+        Frx = Fr_total*kappa_r/sigma_r - F_roll
         Fry =  Fr_total*ca.tan(alphar)/sigma_r
 
         # --- drive torque on rear wheel ---
@@ -187,12 +194,12 @@ def create_ocp(model, params_car, steps, horizon):
     w_xe = 40.0 # 20  40
     w_ye =  40.0 # 20 40
     w_theta = 0
-    w_vx = 10.0 
+    w_vx = 3.0  #  10 10 
 
     w_current = 0.01
     w_steer = 0.01 # 0.1 0.01
     w_slew = 0.0
-    w_steer_v = 0.1 # 0.01 0.1
+    w_steer_v = 0.01 # 0.01 0.1
     
       
     Q_flat = [w_x, w_y, w_theta, w_vx, 0.0, 0.0,  w_current, w_steer]

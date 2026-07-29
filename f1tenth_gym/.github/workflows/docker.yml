@@ -2,20 +2,23 @@ name: Docker
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, 'v*', 'dev*' ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, 'v*' ]
 
 jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
       -
+        name: Checkout
+        uses: actions/checkout@v4
+      -
         name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
+        uses: docker/setup-buildx-action@v3
       -
         name: Build and push
         id: docker_build
-        uses: docker/build-push-action@v2
+        uses: docker/build-push-action@v6
         with:
           push: false

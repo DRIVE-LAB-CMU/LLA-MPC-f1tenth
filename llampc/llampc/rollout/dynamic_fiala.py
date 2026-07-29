@@ -31,13 +31,16 @@ def diffequation(bank_params, known_params, x, u):
     Frmax = mur*Frz
 
     vx_clamped = jnp.maximum(vx, 0.01)
+    vx_front = vx*jnp.cos(steer) + (vy + lf*omega)*jnp.sin(steer)
+    vx_front_clamped = jnp.maximum(vx_front, .01)
 
     alphaf = steer - jnp.arctan((omega*lf + vy) / vx_clamped)
     alphar = jnp.arctan((omega*lr - vy) / vx_clamped)
-    kappa = (rw*omega_w - vx) / vx_clamped
+    kappa_r = (rw*omega_w - vx) / vx_clamped
+    kappa_f = (rw*omega_w - vx_front) / vx_front_clamped
 
-    sigma_f = jnp.sqrt(jnp.tan(alphaf)**2 + kappa**2 + 1e-9)   # front free-rolling
-    sigma_r = jnp.sqrt(jnp.tan(alphar)**2 + kappa**2 + 1e-9)
+    sigma_f = jnp.sqrt(jnp.tan(alphaf)**2 + kappa_f**2 + 1e-9)   # front free-rolling
+    sigma_r = jnp.sqrt(jnp.tan(alphar)**2 + kappa_r**2 + 1e-9)
 
     sigmaf_max = 3*Ffmax/Cf
     sigmar_max = 3*Frmax/Cr
@@ -51,12 +54,12 @@ def diffequation(bank_params, known_params, x, u):
 
     # --- front: lateral only ---
     Ffy = Ff_total * jnp.tan(alphaf) / sigma_f
-    Ffx = Ff_total * kappa           / sigma_f
+    Ffx = Ff_total * kappa_f           / sigma_f
 
     # --- rear: lateral and longitudinal share Fr_total via sigma_r ---
     v_eps = 0.5
     F_roll = Cro * Frz * jnp.tanh(vx / v_eps)
-    Frx = Fr_total*kappa/sigma_r - F_roll
+    Frx = Fr_total*kappa_r/sigma_r - F_roll
     Fry = Fr_total*jnp.tan(alphar)/sigma_r
 
     # --- chassis-frame dynamics (6 states only) ---
@@ -81,7 +84,7 @@ def diffequation_nojit(bank_params, known_params, x, u):
     vy = x[4]
     omega = x[5]
 
-    mass, Iz, lf, lr, rw, omega_w, dFz = known_params
+    mass, Iz, lf, lr, rw, omega_w, dFz= known_params
     Cf, Cr, muf, mur, Cro = bank_params
     L = lf + lr
 
@@ -91,13 +94,16 @@ def diffequation_nojit(bank_params, known_params, x, u):
     Frmax = mur*Frz
 
     vx_clamped = jnp.maximum(vx, 0.01)
+    vx_front = vx*jnp.cos(steer) + (vy + lf*omega)*jnp.sin(steer)
+    vx_front_clamped = jnp.maximum(vx_front, .01)
 
     alphaf = steer - jnp.arctan((omega*lf + vy) / vx_clamped)
     alphar = jnp.arctan((omega*lr - vy) / vx_clamped)
-    kappa = (rw*omega_w - vx) / vx_clamped
+    kappa_r = (rw*omega_w - vx) / vx_clamped
+    kappa_f = (rw*omega_w - vx_front) / vx_front_clamped
 
-    sigma_f = jnp.sqrt(jnp.tan(alphaf)**2 + kappa**2 + 1e-9)   # front free-rolling
-    sigma_r = jnp.sqrt(jnp.tan(alphar)**2 + kappa**2 + 1e-9)
+    sigma_f = jnp.sqrt(jnp.tan(alphaf)**2 + kappa_f**2 + 1e-9)   # front free-rolling
+    sigma_r = jnp.sqrt(jnp.tan(alphar)**2 + kappa_r**2 + 1e-9)
 
     sigmaf_max = 3*Ffmax/Cf
     sigmar_max = 3*Frmax/Cr
@@ -111,12 +117,12 @@ def diffequation_nojit(bank_params, known_params, x, u):
 
     # --- front: lateral only ---
     Ffy = Ff_total * jnp.tan(alphaf) / sigma_f
-    Ffx =  Ff_total * kappa           / sigma_f
+    Ffx = Ff_total * kappa_f           / sigma_f
 
     # --- rear: lateral and longitudinal share Fr_total via sigma_r ---
     v_eps = 0.5
     F_roll = Cro * Frz * jnp.tanh(vx / v_eps)
-    Frx = Fr_total*kappa/sigma_r - F_roll
+    Frx = Fr_total*kappa_r/sigma_r - F_roll
     Fry = Fr_total*jnp.tan(alphar)/sigma_r
 
     # --- chassis-frame dynamics (6 states only) ---
