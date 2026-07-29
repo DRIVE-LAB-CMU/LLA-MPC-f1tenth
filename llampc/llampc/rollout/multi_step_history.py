@@ -125,7 +125,7 @@ class LBHistoryMultiStep:
         self.buffer = [deque() for _ in range(control_size)]
 
 
-    def predict_states(self, x_t, u_t):
+    def predict_states(self, x_t, u_t, reset=False):
         """Batched version of _integrate"""
     
         t0 = time.perf_counter_ns()
