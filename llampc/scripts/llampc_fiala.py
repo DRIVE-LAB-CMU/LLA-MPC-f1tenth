@@ -134,7 +134,7 @@ class MPCNode(Node):
         self.get_logger().info("F1tenth MPC Initialized")
 
     def declare_params(self):
-        self.with_lla = True
+        self.with_lla = False
         self.adaptive_planning = False
         self.adaptive_control = True
         self.lla_reset_interval = 0

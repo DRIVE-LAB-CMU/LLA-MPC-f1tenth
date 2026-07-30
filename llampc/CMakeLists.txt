@@ -74,6 +74,7 @@ install(PROGRAMS
   scripts/car_pong.py
   scripts/llampc_pid.py
   scripts/llampc_fiala.py
+  scripts/multi_llampc_fiala.py
   DESTINATION lib/${PROJECT_NAME}
 )
 if(BUILD_TESTING)

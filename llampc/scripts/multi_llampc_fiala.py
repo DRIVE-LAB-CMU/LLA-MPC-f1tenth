@@ -17,7 +17,7 @@ jax.config.update('jax_persistent_cache_min_compile_time_secs', 0)
 # jax.config.update("jax_log_compiles", True)
 import jax.numpy as jnp
 
-from llampc.nmpc_gen_fiala import setup_mpc
+from llampc.nmpc_gen_fiala_multi import setup_mpc
 from llampc.params import F110, get_param_dict_grid
 from llampc.planner import get_reference_trajectory_segment, get_lookahead_point, ema_filter
 from llampc.utils import Track
@@ -139,6 +139,7 @@ class MPCNode(Node):
         self.adaptive_control = True
         self.lla_reset_interval = 4
         self.lla_skip_interval = 1
+        self.lla_gamma = 0.9
         self.lla_window = 40
 
         self.N = 20 #steps (for nmpc)
@@ -189,10 +190,10 @@ class MPCNode(Node):
         
         # grid discretization
         discretization_dict = {
-            'Cf': 4,   
-            'Cr': 4,   
-            'muf': 5,  
-            'mur': 5,  
+            'Cf': 5,   
+            'Cr': 5,   
+            'muf': 7,  
+            'mur': 7,  
             'Cro': 0.0,
         }
 
@@ -224,7 +225,7 @@ class MPCNode(Node):
             buffer_size = [0, 0], 
             reset_interval = self.lla_reset_interval,
             skip_interval = self.lla_skip_interval,
-            gamma = 1
+            gamma = self.lla_gamma
 
         )
 

@@ -189,18 +189,6 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.cost.cost_type = 'NONLINEAR_LS'
     ocp.cost.cost_type_e = 'NONLINEAR_LS'
 
-    # w_x = 40.0 #20  40  40
-    # w_y = 40.0 # 20  40 40
-    # w_xe = 40.0 # 20  40 0
-    # w_ye = 40.0 # 20 40  0
-    # w_theta = 0
-    # w_vx = 10  #  10 10 
-
-    # w_current = 0.01
-    # w_steer = 0.5 # 0.1 0.01 0.8
-    # w_slew = 0.0
-    # w_steer_v = 0.5 # 0.01 0.1 0.8
-
     w_x = 40.0 #20  40  40
     w_y = 40.0 # 20  40 40
     w_xe = 40.0 # 20  40 0
@@ -209,9 +197,9 @@ def create_ocp(model, params_car, steps, horizon):
     w_vx = 10  #  10 10 
 
     w_current = 0.01
-    w_steer = 0.5 # 0.1 0.01 0.8
+    w_steer = 0.1 # 0.1 0.01 0.8
     w_slew = 0.0
-    w_steer_v = 0.5 # 0.01 0.1 0.8
+    w_steer_v = 0.1 # 0.01 0.1 0.8
     
       
     Q_flat = [w_x, w_y, w_theta, w_vx, 0.0, 0.0,  w_current, w_steer]
