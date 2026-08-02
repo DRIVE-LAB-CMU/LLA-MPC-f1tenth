@@ -41,7 +41,6 @@ def export_model(params_car, exact = False):
         eps = 0.1
         vx_dyn = ca.sqrt(x[3]**2 + eps)
 
-        # --- load transfer is now a STATE (dFz), not computed here ---
         Ffz = mass*g*lr/L
         Frz = mass*g*lf/L
         Ffmax = muf*Ffz
@@ -102,7 +101,6 @@ def export_model(params_car, exact = False):
 
     else:
 
-        # --- load transfer is now a STATE (dFz), not computed here ---
         Ffz = mass*g*lr/L
         Frz = mass*g*lf/L 
         Ffmax = muf*Ffz
@@ -483,7 +481,7 @@ def main():
         p_k = np.concatenate([tire_params, ref_traj[k]])
         solver.set(k, "p", p_k)
 
-    # Initial state: x, y, phi, vx, vy, omega, omega_w, dFz, current, delta
+    # Initial state: x, y, phi, vx, vy, omega, omega_w, current, delta
     x0 = np.zeros(10)
     x0[3] = 3.0                       # vx
     x0[6] = x0[3] / p_car['rw']       # omega_w, consistent with vx (no initial slip)
@@ -510,7 +508,7 @@ def main():
     print(f"Cost: {cost:.4f}")
     print(f"First control [slew_rate, steer_vel]: {u0}")
 
-    print("\nPredicted trajectory (x, y, phi, vx, vy, omega, omega_w, dFz, current, delta):")
+    print("\nPredicted trajectory (x, y, phi, vx, vy, omega, omega_w, current, delta):")
     for k in range(N + 1):
         xk = solver.get(k, "x")
         print(f"  k={k:2d}: {np.array2string(xk, precision=3, suppress_small=True)}")
