@@ -56,13 +56,13 @@ void AckermannToVesc::ackermannCmdCallback(const AckermannDriveStamped::SharedPt
   if (cmd->drive.jerk == 1.0) {
     // --- MPC DUTY MODE ---
     Float64 duty_msg;
-    duty_msg.data = std::max(duty_cycle_min_, std::min(duty_cycle_max_, cmd->drive.acceleration));
+    duty_msg.data = std::max(duty_cycle_min_, std::min(duty_cycle_max_, static_cast<double>(cmd->drive.acceleration)));
     duty_cycle_pub_->publish(duty_msg);
   }
   else if (cmd->drive.jerk == 2.0) {
     // --- MPC CURRENT MODE ---
     Float64 current_msg;
-    current_msg.data = std::max(current_min_, std::min(current_max_, cmd->drive.acceleration));
+    current_msg.data = std::max(current_min_, std::min(current_max_, static_cast<double>(cmd->drive.acceleration)));
     current_pub_->publish(current_msg);
   }
   else if (std::abs(cmd->drive.speed) > 0.01) {
