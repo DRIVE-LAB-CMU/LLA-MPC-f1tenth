@@ -51,6 +51,10 @@ private:
   // conversion gain and offset
   double speed_to_erpm_gain_, speed_to_erpm_offset_;
   double steering_to_servo_gain_, steering_to_servo_offset_;
+  double duty_cycle_min_;
+  double duty_cycle_max_;
+  double current_min_;
+  double current_max_;
 
   // ROS publishers
   rclcpp::Publisher<Float64>::SharedPtr erpm_pub_;
