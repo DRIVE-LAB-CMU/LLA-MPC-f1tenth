@@ -31,6 +31,7 @@ import time
 from threading import Lock
 from particle_filter import utils as Utils
 
+
 # TF
 # import tf.transformations
 # import tf
@@ -86,6 +87,39 @@ class ParticleFiler(Node):
         self.declare_parameter('scan_topic')
         self.declare_parameter('odometry_topic')
 
+        self.declare_parameter('publish_twist', True)
+        self.declare_parameter('vel_ema_tau', 0.06)
+        self.declare_parameter('vel_spike_pct', 15.0)
+        self.declare_parameter('vel_spike_window', 0.5)
+        self.declare_parameter('vel_var_pos_gain', 0.15)   # kappa: correlation discount
+        self.declare_parameter('vel_var_floor_lin', 0.04)
+        self.declare_parameter('vel_var_floor_ang', 0.05)
+        self.declare_parameter('vel_var_ceiling', 10.0)
+        self.declare_parameter('vel_max_dt', 0.5)          # drop stale differences
+
+        self.PUBLISH_TWIST     = self.get_parameter('publish_twist').value
+        self.VEL_VAR_POS_GAIN  = self.get_parameter('vel_var_pos_gain').value
+        self.VEL_VAR_FLOOR_LIN = self.get_parameter('vel_var_floor_lin').value
+        self.VEL_VAR_FLOOR_ANG = self.get_parameter('vel_var_floor_ang').value
+        self.VEL_VAR_CEILING   = self.get_parameter('vel_var_ceiling').value
+        self.VEL_MAX_DT        = self.get_parameter('vel_max_dt').value
+
+
+        ema_tau = self.get_parameter('vel_ema_tau').value
+        spike_pct =  self.get_parameter('vel_spike_pct').value
+        spike_window = self.get_parameter('vel_spike_window').value
+
+
+        self._filt_vx = Utils.CausalSpikeEMA(ema_tau, spike_pct, spike_window)
+        self._filt_vy = Utils.CausalSpikeEMA(ema_tau, spike_pct, spike_window)
+        self._filt_omega = Utils.CausalSpikeEMA(ema_tau, spike_pct, spike_window)
+        
+
+        self.last_inferred_pose  = None
+        self.last_inferred_stamp = None
+        self.last_pose_cov       = None
+        self.pose_cov            = None
+
         # parameters
         self.ANGLE_STEP           = self.get_parameter('angle_step').value
         self.MAX_PARTICLES        = self.get_parameter('max_particles').value
@@ -98,6 +132,9 @@ class ParticleFiler(Node):
         self.SHOW_FINE_TIMING     = self.get_parameter('fine_timing').value
         self.PUBLISH_ODOM         = self.get_parameter('publish_odom').value
         self.DO_VIZ               = self.get_parameter('viz').value
+
+        self.declare_parameter('publish_tf', False)
+        self.PUBLISH_TF = self.get_parameter('publish_tf').value
 
         # sensor model constants
         self.Z_SHORT   = self.get_parameter('z_short').value
@@ -167,7 +204,8 @@ class ParticleFiler(Node):
             self.odom_pub = self.create_publisher(Odometry, '/pf/pose/odom', 1)
 
         # these topics are for coordinate space things
-        self.pub_tf = TransformBroadcaster(self)
+        if(self.PUBLISH_TF):
+            self.pub_tf = TransformBroadcaster(self)
 
         # these topics are to receive data from the racecar
         self.laser_sub = self.create_subscription(
@@ -192,6 +230,87 @@ class ParticleFiler(Node):
             1)
 
         self.get_logger().info('Finished initializing, waiting on messages...')
+
+    ### NEW STUFF
+    @staticmethod
+    def _ang_diff(a, b):
+        return np.arctan2(np.sin(a - b), np.cos(a - b))
+
+    def pose_covariance(self):
+        '''
+        Weighted 3x3 covariance of the particle set. Yaw is handled
+        circularly: the wrapped-normal equivalent variance -2*ln(R),
+        where R is the mean resultant length. A linear np.cov on the
+        theta column reports ~4*pi^2 whenever particles straddle +/-pi,
+        which would blow up the velocity variance spuriously.
+        '''
+        w = self.weights
+        px, py, pth = self.particles[:, 0], self.particles[:, 1], self.particles[:, 2]
+
+        dx = px - np.dot(w, px)
+        dy = py - np.dot(w, py)
+        c, s = np.dot(w, np.cos(pth)), np.dot(w, np.sin(pth))
+        Rlen = np.hypot(c, s)
+        dth = self._ang_diff(pth, np.arctan2(s, c))
+
+        cov = np.zeros((3, 3))
+        cov[0, 0] = np.dot(w, dx * dx)
+        cov[1, 1] = np.dot(w, dy * dy)
+        cov[0, 1] = cov[1, 0] = np.dot(w, dx * dy)
+        cov[0, 2] = cov[2, 0] = np.dot(w, dx * dth)
+        cov[1, 2] = cov[2, 1] = np.dot(w, dy * dth)
+        cov[2, 2] = -2.0 * np.log(max(Rlen, 1e-12))
+        return cov
+
+    def compute_twist(self, pose, stamp_sec, cov):
+        '''
+        Finite-difference the inferred pose, rotate world->body, filter,
+        and size the covariance from the particle spread.
+
+        Returns (vx_body, vy_body, wz, [var_vx, var_vy, var_wz]) or None
+        if there is no usable previous sample.
+        '''
+        prev_pose, prev_t, prev_cov = \
+            self.last_inferred_pose, self.last_inferred_stamp, self.last_pose_cov
+        self.last_inferred_pose, self.last_inferred_stamp, self.last_pose_cov = \
+            np.copy(pose), stamp_sec, cov
+
+        if prev_pose is None:
+            return None
+        dt = stamp_sec - prev_t
+        if dt <= 0.0 or dt > self.VEL_MAX_DT:
+            return None   # stale or non-monotonic; skip rather than emit garbage
+
+        vx_w = (pose[0] - prev_pose[0]) / dt
+        vy_w = (pose[1] - prev_pose[1]) / dt
+        wz   = self._ang_diff(pose[2], prev_pose[2]) / dt
+
+        ct, st = np.cos(pose[2]), np.sin(pose[2])
+        Rwb = np.array([[ct, st], [-st, ct]])          # world -> body
+        vx_b, vy_b = Rwb @ np.array([vx_w, vy_w])
+
+        vx_f = self._filt_vx.update(stamp_sec, vx_b)
+        vy_f = self._filt_vy.update(stamp_sec, vy_b)
+        wz_f = self._filt_omega.update(stamp_sec, wz)
+
+        # --- variance scaled by position variance -------------------
+        # v = (p_k - p_{k-1})/dt  =>  Sigma_v = kappa*(S_k + S_{k-1})/dt^2.
+        # kappa discounts for the fact that consecutive PF estimates share
+        # most of their particles, so their errors are highly correlated
+        # and cancel in the difference. Rotate the world-frame position
+        # block into body frame so the vx/vy split matches the twist.
+        S_world = cov[:2, :2] + prev_cov[:2, :2]
+        S_body = Rwb @ S_world @ Rwb.T
+        k = self.VEL_VAR_POS_GAIN / (dt * dt)
+
+        var_vx = np.clip(self.VEL_VAR_FLOOR_LIN + k * S_body[0, 0],
+                         self.VEL_VAR_FLOOR_LIN, self.VEL_VAR_CEILING)
+        var_vy = np.clip(self.VEL_VAR_FLOOR_LIN + k * S_body[1, 1],
+                         self.VEL_VAR_FLOOR_LIN, self.VEL_VAR_CEILING)
+        var_wz = np.clip(self.VEL_VAR_FLOOR_ANG + k * (cov[2, 2] + prev_cov[2, 2]),
+                         self.VEL_VAR_FLOOR_ANG, self.VEL_VAR_CEILING)
+
+        return float(vx_f), float(vy_f), float(wz_f), [var_vx, var_vy, var_wz]
 
     def get_omap(self):
         '''
@@ -239,34 +358,54 @@ class ParticleFiler(Node):
         ''' Publish a tf for the car. This tells ROS where the car is with respect to the map. '''
         if stamp == None:
             stamp = self.get_clock().now().to_msg()
-
-        t = TransformStamped()
-        # header
-        t.header.stamp = stamp
-        t.header.frame_id = 'map'
-        t.child_frame_id = 'laser'
-        # translation
-        t.transform.translation.x = pose[0]
-        t.transform.translation.y = pose[1]
-        t.transform.translation.z = 0.0
-        q = tf_transformations.quaternion_from_euler(0., 0., pose[2])
-        # rotation
-        t.transform.rotation.x = q[0]
-        t.transform.rotation.y = q[1]
-        t.transform.rotation.z = q[2]
-        t.transform.rotation.w = q[3]
-        self.pub_tf.sendTransform(t)
+        if(self.PUBLISH_TF):
+            t = TransformStamped()
+            # header
+            t.header.stamp = stamp
+            t.header.frame_id = 'map'
+            t.child_frame_id = 'laser'
+            # translation
+            t.transform.translation.x = pose[0]
+            t.transform.translation.y = pose[1]
+            t.transform.translation.z = 0.0
+            q = tf_transformations.quaternion_from_euler(0., 0., pose[2])
+            # rotation
+            t.transform.rotation.x = q[0]
+            t.transform.rotation.y = q[1]
+            t.transform.rotation.z = q[2]
+            t.transform.rotation.w = q[3]
+            
+            self.pub_tf.sendTransform(t)
         # also publish odometry to facilitate getting the localization pose
         if self.PUBLISH_ODOM:
             odom = Odometry()
-            odom.header.stamp = self.get_clock().now().to_msg()
+            odom.header.stamp = stamp
             odom.header.frame_id = 'map'
+            odom.child_frame_id = 'laser'      # twist is body-frame
             odom.pose.pose.position.x = pose[0]
             odom.pose.pose.position.y = pose[1]
             odom.pose.pose.orientation = Utils.angle_to_quaternion(pose[2])
-            cov_mat = np.cov(self.particles, rowvar=False, ddof=0, aweights=self.weights).flatten()
-            odom.pose.covariance[:cov_mat.shape[0]] = cov_mat
-            odom.twist.twist.linear.x = self.current_speed
+
+            cov = self.pose_cov if self.pose_cov is not None else self.pose_covariance()
+            pcov = np.zeros(36)
+            # 3x3 (x,y,yaw) -> the x/y/yaw entries of the 6x6 row-major block
+            pcov[[0, 1, 5, 6, 7, 11, 30, 31, 35]] = cov.flatten()
+            odom.pose.covariance = pcov.tolist()
+
+            if self.PUBLISH_TWIST:
+                t_sec = stamp.sec + stamp.nanosec * 1e-9
+                tw = self.compute_twist(pose, t_sec, cov)
+                if tw is not None:
+                    vx, vy, wz, var = tw
+                    odom.twist.twist.linear.x  = vx
+                    odom.twist.twist.linear.y  = vy
+                    odom.twist.twist.angular.z = wz
+                    tcov = np.zeros(36)
+                    tcov[0], tcov[7], tcov[35] = var
+                    odom.twist.covariance = tcov.tolist()
+            else:
+                odom.twist.twist.linear.x = self.current_speed
+
             self.odom_pub.publish(odom)
         
         return
@@ -670,6 +809,7 @@ class ParticleFiler(Node):
 
                 # compute the expected value of the robot pose
                 self.inferred_pose = self.expected_pose()
+                self.pose_cov = self.pose_covariance()   # <-- add
                 self.state_lock.release()
                 t2 = time.time()
 
@@ -683,6 +823,8 @@ class ParticleFiler(Node):
                     self.get_logger().info(str(['iters per sec:', int(self.timer.fps()), ' possible:', int(self.smoothing.mean())]))
 
                 self.visualize()
+
+                
 
 # import argparse
 # import sys

@@ -243,7 +243,7 @@ class OptitrackSubscriber(Node):
         odom_msg = Odometry()
         odom_msg.header = msg.header
         odom_msg.header.frame_id = 'map'        # pose frame
-        odom_msg.child_frame_id = 'base_link'   # twist (body) frame
+        odom_msg.child_frame_id = 'cg'   # twist (body) frame
 
         # ---- Pose (world) ----
         odom_msg.pose.pose.position.x = position[0]

@@ -35,7 +35,7 @@ class ImuZuptPrepNode(Node):
         # ==========================================
         clean_imu = Imu()
         clean_imu.header.stamp = raw_msg.header.stamp
-        clean_imu.header.frame_id = 'base_link' 
+        clean_imu.header.frame_id = 'imu_link'
         
         # Convert units (g's -> m/s^2, deg/s -> rad/s)
         clean_imu.linear_acceleration.x = raw_msg.linear_acceleration.x * self.G_TO_MS2

@@ -58,8 +58,8 @@ import sys
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-DEFAULT_POSE_TOPIC = '/f1tenth/pose'
-DEFAULT_ODOM_TOPIC = '/optitrack/odom'
+DEFAULT_POSE_TOPIC = '/pf/pose/odom'
+DEFAULT_ODOM_TOPIC = '/pf/pose/odom'
 DEFAULT_EKF_TOPIC = '/odometry/filtered'
 WINDOW_SEC = 10.0          # rolling time window shown on the x-axis
 MAX_SAMPLES = 5000         # hard cap on buffered samples (memory guard)
@@ -78,8 +78,8 @@ APPLY_BRIDGE_TRANSFORM = True
 # Axis-permutation matrix, copied verbatim from the bridge (optitrack_node.py).
 # x_new = -y_old, y_new = x_old, z_new = z_old.
 _BRIDGE_P = np.array([
-    [0, -1, 0],
     [1,  0, 0],
+    [0,  1, 0],
     [0,  0, 1],
 ])
 

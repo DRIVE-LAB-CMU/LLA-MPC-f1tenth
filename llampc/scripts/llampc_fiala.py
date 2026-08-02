@@ -150,7 +150,6 @@ class MPCNode(Node):
         self.lla_predict_dt = self.dt # lla
 
 
-
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
         self.declare_parameter('track_file_name', 'mocap_square2slow.npz')

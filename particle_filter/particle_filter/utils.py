@@ -6,6 +6,64 @@ from geometry_msgs.msg import Point, Pose, PoseStamped, PoseArray, Quaternion, P
 import tf_transformations
 # import tf2_ros
 import time
+from collections import deque
+
+
+
+class CausalSpikeEMA:
+    """Live (causal) EMA + windowed spike clamp for one scalar channel.
+
+    Unlike the offline plotting-tool version, this only ever looks
+    BACKWARD in time -- each new sample is judged against a trailing
+    history buffer spanning `window_sec`, since a live callback has no
+    access to "future" samples the way a post-hoc analysis does.
+
+    Pipeline per sample: clamp to the trailing window's [pct, 100-pct]
+    percentile band, THEN apply a dt-normalized EMA with time constant tau.
+    tau should stay small (a few sample periods) -- this is meant to kill
+    single-sample noise/outliers, not to do the EKF's smoothing job for it
+    and add meaningful lag on top of what you're already fighting.
+    """
+
+    def __init__(self, tau, spike_pct, window_sec):
+        self.tau = tau
+        self.spike_pct = max(0.0, min(49.0, spike_pct))
+        self.window_sec = window_sec
+        self._hist_t = deque()
+        self._hist_v = deque()
+        self._ema = None
+        self._last_t = None
+
+    def update(self, t, v):
+        # --- 1. maintain trailing window ---
+        self._hist_t.append(t)
+        self._hist_v.append(v)
+        while self._hist_t and (t - self._hist_t[0]) > self.window_sec:
+            self._hist_t.popleft()
+            self._hist_v.popleft()
+
+        # --- 2. windowed spike clamp (causal: only past+current samples) ---
+        if self.spike_pct > 0 and len(self._hist_v) >= 3:
+            arr = np.asarray(self._hist_v, dtype=float)
+            lo = np.percentile(arr, self.spike_pct)
+            hi = np.percentile(arr, 100.0 - self.spike_pct)
+            v_clamped = min(max(v, lo), hi)
+        else:
+            v_clamped = v
+
+        # --- 3. dt-normalized EMA ---
+        if self._ema is None or self._last_t is None:
+            self._ema = v_clamped
+        else:
+            dt = t - self._last_t
+            if dt > 0 and self.tau > 0:
+                a = dt / (self.tau + dt)
+                self._ema = self._ema + a * (v_clamped - self._ema)
+            elif dt > 0:
+                self._ema = v_clamped  # tau<=0 -> spike clamp only, no smoothing
+        self._last_t = t
+        return self._ema
+
 
 class CircularArray(object):
     """ Simple implementation of a circular array.

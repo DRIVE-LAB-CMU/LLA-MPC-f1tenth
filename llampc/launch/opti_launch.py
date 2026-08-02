@@ -63,6 +63,20 @@ def generate_launch_description():
         parameters=[{'topic': LaunchConfiguration('mocap_topic')}]
     )
 
+    cg_tf_node = Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='static_baselink_to_cg',
+            arguments=['0.15', '0.0', '0.0', '0.0', '0.0', '0.0', 'base_link', 'cg']
+        )
+    
+    imu_tf_node = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='static_baselink_to_imu',
+        arguments=['0.065', '0.0', '0.0', '0.0', '0.0', '0.0', 'base_link', 'imu_link']
+    )
+
     return LaunchDescription([
         natnet_mocap_action,
         mocap_topic_la,

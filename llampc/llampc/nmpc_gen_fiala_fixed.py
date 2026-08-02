@@ -12,7 +12,7 @@ def export_model(params_car, exact = False):
     model = AcadosModel()
     model.name = "f1tenthfiala"
 
-    x = ca.MX.sym('x', 10)   # state: x, y, phi, vx, vy, omega, omega_w, current, delta
+    x = ca.MX.sym('x', 9)   # state: x, y, phi, vx, vy, omega, omega_w, current, delta
     u = ca.MX.sym('u', 2)   # control rate: curent slew rate, steer rate
     p = ca.MX.sym('p', 5)
 
@@ -30,12 +30,11 @@ def export_model(params_car, exact = False):
     lam = params_car['lambda']
     g    = 9.81
     hcg, L = params_car['h'], lf + lr
-    c = 20      # dFz relaxation rate [1/s]
 
 
     Cf, Cr, muf, mur, Cro = [p[i] for i in range(5)]
-    # state: x, y, phi, vx, vy, omega, omega_w, dFz, current, delta   (10 states)
-    omega_w, dFz, current, delta = x[6], x[7], x[8], x[9]
+    # state: x, y, phi, vx, vy, omega, omega_w, current, delta   (10 states)
+    omega_w, current, delta = x[6], x[7], x[8]
     
 
     if not exact:
@@ -43,8 +42,8 @@ def export_model(params_car, exact = False):
         vx_dyn = ca.sqrt(x[3]**2 + eps)
 
         # --- load transfer is now a STATE (dFz), not computed here ---
-        Ffz = mass*g*lr/L - dFz
-        Frz = mass*g*lf/L + dFz
+        Ffz = mass*g*lr/L
+        Frz = mass*g*lf/L
         Ffmax = muf*Ffz
         Frmax = mur*Frz          # coupling lives in sigma_r, no friction-circle derate
 
@@ -97,16 +96,15 @@ def export_model(params_car, exact = False):
         dx4 = (Fry + Ffy*ca.cos(delta) + Ffx*ca.sin(delta))/mass - x[3]*x[5]
         dx5 = (lf *(Ffy*ca.cos(delta) + Ffx*ca.sin(delta)) - lr*Fry)/Iz
         dx6 = (tau_drive - Frx*rw - Ffx *rw)/(Iw + Im)
-        dx7 = -c*(dFz - (hcg/L)*Fx_chassis)      # dFz relaxation, driven by REALIZED force
-        dx8 = u[0]
-        dx9 = u[1]
+        dx7 = u[0]
+        dx8 = u[1]
 
 
     else:
 
         # --- load transfer is now a STATE (dFz), not computed here ---
-        Ffz = mass*g*lr/L - dFz
-        Frz = mass*g*lf/L + dFz
+        Ffz = mass*g*lr/L
+        Frz = mass*g*lf/L 
         Ffmax = muf*Ffz
         Frmax = mur*Frz          # coupling lives in sigma_r, no friction-circle derate
 
@@ -157,9 +155,8 @@ def export_model(params_car, exact = False):
         dx4 = (Fry + Ffy*ca.cos(delta) + Ffx*ca.sin(delta))/mass - x[3]*x[5]
         dx5 = (lf *(Ffy*ca.cos(delta) + Ffx*ca.sin(delta)) - lr*Fry)/Iz
         dx6 = (tau_drive - Frx*rw - Ffx *rw)/(Iw + Im)
-        dx7 = -c*(dFz - (hcg/L)*Fx_chassis)      # dFz relaxation, driven by REALIZED force
-        dx8 = u[0]
-        dx9 = u[1]
+        dx7 = u[0]
+        dx8 = u[1]
 
 
     f_expl = ca.vertcat(dx0, dx1, dx2, dx3, dx4, dx5, dx6, dx7, dx8, dx9)
@@ -261,8 +258,6 @@ def create_ocp(model, params_car, steps, horizon):
     # w_slew = 0.0
     # w_steer_v = 0.1 # 0.01 0.1 0.8
     
-
-    
     
       
     Q_flat = [w_x, w_y, w_theta, w_vx, 0.0, w_omega,  w_current, w_steer]
@@ -301,8 +296,8 @@ def create_ocp(model, params_car, steps, horizon):
         x[3] - x_ref[3],   # vx
         x[4] - x_ref[4],   # vy
         x[5] - x_ref[5],   # omega
-        x[8],   # current
-        x[9],   # steer
+        x[7],   # current
+        x[8],   # steer
         u
     )
     ocp.model.cost_y_expr_e = ca.vertcat(
@@ -312,15 +307,15 @@ def create_ocp(model, params_car, steps, horizon):
         x[3] - x_ref[3],   # vx
         x[4] - x_ref[4],   # vy
         x[5] - x_ref[5],   # omega
-        x[8],   # current
-        x[9],   # steer
+        x[7],   # current
+        x[8],   # steer
     )
     
     ocp.model.p = model.p  # Combine with existing parameters
     ocp.dims.np = model.p.size()[0]
     ocp.parameter_values = np.zeros((ocp.dims.np, 1))
 
-    ocp.constraints.idxbx = np.array([3, 4,5, 8, 9])
+    ocp.constraints.idxbx = np.array([3, 4,5, 7,8])
     ocp.constraints.lbx = np.array([-0.5, 
                                 -4,
                                 - 2*np.pi,
