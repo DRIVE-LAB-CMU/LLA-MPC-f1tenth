@@ -142,16 +142,18 @@ class MPCNode(Node):
 
 
         self.N = 20 #steps (for nmpc)
-        self.Tf = 0.8 # total time horizon (for nmpc)
-        self.dt = self.Tf / self.N
-        self.control_callback_speed = 0.04
-        self.lla_predict_horizon = 0.04
+        self.hz = 25 #control frequency
+        
+        self.dt = 1/self.hz
+        self.Tf = self.N * self.dt # total time horizon (for nmpc)
+        self.control_callback_speed = self.dt
+        self.lla_predict_dt = self.dt # lla
 
 
 
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'mocap_turnfastbank.npz')
+        self.declare_parameter('track_file_name', 'mocap_square2slow.npz')
         self.declare_parameter('odom_topic', '/odometry/filtered')
         # self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
@@ -221,7 +223,7 @@ class MPCNode(Node):
         history_length=self.lla_window
         self.lb_history = history.LBHistory(
             num_models, history_length,
-            self.lla_predict_horizon, cost_weights,
+            self.lla_predict_dt, cost_weights,
             self.state_size, rk4Factory,
             self.dynamics_bank, dynamics_fiala.diffequation,
             buffer_size = [0, 0]
@@ -253,7 +255,6 @@ class MPCNode(Node):
         self.dFz = 0
 
         
-
         self.lla_solver = LLASolver(
             setup_mpc(self.N, self.Tf, build=True), lla_p=5, N = self.N)
         self.get_logger().info("SOLVER COMPILED, WARM STARTING")

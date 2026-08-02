@@ -1821,7 +1821,7 @@ def main():
         full_open_loop=False,
         window_P=40,
         cost_form=np.array([10.0, 10.0, 20.0, 1.0, 10.0, 0.1]),
-        compute_m_step=True,    # set False to skip the slow M-step computation
+        compute_m_step=False,    # set False to skip the slow M-step computation
         m_step_M=10,
         # Weights for the accumulated-MPC-error graph: actual state vs.
         # reference node 0 (x, y, theta, vx, vy, omega), NMPC solves only.
