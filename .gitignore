@@ -21,7 +21,7 @@ devel_isolated/
 *.pxd
 *.so
 
-*.npz
+src/llampc/llampc/utils/run_visualizer
 
 
 *.log
