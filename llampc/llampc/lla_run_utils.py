@@ -13,7 +13,7 @@ class LLASolver():
         self.max_v = 3.0
         self.min_v = 0.2
 
-        self.kd = 0.1
+        self.kd = 0.01
         self.ki = 0.1
         self.kp = 0.01
 
