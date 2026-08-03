@@ -20,12 +20,11 @@ def _speed_at(track, s, mu_est=None):
         over track.mus; clamp to endpoints outside the baked range.
     """
     # bank mode: spline_v is a list and track.mus exists
+    if mu_est is None or getattr(track, 'spline_v', None) is None:
+        return track.v
+
     if isinstance(track.spline_v, (list, tuple)):
         mus = track.mus
-        if mu_est is None:
-            # no live estimate -> fall back to the most conservative (slowest)
-            # profile, which is the smallest mu.
-            return track.v
         if mu_est <= mus[0]:
             return track.spline_v[0].calc(s)
         if mu_est >= mus[-1]:
