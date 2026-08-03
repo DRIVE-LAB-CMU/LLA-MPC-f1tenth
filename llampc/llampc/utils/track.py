@@ -42,14 +42,11 @@ class Track:
         """	load raceline and fit cubic splines
         """
         x, y, theta = self._fit_cubic_splines(
-            wx=wx, 
-            wy=wy, 
+            wx=wx,
+            wy=wy,
             n_samples=n_samples
             )
-        # theta = np.cumsum(np.linalg.norm(np.diff(np.array([x,y])), 2, axis=0))
-        # theta = np.concatenate([np.array([0]), theta])
         self.spline = Spline2D(wx, wy)
-        # print(wx,wy)
         x, y = wx, wy
         theta = self.spline.s
 
@@ -57,18 +54,23 @@ class Track:
         self.y_raceline = np.array(y)
         self.raceline = np.array([x, y])
 
-        if vs is not None :
+        # Always defined, so callers can test for them without try/getattr.
+        # spline_v is the per-mu bank (adaptive planning only); spline_v_single
+        # is the single speed profile every track has.
+        self.v = None
+        self.v_raceline = None
+        self.mus = None
+        self.spline_v = None
+        self.spline_v_single = None
+
+        if vs is not None:
             self.v_raceline = vs
             self.mus = mus
-            # self.t_raceline = t
-            self.spline_v = []
-            for vi in vs :
-                # print(len(vi))
-                # print(len(theta))
-                self.spline_v.append(Spline(theta, vi))
+            self.spline_v = [Spline(theta, vi) for vi in vs]
 
         if v is not None:
-            self.v = v
+            self.v = np.asarray(v)
+            self.spline_v_single = Spline(theta, self.v)
 
     def _fit_cubic_splines(self, wx, wy, n_samples):
         """	fit cubic splines on waypoints
