@@ -18,7 +18,17 @@ class Track:
         raceline = np.load(file_path, allow_pickle=True)
         n_samples = raceline['x'].size
         print(list(raceline.keys()))
-        self._load_raceline(
+
+        if not 'vs' in list(raceline.keys()):
+            self._load_raceline(
+                wx=raceline['x'],
+                wy=raceline['y'],
+                n_samples=n_samples,
+                v=raceline['speed'],
+            )
+
+        else:
+            self._load_raceline(
                 wx=raceline['x'],
                 wy=raceline['y'],
                 n_samples=n_samples,
