@@ -121,7 +121,7 @@ class MPCNode(Node):
         self.get_logger().info("F1tenth MPC Initialized")
 
     def declare_params(self):
-        self.with_lla = False
+        self.with_lla = True
         self.adaptive_planning = False
         self.adaptive_control = True
         self.lla_reset_interval = 0
@@ -139,7 +139,7 @@ class MPCNode(Node):
 
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'blevel_ovalslow.npz')
+        self.declare_parameter('track_file_name', 'blevel_turn_fast.npz')
         self.declare_parameter('odom_topic', '/odometry/filtered')
         # self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
@@ -180,10 +180,10 @@ class MPCNode(Node):
         
         # grid discretization
         discretization_dict = {
-            'Cf': 7,   
-            'Cr': 7,   
-            'muf': 10,  
-            'mur': 10,  
+            'Cf': 5,   
+            'Cr': 5,   
+            'muf': 7,  
+            'mur': 7,  
             'Cro': 0.0,
         }
 
@@ -349,7 +349,7 @@ class MPCNode(Node):
 
         mu_est = None if not self.adaptive_planning else mu_est
 
-        if self.current_state[3] < 0.3:
+        if self.current_state[3] < 0.1:
             ref_point, idx = get_lookahead_point(
                 self.current_state, self.track, self.projidx, 
                 lookahead_dist = 1.2, mu_est = mu_est)
@@ -381,7 +381,7 @@ class MPCNode(Node):
             if self.publish_trajectories:
                 record_ref_trajectory = ref_segment.T
                 # self.publish_ref_trajectory(ref_segment)
-            # print(f"REF: {ref_segment}")
+            #print(f"REF: {ref_segment}")
 
             self.lla_solver.prepare_mpc_solve()
 

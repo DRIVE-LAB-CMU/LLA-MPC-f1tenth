@@ -191,13 +191,13 @@ def create_ocp(model, params_car, steps, horizon):
     w_xe = 40.0 # 20  40 0
     w_ye = 40.0 # 20 40  0
     w_theta = 0
-    w_vx = 10  #  10 10 
+    w_vx = 1.0  #  10 10 
 
     w_current = 0.01
-    w_steer = 0.01 # 0.1 0.01 0.8
+    w_steer = 0.5 # 0.1 0.01 0.8
     w_slew = 0.0
-    w_steer_v = 0.1 # 0.01 0.1 0.8
-    w_omega = 0
+    w_steer_v = 0.5 # 0.01 0.1 0.8
+    w_omega = 0.5
 
     # oval
     # w_x = 40.0 #20  40  40
@@ -374,7 +374,7 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.solver_options.sim_method_num_steps = 5
 
     ocp.solver_options.nlp_solver_type = 'SQP'
-    ocp.solver_options.nlp_solver_max_iter = 20  # 2-3 iterations
+    ocp.solver_options.nlp_solver_max_iter = 3  # 2-3 iterations
     # ocp.solver_options.globalization = 'FIXED_STEP'
     ocp.solver_options.print_level = 0
     ocp.solver_options.qp_solver_warm_start = 1    
