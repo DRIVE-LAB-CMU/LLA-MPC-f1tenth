@@ -129,7 +129,7 @@ class MPCNode(Node):
 
 
         self.N = 20 #steps (for nmpc)
-        self.hz = 25 #control frequency
+        self.hz = 40 #control frequency
         
         self.dt = 1/self.hz
         self.Tf = self.N * self.dt # total time horizon (for nmpc)

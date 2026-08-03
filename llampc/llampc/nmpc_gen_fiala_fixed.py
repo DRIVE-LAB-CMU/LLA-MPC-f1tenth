@@ -371,7 +371,7 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.solver_options.sim_method_num_stages = 4
     
     # DROPPED FROM 10 to 2 (This makes the solver ~5x faster)
-    ocp.solver_options.sim_method_num_steps = 10
+    ocp.solver_options.sim_method_num_steps = 5
 
     ocp.solver_options.nlp_solver_type = 'SQP'
     ocp.solver_options.nlp_solver_max_iter = 20  # 2-3 iterations
