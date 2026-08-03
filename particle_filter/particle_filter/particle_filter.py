@@ -91,7 +91,7 @@ class ParticleFiler(Node):
         self.declare_parameter('vel_ema_tau', 0.06)
         self.declare_parameter('vel_spike_pct', 15.0)
         self.declare_parameter('vel_spike_window', 0.5)
-        self.declare_parameter('vel_var_pos_gain', 0.15)   # kappa: correlation discount
+        self.declare_parameter('vel_var_pos_gain', 0.0)   # kappa: correlation discount
         self.declare_parameter('vel_var_floor_lin', 0.04)
         self.declare_parameter('vel_var_floor_ang', 0.05)
         self.declare_parameter('vel_var_ceiling', 10.0)
@@ -299,16 +299,10 @@ class ParticleFiler(Node):
         # most of their particles, so their errors are highly correlated
         # and cancel in the difference. Rotate the world-frame position
         # block into body frame so the vx/vy split matches the twist.
-        S_world = cov[:2, :2] + prev_cov[:2, :2]
-        S_body = Rwb @ S_world @ Rwb.T
-        k = self.VEL_VAR_POS_GAIN / (dt * dt)
 
-        var_vx = np.clip(self.VEL_VAR_FLOOR_LIN + k * S_body[0, 0],
-                         self.VEL_VAR_FLOOR_LIN, self.VEL_VAR_CEILING)
-        var_vy = np.clip(self.VEL_VAR_FLOOR_LIN + k * S_body[1, 1],
-                         self.VEL_VAR_FLOOR_LIN, self.VEL_VAR_CEILING)
-        var_wz = np.clip(self.VEL_VAR_FLOOR_ANG + k * (cov[2, 2] + prev_cov[2, 2]),
-                         self.VEL_VAR_FLOOR_ANG, self.VEL_VAR_CEILING)
+        var_vx = .25
+        var_vy = .09
+        var_wz = .09
 
         return float(vx_f), float(vy_f), float(wz_f), [var_vx, var_vy, var_wz]
 
