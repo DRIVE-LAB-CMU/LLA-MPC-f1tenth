@@ -157,7 +157,7 @@ def export_model(params_car, exact = False):
         dx8 = u[1]
 
 
-    f_expl = ca.vertcat(dx0, dx1, dx2, dx3, dx4, dx5, dx6, dx7, dx8, dx9)
+    f_expl = ca.vertcat(dx0, dx1, dx2, dx3, dx4, dx5, dx6, dx7, dx8)
     model.f_expl_expr = f_expl
     model.x = x
     model.u = u
@@ -344,9 +344,9 @@ def create_ocp(model, params_car, steps, horizon):
     ocp.cost.Zu  = w_slack    * np.ones(nsbx)  # upper L2 weight
     #####################################
     
-    ocp.constraints.idxbx_0 = np.arange(10) # IMPORTANT FOR RUNTIME
-    ocp.constraints.lbx_0 = np.zeros(10)           # placeholder
-    ocp.constraints.ubx_0 = np.zeros(10)           # placeholder
+    ocp.constraints.idxbx_0 = np.arange(9) # IMPORTANT FOR RUNTIME
+    ocp.constraints.lbx_0 = np.zeros(9)           # placeholder
+    ocp.constraints.ubx_0 = np.zeros(9)           # placeholder
 
     ocp.constraints.lbx_e = ocp.constraints.lbx
     ocp.constraints.ubx_e = ocp.constraints.ubx
