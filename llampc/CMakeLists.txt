@@ -75,6 +75,7 @@ install(PROGRAMS
   scripts/llampc_pid.py
   scripts/llampc_fiala.py
   scripts/multi_llampc_fiala.py
+  scripts/llampc_fiala_fixed.py
   DESTINATION lib/${PROJECT_NAME}
 )
 if(BUILD_TESTING)
