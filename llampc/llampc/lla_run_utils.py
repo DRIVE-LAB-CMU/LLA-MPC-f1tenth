@@ -211,22 +211,38 @@ class LLALogger():
 
     def save_log(self):
         print(f"Saving data to {self.log_file}")
+
+        def pack(key):
+            """Stack if rectangular, else fall back to an object array.
+
+            Pure-pursuit and MPC cycles log different shapes for the rollout
+            fields, so some keys are ragged and can only be stored as objects
+            (read back with np.load(..., allow_pickle=True)).
+            """
+            vals = self.log_buffer[key]
+            try:
+                return np.array(vals)
+            except ValueError:
+                out = np.empty(len(vals), dtype=object)
+                out[:] = vals
+                return out
+
         np.savez(
             self.log_file,
-            time=np.array(self.log_buffer["time"]),
-            state=np.array(self.log_buffer["state"]),
-            params=np.array(self.log_buffer["params"]),
-            model_index=np.array(self.log_buffer["model_idx"]),
-            ctrl=np.array(self.log_buffer["ctrl"]), 
-            d_ctrl=np.array(self.log_buffer["d_ctrl"]),
-            states=np.array(self.log_buffer["predicted_state"]),
-            mpc_rollout=np.array(self.log_buffer["mpc_rollout"]),
-            ref_trajectory=np.array(self.log_buffer["ref_trajectory"]),
-            one_step_cost=np.array(self.log_buffer["one_step_cost"]),
-            running_cost=np.array(self.log_buffer["running_cost"]),
-            ok_time = np.array(self.log_buffer["ok_time"]),
-            cmd = np.array(self.log_buffer["cmd"]),
-            known_params = np.array(self.log_buffer["known_params"]),
-            solve_time = np.array(self.log_buffer["solve_time"]),
-            mu_est = np.array(self.log_buffer["mu_est"])
+            time=pack("time"),
+            state=pack("state"),
+            params=pack("params"),
+            model_index=pack("model_idx"),
+            ctrl=pack("ctrl"),
+            d_ctrl=pack("d_ctrl"),
+            states=pack("predicted_state"),
+            mpc_rollout=pack("mpc_rollout"),
+            ref_trajectory=pack("ref_trajectory"),
+            one_step_cost=pack("one_step_cost"),
+            running_cost=pack("running_cost"),
+            ok_time=pack("ok_time"),
+            cmd=pack("cmd"),
+            known_params=pack("known_params"),
+            solve_time=pack("solve_time"),
+            mu_est=pack("mu_est"),
         )
