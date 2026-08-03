@@ -99,7 +99,7 @@ class MPCNode(Node):
 
         self.cmd_pub = self.create_publisher(
             AckermannDriveStamped,
-            '/drive',
+            '/mpc/drive',
             10
         )
 
@@ -121,14 +121,14 @@ class MPCNode(Node):
         self.get_logger().info("F1tenth MPC Initialized")
 
     def declare_params(self):
-        self.with_lla = True
+        self.with_lla = False
         self.adaptive_planning = False
         self.adaptive_control = True
         self.lla_reset_interval = 0
-        self.lla_window = 40
+        self.lla_window = 60
 
 
-        self.N = 20 #steps (for nmpc)
+        self.N = 30 #steps (for nmpc)
         self.hz = 40 #control frequency
         
         self.dt = 1/self.hz
@@ -180,12 +180,20 @@ class MPCNode(Node):
         
         # grid discretization
         discretization_dict = {
-            'Cf': 5,   
-            'Cr': 5,   
-            'muf': 7,  
-            'mur': 7,  
+            'Cf': 7,   
+            'Cr': 7,   
+            'muf': 10,  
+            'mur': 10,  
             'Cro': 0.0,
         }
+        # stuff with blevel
+        # discretization_dict = {
+        #     'Cf': 5,   
+        #     'Cr': 5,   
+        #     'muf': 7,  
+        #     'mur': 7,  
+        #     'Cro': 0.0,
+        # }
 
         param_dict = get_param_dict_grid(mean_dict, variation_dict, 
                                          discretization=discretization_dict, ground_truth=True,
