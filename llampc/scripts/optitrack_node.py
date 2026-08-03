@@ -194,7 +194,7 @@ class OptitrackSubscriber(Node):
 
     def mocap_callback(self, msg):
         timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        position = np.array([-msg.pose.position.x, msg.pose.position.z, -msg.pose.position.y])
+        position = np.array([-msg.pose.position.x, msg.pose.position.z, msg.pose.position.y])
 
         q_orig = np.array([
             msg.pose.orientation.x,
@@ -218,7 +218,7 @@ class OptitrackSubscriber(Node):
         P = np.array([
             [-1, 0, 0],
             [ 0, 0, 1],
-            [ 0, -1, 0]])
+            [ 0, 1, 0]])
 
         # Transform rotation matrix
         R_new = B @ P @ R_orig      # not P @ R_orig @ P.T
