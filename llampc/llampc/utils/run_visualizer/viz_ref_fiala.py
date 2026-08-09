@@ -1,0 +1,1840 @@
+"""Interactive state-trajectory visualizer.
+
+Two windows:
+  * main      - trajectory plot + per-parameter time series + playback controls
+  * diagnostics - sliding-window cost, one-step difference, (optional)
+                  M-step lookahead error, and (optional) accumulated MPC
+                  tracking error vs. reference, sharing cost-component
+                  checkboxes
+
+Run as a script. Rollout backend lives in rollouts.py; if it is unavailable the
+visualizer falls back to precomputed npz arrays or the recorded run only.
+"""
+import os
+# Force Linux window backends to scale UI elements correctly.
+# NOTE: GDK_SCALE only accepts integers (GTK silently ignores/rejects
+# fractional values like "1.5"), so it was previously a no-op. Qt's
+# AUTO_SCREEN_SCALE_FACTOR is the one safe "just do the right thing" knob;
+# we compute an explicit fractional factor for Qt/GTK below instead of
+# guessing a hard-coded value.
+os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "1")
+os.environ.pop("GDK_SCALE", None)
+
+
+def _detect_dpi_scale(base_dpi=96.0):
+    """Best-effort screen-DPI probe so fonts/figures scale on HiDPI displays.
+
+    Falls back to 1.0 (no scaling) if no display toolkit is available, e.g.
+    headless/CI environments, rather than silently doing nothing like the
+    previous env-var-only approach.
+    """
+    try:
+        import tkinter as tk
+        root = tk.Tk()
+        root.withdraw()
+        dpi = root.winfo_fpixels('1i')
+        root.destroy()
+        if dpi and dpi > 0:
+            return max(1.0, dpi / base_dpi)
+    except Exception:
+        pass
+    return 1.0
+
+
+_DPI_SCALE = _detect_dpi_scale()
+# Qt reads fractional scaling from this var (GTK has no equivalent fractional
+# knob, so on GTK backends we rely on the rcParams scaling below instead).
+os.environ.setdefault("QT_SCALE_FACTOR", f"{_DPI_SCALE:.2f}")
+
+import matplotlib
+matplotlib.use('QtAgg')
+
+import matplotlib.pyplot as plt
+# Set readable base sizes for high-res monitors; scaled by the detected DPI
+# factor instead of a fixed guess, so they actually grow on HiDPI screens.
+plt.rcParams.update({
+    'font.size': 13 * _DPI_SCALE,
+    'axes.labelsize': 14 * _DPI_SCALE,
+    'axes.titlesize': 14 * _DPI_SCALE,
+    'xtick.labelsize': 11 * _DPI_SCALE,
+    'ytick.labelsize': 11 * _DPI_SCALE,
+    'legend.fontsize': 10 * _DPI_SCALE,
+    'lines.linewidth': 2.0
+})
+
+import argparse
+import os
+import sys
+
+# Ensure rollouts.py is imported from THIS file's directory, regardless of cwd.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from matplotlib.lines import Line2D
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.widgets import Slider, Button, CheckButtons
+from matplotlib.patches import FancyArrow, Circle, Patch
+
+from rollouts_fiala import (
+    _ROLLOUT_OK, _ROLLOUT_ERR,
+    BANK_ORDER, DEFAULT_LOG_ORDER, COST_DIM_LABELS,
+    dict_to_bank_vec, remap_to_bank_order,
+    simulate_general_models, simulate_lla_rollout, simulate_lla_one_step,
+    simulate_general_m_step, simulate_lla_m_step,
+)
+
+if _ROLLOUT_OK:
+    from rollouts_lateral import F110
+else:
+    F110 = None
+
+
+
+# ===========================================================================
+# Visualizer
+# ===========================================================================
+class StateVisualizer:
+    """Interactive visualizer for state trajectory data."""
+
+    def __init__(self, filepath, ref_filepath=None, n_params_to_show=None, params_per_column=3,
+                 param_names=None, obstacles=None, r_car=0.04,
+                 general_models=None, compute_rollouts=True,
+                 dt=1.0 / 40.0, ol_reset_interval=40, cost_weights=None,
+                 full_open_loop=False, log_order=None, window_P=20, cost_form=None,
+                 compute_m_step=False, m_step_M=10,
+                 mpc_state_weights=None, mpc_ctrl_weights=None,
+                 mpc_last_ctrl_weights=None):
+        self.n_params_to_show = n_params_to_show
+        self.params_per_column = params_per_column
+        self.param_names = param_names
+        self.ref_filepath = ref_filepath
+
+        self.r_car = r_car
+        self.obstacles = []
+        if obstacles:
+            for p_obs, r_obs in obstacles:
+                self.obstacles.append((np.asarray(p_obs, dtype=float), float(r_obs)))
+
+        # --- Rollout config ---
+        self.compute_rollouts = compute_rollouts
+        self.dt = dt
+        self.ol_reset_interval = ol_reset_interval
+        self.cost_weights = (np.array([1.0, 1.0, 0.0, 0.0, 0, 0])
+                             if cost_weights is None else np.asarray(cost_weights))
+        self.cost_form = (self.cost_weights if cost_form is None
+                          else np.asarray(cost_form, dtype=float))
+        self.active_cost_dims = [bool(w != 0) for w in self.cost_form]
+
+        self._mpc_state_weights_init = (None if mpc_state_weights is None
+                                        else np.asarray(mpc_state_weights, dtype=float))
+        self._mpc_ctrl_weights_init = (None if mpc_ctrl_weights is None
+                                       else np.asarray(mpc_ctrl_weights, dtype=float))
+        self._mpc_last_ctrl_weights_init = (None if mpc_last_ctrl_weights is None
+                                            else np.asarray(mpc_last_ctrl_weights, dtype=float))
+        self.mpc_cost_form = None
+        self.active_mpc_cost_dims = None
+        self.mpc_dim_labels = None
+
+        self.full_open_loop = full_open_loop
+        self.general_models = general_models or {}
+        self.log_order = log_order or DEFAULT_LOG_ORDER
+        self.params_car = F110() if _ROLLOUT_OK else None
+
+        self.compute_m_step = bool(compute_m_step)
+        self.m_step_M = int(m_step_M)
+        self.show_m_step = True
+        self._has_m_step = False
+
+        self.lla_traj = None
+        self.lla_one_step_traj = None
+        self.lla_params_over_time = None
+        self.general_trajs = {}
+        self.general_order = []
+        self.rollout_len = 0
+
+        self.show_lla = True
+        self.show_general = True
+        self.show_velocity = True
+        self.model_mode = "open_loop"
+        self.window_P = int(window_P)
+
+        self.load_data(filepath)
+        self.load_ref_data()
+        self.prepare_rollouts()
+
+        self.setup_figure()
+        self.setup_cost_figure()
+        self.current_frame = 0
+        self.playing = False
+        self.setup_artists()
+        self.setup_controls()
+
+    def load_data(self, filepath):
+        data = np.load(filepath, allow_pickle=True)
+        self._raw = data
+        self.time = np.asarray(data["time"], dtype=float)
+        if len(self.time) > 0:
+            self.time = self.time - self.time[0]
+        state = data["state"]
+        self.state = state
+        self.x = state[:, 0]
+        self.y = state[:, 1]
+        self.theta = state[:, 2]
+        self.dx = state[:, 3]
+        self.dy = state[:, 4]
+        self.omega = state[:, 5]
+        self.n_frames = len(self.x)
+
+        params_raw = data["params"]
+
+        if isinstance(params_raw, np.ndarray) and params_raw.ndim == 2:
+            if params_raw.shape[0] == len(self.time):
+                self.params = [params_raw[:, i] for i in range(params_raw.shape[1])]
+            else:
+                self.params = [params_raw[i, :] for i in range(params_raw.shape[0])]
+        else:
+            self.params = list(params_raw)
+
+        self.model_idx = data["model_index"]
+        ctrl = data["ctrl"]
+        self.ctrl = ctrl
+        self.accel = ctrl[:, 0]
+        self.steer = ctrl[:, 1]
+
+        self.recording = {"state": state, "ctrl": ctrl, "time": self.time}
+        self.rollout_total = max(0, len(self.time) - 1)
+
+        self.mpc_rollout = None
+        if "mpc_rollout" in data:
+            rollout_data = data["mpc_rollout"]
+            if len(rollout_data) > 0 and any(len(r) > 0 for r in rollout_data):
+                self.mpc_rollout = rollout_data
+
+        self.ref_trajectory = None
+        if "ref_trajectory" in data:
+            ref_traj_data = data["ref_trajectory"]
+            print(ref_traj_data.shape)
+            if len(ref_traj_data) > 0 and len(ref_traj_data[0]) > 0:
+                self.ref_trajectory = ref_traj_data
+
+        self.known_params = None
+        if "known_params" in data:
+            kp = data["known_params"]
+            if len(kp) > 0:
+                self.known_params = kp
+
+        self.solve_time = None
+        if "solve_time" in data:
+            st = data["solve_time"]
+            if len(st) > 0:
+                self.solve_time = np.asarray(st, dtype=float)
+
+        self.d_ctrl = None
+        if "d_ctrl" in data:
+            dctrl_data = data["d_ctrl"]
+            if len(dctrl_data) > 0:
+                self.d_ctrl = dctrl_data
+
+        if self.n_params_to_show is None:
+            self.n_params_to_show = [x for x in range(len(self.params))]
+
+        self.mu_est = None
+        if "mu_est" in data:
+            me = data["mu_est"]
+            if len(me) > 0:
+                me_clean = np.array(
+                    [np.nan if v is None else v for v in me], dtype=float
+                )
+            self.mu_est = me_clean if np.any(np.isfinite(me_clean)) else None
+
+    def load_ref_data(self):
+        self.ref_x = None
+        self.ref_y = None
+
+        if self.ref_filepath and os.path.exists(self.ref_filepath):
+            try:
+                ref_data = np.load(self.ref_filepath, allow_pickle=True)
+                self.ref_x = ref_data['x']
+                self.ref_y = ref_data['y']
+            except Exception as e:
+                print(f"Warning: Failed to load reference trajectory from {self.ref_filepath}: {e}")
+
+    def prepare_rollouts(self):
+        raw = self._raw
+        files = set(getattr(raw, "files", []))
+
+        if "lla_dynamic_trajectory" in files:
+            self.lla_traj = np.asarray(raw["lla_dynamic_trajectory"], dtype=float)
+            if "lla_optimal_params" in files:
+                self.lla_params_over_time = np.asarray(raw["lla_optimal_params"], dtype=float)
+            if "lla_one_step_trajectory" in files:
+                self.lla_one_step_traj = np.asarray(raw["lla_one_step_trajectory"], dtype=float)
+        elif self.compute_rollouts and _ROLLOUT_OK and "params" in files and self.rollout_total > 0:
+            logged = np.asarray(raw["params"])
+            lla_total = min(self.rollout_total, len(logged))
+            lla_params = remap_to_bank_order(logged[:lla_total], self.log_order)
+            self.lla_params_over_time = lla_params
+
+            kp_slice = None
+            if self.known_params is not None:
+                kp_slice = self.known_params[:lla_total]
+
+            self.lla_traj = simulate_lla_rollout(
+                lla_total, self.recording, lla_params, self.params_car,
+                self.dt, self.ol_reset_interval, full_open_loop=self.full_open_loop,
+                known_params_over_time=kp_slice
+            )
+            self.lla_one_step_traj = simulate_lla_one_step(
+                lla_total, self.recording, lla_params, self.params_car, self.dt,
+                known_params_over_time=kp_slice
+            )
+
+        if (self.lla_traj is not None and self.lla_one_step_traj is None
+                and self.lla_params_over_time is not None
+                and self.compute_rollouts and _ROLLOUT_OK):
+            lla_total = len(self.lla_traj)
+            kp_slice = (self.known_params[:lla_total]
+                        if self.known_params is not None else None)
+            self.lla_one_step_traj = simulate_lla_one_step(
+                lla_total, self.recording, self.lla_params_over_time,
+                self.params_car, self.dt, known_params_over_time=kp_slice
+            )
+
+        if "traj_open_loop" in files and "model_names" in files:
+            names = [str(n) for n in raw["model_names"]]
+            ol = np.asarray(raw["traj_open_loop"], dtype=float)
+            os_arr = (np.asarray(raw["traj_one_step"], dtype=float)
+                      if "traj_one_step" in files else ol)
+            for i, name in enumerate(names):
+                self.general_trajs[name] = {"open_loop": ol[i], "one_step": os_arr[i]}
+                self.general_order.append(name)
+        elif self.compute_rollouts and _ROLLOUT_OK and self.general_models and self.rollout_total > 0:
+            names = list(self.general_models.keys())
+            bank = np.stack([dict_to_bank_vec(self.general_models[n]) for n in names])
+            kp_slice = (self.known_params[:self.rollout_total]
+                        if self.known_params is not None else None)
+            ol, os_arr = simulate_general_models(
+                self.rollout_total, self.recording, bank, self.params_car,
+                self.dt, self.ol_reset_interval, self.cost_weights,
+                full_open_loop=self.full_open_loop,
+                known_params_over_time=kp_slice
+            )
+            for i, name in enumerate(names):
+                self.general_trajs[name] = {"open_loop": ol[:, i, :], "one_step": os_arr[:, i, :]}
+                self.general_order.append(name)
+
+        lens = []
+        if self.lla_traj is not None:
+            lens.append(len(self.lla_traj))
+        for name in self.general_order:
+            lens.append(len(self.general_trajs[name]["open_loop"]))
+        self.rollout_len = min(lens) if lens else 0
+
+        if (self.compute_rollouts and not _ROLLOUT_OK
+                and self.lla_traj is None and not self.general_trajs):
+            print(f"[visualizer] Rollout backend unavailable ({_ROLLOUT_ERR}); "
+                  f"showing recorded trajectory only.")
+
+        self._compute_cost_curves()
+        self._compute_m_step_curves()
+        self._compute_mpc_error_curve()
+
+    def _step_cost_components(self, traj):
+        T = min(len(traj), self.rollout_len)
+        tr = np.asarray(traj[:T], dtype=float)
+        truth = np.asarray(self.state[:T], dtype=float)
+        w = np.asarray(self.cost_form, dtype=float)
+        err = truth - tr
+        err[:, 2] = (err[:, 2] + np.pi) % (2 * np.pi) - np.pi
+        return (err ** 2) * w[None, :]
+
+    def _sliding_window(self, step_cost):
+        P = max(1, int(self.window_P))
+        step_cost = np.asarray(step_cost, dtype=float)
+        csum = np.concatenate([np.zeros((1,) + step_cost.shape[1:]),
+                                np.cumsum(step_cost, axis=0)], axis=0)
+        idx = np.arange(len(step_cost))
+        lo = np.maximum(0, idx - P + 1)
+        return csum[idx + 1] - csum[lo]
+
+    def _combine_active(self, component_curves):
+        mask = np.asarray(self.active_cost_dims, dtype=float)
+        if not np.any(mask):
+            return np.zeros(component_curves.shape[0])
+        return component_curves @ mask
+
+    def _compute_cost_curves(self):
+        self.cost_time = None
+        self.lla_cost_components = {}
+        self.gen_cost_components = {}
+        self.lla_onestep_components = None
+        self.gen_onestep_components = {}
+        if self.rollout_len == 0:
+            return
+
+        T = self.rollout_len
+        self.cost_time = np.asarray(self.time[:T], dtype=float)
+
+        if self.lla_traj is not None:
+            self.lla_cost_components['open_loop'] = self._sliding_window(
+                self._step_cost_components(self.lla_traj))
+        if self.lla_one_step_traj is not None:
+            self.lla_cost_components['one_step'] = self._sliding_window(
+                self._step_cost_components(self.lla_one_step_traj))
+            self.lla_onestep_components = self._step_cost_components(self.lla_one_step_traj)
+
+        for name in self.general_order:
+            self.gen_cost_components[name] = {
+                mode: self._sliding_window(
+                    self._step_cost_components(self.general_trajs[name][mode]))
+                for mode in ("open_loop", "one_step")
+            }
+            self.gen_onestep_components[name] = self._step_cost_components(
+                self.general_trajs[name]['one_step'])
+
+    def _compute_m_step_curves(self):
+        self.lla_m_step_components = {}
+        self.gen_m_step_components = {}
+        if not self.compute_m_step or self.rollout_len == 0:
+            return
+        if not _ROLLOUT_OK:
+            print("[m-step] rollout backend unavailable; skipping M-step lookahead.")
+            return
+
+        T = self.rollout_len
+        M = self.m_step_M
+        modes = ("open_loop", "one_step")
+
+        if self.lla_params_over_time is not None:
+            kp_slice = (self.known_params[:T]
+                        if self.known_params is not None else None)
+            for mode in modes:
+                comp = simulate_lla_m_step(
+                    T, self.recording, self.lla_params_over_time, self.params_car,
+                    self.dt, M, self.cost_form, mode, self.ol_reset_interval,
+                    full_open_loop=self.full_open_loop,
+                    known_params_over_time=kp_slice)
+                self.lla_m_step_components[mode] = comp[:T]
+
+        names = [n for n in self.general_order if n in self.general_models]
+        if names:
+            bank = np.stack([dict_to_bank_vec(self.general_models[n]) for n in names])
+            kp_slice = (self.known_params[:T]
+                        if self.known_params is not None else None)
+            for mode in modes:
+                comp = simulate_general_m_step(
+                    T, self.recording, bank, self.params_car,
+                    self.dt, M, self.cost_form, mode, self.ol_reset_interval,
+                    full_open_loop=self.full_open_loop,
+                    known_params_over_time=kp_slice
+                )
+                for i, name in enumerate(names):
+                    self.gen_m_step_components.setdefault(name, {})[mode] = comp[:T, i, :]
+
+        self._has_m_step = bool(self.lla_m_step_components or self.gen_m_step_components)
+
+    def _extract_first_ref_node(self):
+        if self.ref_trajectory is None:
+            return None
+
+        T = min(self.n_frames, len(self.ref_trajectory))
+        if T == 0:
+            return None
+
+        first_nodes = np.zeros((T, 6), dtype=float)
+        for t in range(T):
+            seg = self.ref_trajectory[t]
+            if seg is None or len(seg) == 0:
+                first_nodes[t] = np.nan
+                continue
+            pts = self._as_points(seg)
+            row = np.asarray(pts[0], dtype=float)
+            n = min(6, row.shape[0])
+            first_nodes[t, :n] = row[:n]
+        return first_nodes
+
+    def _compute_mpc_error_curve(self):
+        self.mpc_error_time = None
+        self.mpc_error_cumulative = None
+        self.mpc_error_valid = None
+        self.mpc_ctrl_dim = 0
+        self.mpc_last_ctrl_dim = 0
+
+        ref_first = self._extract_first_ref_node()
+        if ref_first is None:
+            return
+
+        T = len(ref_first)
+
+        valid = np.zeros(T, dtype=bool)
+        ctrl_dim = 0
+        if self.d_ctrl is not None:
+            for t in range(min(T, len(self.d_ctrl))):
+                dc = self.d_ctrl[t]
+                dc = np.atleast_1d(dc) if dc is not None else np.array([])
+                if dc.size > 0:
+                    valid[t] = True
+                    ctrl_dim = max(ctrl_dim, dc.size)
+        else:
+            print("[mpc-error] no d_ctrl logged; can't exclude pure-pursuit "
+                  "frames, so all frames are treated as valid.")
+            valid[:] = True
+
+        self.mpc_ctrl_dim = ctrl_dim
+        n_dims = 6 + ctrl_dim
+
+        last_ctrl_dim = int(self.ctrl.shape[1]) if self.ctrl is not None else 0
+
+        state_w = (self._mpc_state_weights_init
+                  if self._mpc_state_weights_init is not None
+                  else np.array([1.0, 1.0, 0.0, 0.0, 0.0, 0.0]))
+        if ctrl_dim > 0:
+            ctrl_w = (self._mpc_ctrl_weights_init
+                     if self._mpc_ctrl_weights_init is not None
+                     else np.ones(ctrl_dim))
+            ctrl_w = np.resize(np.asarray(ctrl_w, dtype=float), ctrl_dim)
+        else:
+            ctrl_w = np.zeros(0)
+        if last_ctrl_dim > 0:
+            last_ctrl_w = (self._mpc_last_ctrl_weights_init
+                          if self._mpc_last_ctrl_weights_init is not None
+                          else np.ones(last_ctrl_dim))
+            last_ctrl_w = np.resize(np.asarray(last_ctrl_w, dtype=float), last_ctrl_dim)
+        else:
+            last_ctrl_w = np.zeros(0)
+
+        self.mpc_last_ctrl_dim = last_ctrl_dim
+        self.mpc_cost_form = np.concatenate(
+            [np.asarray(state_w, dtype=float), ctrl_w, last_ctrl_w])
+        self.active_mpc_cost_dims = [bool(w != 0) for w in self.mpc_cost_form]
+
+        last_ctrl_labels = (['accel', 'steer'] if last_ctrl_dim == 2
+                            else [f"last_u{i}" for i in range(last_ctrl_dim)])
+        self.mpc_dim_labels = (list(COST_DIM_LABELS)
+                               + [f"u{i}" for i in range(ctrl_dim)]
+                               + last_ctrl_labels)
+
+        truth = np.asarray(self.state[:T], dtype=float)
+        err_state = ref_first - truth
+        err_state[:, 2] = (err_state[:, 2] + np.pi) % (2 * np.pi) - np.pi
+        state_components = err_state ** 2
+
+        if ctrl_dim > 0:
+            ctrl_components = np.zeros((T, ctrl_dim), dtype=float)
+            if self.d_ctrl is not None:
+                for t in range(min(T, len(self.d_ctrl))):
+                    if not valid[t]:
+                        continue
+                    dc = np.atleast_1d(np.asarray(self.d_ctrl[t], dtype=float))
+                    n = min(ctrl_dim, dc.shape[0])
+                    ctrl_components[t, :n] = dc[:n] ** 2
+        else:
+            ctrl_components = np.zeros((T, 0), dtype=float)
+
+        if last_ctrl_dim > 0:
+            last_ctrl_components = np.asarray(self.ctrl[:T], dtype=float) ** 2
+        else:
+            last_ctrl_components = np.zeros((T, 0), dtype=float)
+
+        components = np.concatenate(
+            [state_components, ctrl_components, last_ctrl_components], axis=1)
+        weighted = components * self.mpc_cost_form[None, :]
+        weighted[~valid] = 0.0
+
+        self.mpc_error_time = np.asarray(self.time[:T], dtype=float)
+        self.mpc_error_cumulative = np.cumsum(weighted, axis=0)
+        self.mpc_error_valid = valid
+
+    def _mpc_error_curve(self):
+        if self.mpc_error_cumulative is None:
+            return None
+        mask = np.asarray(self.active_mpc_cost_dims, dtype=float)
+        if not np.any(mask):
+            return np.zeros(self.mpc_error_cumulative.shape[0])
+        return self.mpc_error_cumulative @ mask
+
+    @staticmethod
+    def _shade_excluded_regions(ax, valid, times, color='gray', alpha=0.15,
+                                label='Pure pursuit (excluded)'):
+        if valid is None or times is None or len(valid) == 0:
+            return
+        n = len(valid)
+        i = 0
+        first = True
+        while i < n:
+            if not valid[i]:
+                j = i
+                while j < n and not valid[j]:
+                    j += 1
+                t0 = times[i]
+                t1 = times[min(j, n - 1)]
+                ax.axvspan(t0, t1, color=color, alpha=alpha, zorder=0,
+                          label=label if first else None)
+                first = False
+                i = j
+            else:
+                i += 1
+
+    def _iter_limit_trajs(self):
+        if self.lla_traj is not None:
+            yield self.lla_traj
+        for name in self.general_order:
+            yield self.general_trajs[name]["one_step"]
+
+    def _active_lla_traj(self):
+        if self.model_mode == 'one_step' and self.lla_one_step_traj is not None:
+            return self.lla_one_step_traj
+        return self.lla_traj
+
+    def _lla_cost_curve(self):
+        comp = self.lla_cost_components.get(self.model_mode)
+        if comp is None:
+            return None
+        return self._combine_active(comp)
+
+    def _gen_cost_curve(self, name):
+        comp = self.gen_cost_components[name][self.model_mode]
+        return self._combine_active(comp)
+
+    def _lla_onestep_curve(self):
+        if self.lla_onestep_components is None:
+            return None
+        return self._combine_active(self.lla_onestep_components)
+
+    def _gen_onestep_curve(self, name):
+        return self._combine_active(self.gen_onestep_components[name])
+
+    def _lla_m_step_curve(self):
+        comp = self.lla_m_step_components.get(self.model_mode)
+        if comp is None:
+            return None
+        return self._combine_active(comp)
+
+    def _gen_m_step_curve(self, name):
+        modes = self.gen_m_step_components.get(name)
+        if not modes or self.model_mode not in modes:
+            return None
+        return self._combine_active(modes[self.model_mode])
+
+    def setup_figure(self):
+        n_param_cols = int(np.ceil(len(self.n_params_to_show) / self.params_per_column))
+        n_param_rows = min(self.params_per_column, len(self.n_params_to_show))
+
+        n_extra_rows = 1 if self.mu_est is not None else 0
+        self.fig = plt.figure(figsize=(8 + n_param_cols * 4,
+                                       max(9, 4 + (n_param_rows + n_extra_rows) * 1.8)))
+
+        n_extra_rows = 1 if self.mu_est is not None else 0
+        gs = self.fig.add_gridspec(
+            n_param_rows + n_extra_rows, 1 + n_param_cols,
+            left=0.08, right=0.96, bottom=0.30, top=0.95,
+            wspace=0.35, hspace=0.4,
+            width_ratios=[1.8] + [1] * n_param_cols
+        )
+
+        self.ax = self.fig.add_subplot(gs[:, 0])
+
+        min_x, max_x = self.x.min(), self.x.max()
+        min_y, max_y = self.y.min(), self.y.max()
+
+        if self.ref_x is not None and self.ref_y is not None:
+            min_x = min(min_x, self.ref_x.min())
+            max_x = max(max_x, self.ref_x.max())
+            min_y = min(min_y, self.ref_y.min())
+            max_y = max(max_y, self.ref_y.max())
+
+        for p_obs, r_obs in self.obstacles:
+            reach = r_obs + self.r_car
+            min_x = min(min_x, p_obs[0] - reach)
+            max_x = max(max_x, p_obs[0] + reach)
+            min_y = min(min_y, p_obs[1] - reach)
+            max_y = max(max_y, p_obs[1] + reach)
+
+        for traj in self._iter_limit_trajs():
+            if traj is None or len(traj) == 0:
+                continue
+            min_x = min(min_x, float(np.min(traj[:, 0])))
+            max_x = max(max_x, float(np.max(traj[:, 0])))
+            min_y = min(min_y, float(np.min(traj[:, 1])))
+            max_y = max(max_y, float(np.max(traj[:, 1])))
+
+        margin = max(1.0, 0.1 * max(max_x - min_x, max_y - min_y))
+        self.ax.set_xlim(min_x - margin, max_x + margin)
+        self.ax.set_ylim(min_y - margin, max_y + margin)
+        self.ax.set_xlabel('X Position', fontsize=10)
+        self.ax.set_ylabel('Y Position', fontsize=10)
+        self.ax.set_aspect('equal', adjustable='box')
+        self.ax.grid(True, alpha=0.3)
+        self.ax.set_title('Trajectory', fontsize=12, fontweight='bold')
+
+        self.ax_params = []
+        for count in range(len(self.n_params_to_show)):
+            col = count // self.params_per_column
+            row = count % self.params_per_column
+            ax_p = self.fig.add_subplot(gs[row, col + 1])
+            self.ax_params.append(ax_p)
+
+            idx = self.n_params_to_show[count]
+            if self.param_names and idx in self.param_names:
+                param_label = self.param_names[idx]
+            else:
+                param_label = f'Param {idx}'
+
+            ax_p.set_xlabel('Time (s)', fontsize=9)
+            ax_p.set_ylabel(param_label, fontsize=9)
+            ax_p.grid(True, alpha=0.3)
+            ax_p.tick_params(labelsize=8)
+
+            param_data = self.params[idx]
+            ax_p.plot(self.time, param_data, 'b-', linewidth=1.5, alpha=0.8)
+            ax_p.set_xlim(self.time[0], self.time[-1])
+
+            param_range = np.ptp(param_data)
+            if param_range > 0:
+                margin = 0.1 * param_range
+                ax_p.set_ylim(param_data.min() - margin, param_data.max() + margin)
+            else:
+                ax_p.set_ylim(param_data.min() - 0.1, param_data.max() + 0.1)
+
+        self.ax_mu = None
+        self.mu_vline = None
+        self.mu_point = None
+        if self.mu_est is not None:
+            finite_mu = self.mu_est[np.isfinite(self.mu_est)]
+            if finite_mu.size == 0:
+                self.mu_est = None
+            else:
+                self.ax_mu = self.fig.add_subplot(gs[n_param_rows, 1:])
+
+                t = self.time[:len(self.mu_est)]
+                self.ax_mu.plot(t, self.mu_est, '-', color='teal',
+                                linewidth=1.5, alpha=0.9)
+                self.ax_mu.set_xlabel('Time (s)', fontsize=9)
+                self.ax_mu.set_ylabel('mu_est', fontsize=9)
+                self.ax_mu.grid(True, alpha=0.3)
+                self.ax_mu.tick_params(labelsize=8)
+                if len(t) > 1:
+                    self.ax_mu.set_xlim(t[0], t[-1])
+
+                mr = np.ptp(finite_mu)
+                if mr > 0:
+                    m = 0.1 * mr
+                    self.ax_mu.set_ylim(finite_mu.min() - m, finite_mu.max() + m)
+                else:
+                    self.ax_mu.set_ylim(finite_mu.min() - 0.1, finite_mu.max() + 0.1)
+
+    def setup_cost_figure(self):
+        have_m = self._has_m_step
+        have_mpc_err = self.mpc_error_cumulative is not None
+        n_rows = 2 + int(have_m) + int(have_mpc_err)
+
+        self.fig_diag = plt.figure(figsize=(11, 6 + 2.2 * n_rows))
+        try:
+            self.fig_diag.canvas.manager.set_window_title('Cost / lookahead diagnostics')
+        except Exception:
+            pass
+
+        gs = self.fig_diag.add_gridspec(
+            n_rows, 1, left=0.08, right=0.80, top=0.95, bottom=0.07, hspace=0.45
+        )
+        self.ax_cost = self.fig_diag.add_subplot(gs[0])
+        self.ax_onestep = self.fig_diag.add_subplot(gs[1], sharex=self.ax_cost)
+
+        next_row = 2
+        self.ax_mstep = None
+        if have_m:
+            self.ax_mstep = self.fig_diag.add_subplot(gs[next_row], sharex=self.ax_cost)
+            next_row += 1
+
+        self.ax_mpc_error = None
+        if have_mpc_err:
+            self.ax_mpc_error = self.fig_diag.add_subplot(gs[next_row], sharex=self.ax_cost)
+            next_row += 1
+
+        self.ax_cost.set_title(f'Sliding-window model cost (P={self.window_P})',
+                               fontsize=10, fontweight='bold', loc='left')
+        self.ax_cost.set_ylabel('Windowed cost', fontsize=9)
+        self.ax_cost.grid(True, alpha=0.3)
+        self.ax_cost.tick_params(labelsize=8)
+
+        self.ax_onestep.set_title('One-step prediction difference (per step)',
+                                  fontsize=10, fontweight='bold', loc='left')
+        self.ax_onestep.set_ylabel('Per-step cost', fontsize=9)
+        self.ax_onestep.grid(True, alpha=0.3)
+        self.ax_onestep.tick_params(labelsize=8)
+
+        if self.ax_mstep is not None:
+            self.ax_mstep.set_title(
+                f'M-step lookahead error (M={self.m_step_M}, mode-aware)',
+                fontsize=10, fontweight='bold', loc='left')
+            self.ax_mstep.set_ylabel('Horizon cost', fontsize=9)
+            self.ax_mstep.grid(True, alpha=0.3)
+            self.ax_mstep.tick_params(labelsize=8)
+
+        if self.ax_mpc_error is not None:
+            self.ax_mpc_error.set_title(
+                'Accumulated MPC error: actual state vs. reference (NMPC solves only)',
+                fontsize=10, fontweight='bold', loc='left')
+            self.ax_mpc_error.set_ylabel('Cumulative error', fontsize=9)
+            self.ax_mpc_error.grid(True, alpha=0.3)
+            self.ax_mpc_error.tick_params(labelsize=8)
+
+        bottom_ax = self.ax_mpc_error if self.ax_mpc_error is not None else \
+            (self.ax_mstep if self.ax_mstep is not None else self.ax_onestep)
+        bottom_ax.set_xlabel('Time (s)', fontsize=9)
+
+        if self.cost_time is not None and len(self.cost_time) > 1:
+            self.ax_cost.set_xlim(self.cost_time[0], self.cost_time[-1])
+
+        self.ax_cost_dims = self.fig_diag.add_axes([0.82, 0.55, 0.16, 0.28])
+        self.ax_cost_dims.set_title('Cost terms', fontsize=8, fontweight='bold')
+        self.ax_cost_dims.axis('off')
+
+        self.ax_mpc_cost_dims = None
+        if have_mpc_err:
+            self.ax_mpc_cost_dims = self.fig_diag.add_axes([0.82, 0.15, 0.16, 0.28])
+            self.ax_mpc_cost_dims.set_title('MPC-error terms', fontsize=8, fontweight='bold')
+            self.ax_mpc_cost_dims.axis('off')
+
+    def setup_artists(self):
+        if self.ref_x is not None and self.ref_y is not None:
+            self.ax.plot(self.ref_x, self.ref_y, 'k--', alpha=0.4, linewidth=1.5, label='Raceline', zorder=1)
+
+        for p_obs, r_obs in self.obstacles:
+            obs_circle = Circle(
+                (p_obs[0], p_obs[1]), r_obs,
+                facecolor='red', edgecolor='darkred',
+                alpha=0.25, linewidth=1.5, zorder=1
+            )
+            self.ax.add_patch(obs_circle)
+
+            keepout_circle = Circle(
+                (p_obs[0], p_obs[1]), r_obs + self.r_car,
+                facecolor='none', edgecolor='red',
+                linestyle='--', alpha=0.6, linewidth=1.2, zorder=1
+            )
+            self.ax.add_patch(keepout_circle)
+
+        self.trail, = self.ax.plot([], [], 'b-', alpha=0.3, linewidth=1, label='Trajectory', zorder=2)
+
+        self.rollout_line,   = self.ax.plot([], [], 'm--', alpha=0.5, linewidth=1.5, zorder=3)
+        self.rollout_points, = self.ax.plot([], [], 'mo',  markersize=5, alpha=0.9,  zorder=4)
+
+        self.ref_traj_line,   = self.ax.plot([], [], 'g--', alpha=0.5, linewidth=1.5, zorder=3)
+        self.ref_traj_points, = self.ax.plot([], [], 'g^',  markersize=5, alpha=0.9,  zorder=4)
+
+        self.point, = self.ax.plot([], [], 'ko', markersize=10, label='Position', zorder=5)
+        self.heading_line, = self.ax.plot([], [], 'k-', linewidth=2, zorder=4)
+
+        self.x_vel_arrow = None
+        self.y_vel_arrow = None
+        self.accel_arrow = None
+
+        self.rollout_yaw_arrows = []
+        self.ref_traj_yaw_arrows = []
+
+        self.lla_trail = None
+        self.lla_point = None
+        self.lla_heading = None
+        self.model_artists = {}
+
+        legend_elements = []
+
+        if self.ref_x is not None:
+            legend_elements.append(Line2D([0], [0], color='black', linestyle='--', lw=1.5, alpha=0.4, label='Reference'))
+
+        if self.obstacles:
+            legend_elements.append(Patch(facecolor='red', edgecolor='darkred', alpha=0.25, label='Obstacle'))
+            legend_elements.append(Line2D([0], [0], color='red', linestyle='--', lw=1.2, alpha=0.6,
+                                          label='Keep-out (r_obs+r_car)'))
+
+        if self.ref_trajectory is not None:
+            legend_elements.append(Line2D([0], [0], color='g', linestyle='--', marker='^',
+                                          markersize=5, lw=1.5, label='Ref Trajectory'))
+
+        if self.mpc_rollout is not None:
+            legend_elements.append(Line2D([0], [0], color='m', linestyle='--', marker='o',
+                                          markersize=5, lw=1.5, label='MPC Rollout'))
+
+        if self.lla_traj is not None:
+            self.lla_trail, = self.ax.plot([], [], '-', color='orange', alpha=0.55,
+                                           linewidth=1.8, zorder=3)
+            self.lla_point, = self.ax.plot([], [], 'o', color='orange', mec='k',
+                                           markersize=9, zorder=6)
+            self.lla_heading, = self.ax.plot([], [], '-', color='orange',
+                                             linewidth=2, zorder=6)
+            legend_elements.append(Line2D([0], [0], color='orange', marker='o', lw=1.8,
+                                          label='LLA (per-step params)'))
+
+        cmap = plt.get_cmap('tab10')
+        for i, name in enumerate(self.general_order):
+            color = cmap(i % 10)
+            trail, = self.ax.plot([], [], '-', color=color, alpha=0.45, linewidth=1.3, zorder=2)
+            point, = self.ax.plot([], [], 's', color=color, mec='k', markersize=7, zorder=5)
+            heading, = self.ax.plot([], [], '-', color=color, linewidth=2, zorder=5)
+            self.model_artists[name] = {"trail": trail, "point": point,
+                                        "color": color, "heading": heading}
+            legend_elements.append(Line2D([0], [0], color=color, marker='s', lw=1.3, label=str(name)))
+
+        self.window_true, = self.ax.plot([], [], 'o-', color='navy', markersize=4,
+                                          linewidth=2.0, alpha=0.9, zorder=4)
+        self.window_lla = None
+        if self.lla_traj is not None:
+            self.window_lla, = self.ax.plot([], [], 'o-', color='orange', markersize=4,
+                                            linewidth=2.2, alpha=1.0, zorder=7)
+        self.window_models = {}
+        for name in self.general_order:
+            color = self.model_artists[name]["color"]
+            art, = self.ax.plot([], [], 'o-', color=color, markersize=4,
+                                linewidth=2.0, alpha=1.0, zorder=6)
+            self.window_models[name] = art
+
+        legend_elements.append(Line2D([0], [0], color='navy', marker='o', lw=2.0,
+                                      label=f'Eval window (last {self.window_P})'))
+
+        legend_elements.extend([
+            Line2D([0], [0], color='black', lw=2, label='Heading (Yaw)'),
+            Patch(facecolor='blue', alpha=0.7, label='X Velocity'),
+            Patch(facecolor='green', alpha=0.7, label='Y Velocity'),
+            Patch(facecolor='red', alpha=0.7, label='Acceleration')
+        ])
+
+        self.ax.legend(handles=legend_elements, loc='upper right', fontsize=8)
+
+        self.info_text = self.fig.text(
+            0.01, 0.99, '', verticalalignment='top',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.9),
+            fontsize=9, family='monospace'
+        )
+
+        self.param_vlines = []
+        self.param_points = []
+        for idx, ax_p in enumerate(self.ax_params):
+            vline = ax_p.axvline(x=0, color='red', linestyle='--',
+                                 linewidth=1.5, alpha=0.7, zorder=3)
+            self.param_vlines.append(vline)
+
+            point, = ax_p.plot([], [], 'ro', markersize=6, zorder=4)
+            self.param_points.append(point)
+
+        self._setup_cost_artists()
+
+        if getattr(self, "ax_mu", None) is not None:
+            self.mu_vline = self.ax_mu.axvline(x=0, color='red', linestyle='--',
+                                               linewidth=1.5, alpha=0.7, zorder=3)
+            self.mu_point, = self.ax_mu.plot([], [], 'ro', markersize=6, zorder=4)
+
+    def _setup_cost_artists(self):
+        self.cost_line_lla = None
+        self.cost_dot_lla = None
+        self.cost_lines_gen = {}
+        self.cost_dots_gen = {}
+        self.os_line_lla = None
+        self.os_dot_lla = None
+        self.os_lines_gen = {}
+        self.os_dots_gen = {}
+        self.ms_line_lla = None
+        self.ms_dot_lla = None
+        self.ms_lines_gen = {}
+        self.ms_dots_gen = {}
+        self.mpc_error_line = None
+        self.mpc_error_dot = None
+
+        if self.lla_traj is not None:
+            self.cost_line_lla, = self.ax_cost.plot([], [], '-', color='orange',
+                                                    linewidth=1.6, label='LLA')
+            self.cost_dot_lla, = self.ax_cost.plot([], [], 'o', color='orange',
+                                                   mec='k', markersize=6, zorder=5)
+        if self.lla_one_step_traj is not None:
+            self.os_line_lla, = self.ax_onestep.plot([], [], '-', color='orange',
+                                                     linewidth=1.6, label='LLA')
+            self.os_dot_lla, = self.ax_onestep.plot([], [], 'o', color='orange',
+                                                    mec='k', markersize=6, zorder=5)
+
+        for name in self.general_order:
+            color = self.model_artists[name]["color"]
+            line, = self.ax_cost.plot([], [], '-', color=color, linewidth=1.4, label=str(name))
+            dot, = self.ax_cost.plot([], [], 's', color=color, mec='k', markersize=5, zorder=5)
+            self.cost_lines_gen[name] = line
+            self.cost_dots_gen[name] = dot
+
+            oline, = self.ax_onestep.plot([], [], '-', color=color, linewidth=1.4, label=str(name))
+            odot, = self.ax_onestep.plot([], [], 's', color=color, mec='k', markersize=5, zorder=5)
+            self.os_lines_gen[name] = oline
+            self.os_dots_gen[name] = odot
+
+        if getattr(self, "ax_mstep", None) is not None:
+            if self.lla_m_step_components:
+                self.ms_line_lla, = self.ax_mstep.plot([], [], '-', color='orange',
+                                                       linewidth=1.6, label='LLA')
+                self.ms_dot_lla, = self.ax_mstep.plot([], [], 'o', color='orange',
+                                                      mec='k', markersize=6, zorder=5)
+            for name in self.general_order:
+                if name not in self.gen_m_step_components:
+                    continue
+                color = self.model_artists[name]["color"]
+                mline, = self.ax_mstep.plot([], [], '-', color=color,
+                                            linewidth=1.4, label=str(name))
+                mdot, = self.ax_mstep.plot([], [], 's', color=color, mec='k',
+                                           markersize=5, zorder=5)
+                self.ms_lines_gen[name] = mline
+                self.ms_dots_gen[name] = mdot
+
+        if getattr(self, "ax_mpc_error", None) is not None and self.mpc_error_cumulative is not None:
+            self.mpc_error_line, = self.ax_mpc_error.plot(
+                [], [], '-', color='purple', linewidth=1.8, label='Actual state (NMPC only)')
+            self.mpc_error_dot, = self.ax_mpc_error.plot(
+                [], [], 'o', color='purple', mec='k', markersize=6, zorder=5)
+            self._shade_excluded_regions(
+                self.ax_mpc_error, self.mpc_error_valid, self.mpc_error_time)
+
+        self.cost_window_span = self.ax_onestep.axvspan(
+            0, 0, color='red', alpha=0.12, zorder=1, linewidth=0)
+
+        self.cost_cursor = self.ax_cost.axvline(x=0, color='red', linestyle='--',
+                                                linewidth=1.2, alpha=0.7, zorder=3)
+        self.onestep_cursor = self.ax_onestep.axvline(x=0, color='red', linestyle='--',
+                                                      linewidth=1.2, alpha=0.7, zorder=3)
+        self.mstep_cursor = None
+        if getattr(self, "ax_mstep", None) is not None:
+            self.mstep_cursor = self.ax_mstep.axvline(
+                x=0, color='red', linestyle='--', linewidth=1.2, alpha=0.7, zorder=3)
+        self.mpc_error_cursor = None
+        if getattr(self, "ax_mpc_error", None) is not None:
+            self.mpc_error_cursor = self.ax_mpc_error.axvline(
+                x=0, color='red', linestyle='--', linewidth=1.2, alpha=0.7, zorder=3)
+
+        if self.cost_line_lla is not None or self.cost_lines_gen:
+            ncol = min(4, 1 + len(self.general_order))
+            self.ax_cost.legend(loc='upper left', fontsize=7, ncol=ncol)
+            self.ax_onestep.legend(loc='upper left', fontsize=7, ncol=ncol)
+            if (getattr(self, "ax_mstep", None) is not None
+                    and (self.ms_line_lla is not None or self.ms_lines_gen)):
+                self.ax_mstep.legend(loc='upper left', fontsize=7, ncol=ncol)
+            if getattr(self, "ax_mpc_error", None) is not None and self.mpc_error_line is not None:
+                self.ax_mpc_error.legend(loc='upper left', fontsize=7)
+
+        self._setup_cost_dim_checkboxes()
+        self._setup_mpc_cost_dim_checkboxes()
+        self._refresh_cost_lines()
+
+    def _setup_cost_dim_checkboxes(self):
+        if getattr(self, "ax_cost_dims", None) is None:
+            self.cost_dim_checks = None
+            return
+        self.cost_dim_checks = CheckButtons(
+            self.ax_cost_dims, COST_DIM_LABELS, list(self.active_cost_dims)
+        )
+        for label in self.cost_dim_checks.labels:
+            label.set_fontsize(8)
+        self.cost_dim_checks.on_clicked(self.on_cost_dim_toggle)
+
+    def on_cost_dim_toggle(self, label):
+        i = COST_DIM_LABELS.index(label)
+        self.active_cost_dims[i] = not self.active_cost_dims[i]
+        self._refresh_cost_lines()
+        self._update_cost_cursor(self.current_frame)
+        if getattr(self, "fig_diag", None) is not None:
+            self.fig_diag.canvas.draw_idle()
+
+    def _setup_mpc_cost_dim_checkboxes(self):
+        if getattr(self, "ax_mpc_cost_dims", None) is None or self.mpc_dim_labels is None:
+            self.mpc_cost_dim_checks = None
+            return
+        self.mpc_cost_dim_checks = CheckButtons(
+            self.ax_mpc_cost_dims, self.mpc_dim_labels, list(self.active_mpc_cost_dims)
+        )
+        for label in self.mpc_cost_dim_checks.labels:
+            label.set_fontsize(8)
+        self.mpc_cost_dim_checks.on_clicked(self.on_mpc_cost_dim_toggle)
+
+    def on_mpc_cost_dim_toggle(self, label):
+        i = self.mpc_dim_labels.index(label)
+        self.active_mpc_cost_dims[i] = not self.active_mpc_cost_dims[i]
+        self._refresh_mpc_error_lines()
+        self._update_mpc_error_cursor(self.current_frame)
+        if getattr(self, "fig_diag", None) is not None:
+            self.fig_diag.canvas.draw_idle()
+
+    @staticmethod
+    def _autoscale_axis_y(ax, lines, pad_frac=0.08, floor_zero=True):
+        vals = []
+        for line in lines:
+            if line is None:
+                continue
+            y = np.asarray(line.get_ydata(), dtype=float)
+            if y.size == 0:
+                continue
+            y = y[np.isfinite(y)]
+            if y.size == 0:
+                continue
+            vals.append(y)
+
+        if not vals:
+            return
+
+        all_y = np.concatenate(vals)
+        ymin, ymax = float(all_y.min()), float(all_y.max())
+        if floor_zero:
+            ymin = min(ymin, 0.0)
+
+        span = ymax - ymin
+        if span <= 0:
+            pad = max(abs(ymax), 1.0) * pad_frac
+        else:
+            pad = span * pad_frac
+
+        ax.set_ylim(ymin - (0 if floor_zero else pad), ymax + pad)
+
+    def _refresh_cost_lines(self):
+        if getattr(self, "ax_cost", None) is None or self.cost_time is None:
+            return
+
+        if self.cost_line_lla is not None:
+            curve = self._lla_cost_curve()
+            if self.show_lla and curve is not None:
+                self.cost_line_lla.set_data(self.cost_time, curve)
+            else:
+                self.cost_line_lla.set_data([], [])
+        for name, line in self.cost_lines_gen.items():
+            if self.show_general:
+                line.set_data(self.cost_time, self._gen_cost_curve(name))
+            else:
+                line.set_data([], [])
+        self._autoscale_axis_y(
+            self.ax_cost,
+            [self.cost_line_lla, *self.cost_lines_gen.values()]
+        )
+
+        if self.os_line_lla is not None:
+            curve = self._lla_onestep_curve()
+            if self.show_lla and curve is not None:
+                self.os_line_lla.set_data(self.cost_time, curve)
+            else:
+                self.os_line_lla.set_data([], [])
+        for name, line in self.os_lines_gen.items():
+            if self.show_general:
+                line.set_data(self.cost_time, self._gen_onestep_curve(name))
+            else:
+                line.set_data([], [])
+        self._autoscale_axis_y(
+            self.ax_onestep,
+            [self.os_line_lla, *self.os_lines_gen.values()]
+        )
+
+        if getattr(self, "ax_mstep", None) is not None:
+            if self.ms_line_lla is not None:
+                curve = self._lla_m_step_curve()
+                if self.show_m_step and self.show_lla and curve is not None:
+                    self.ms_line_lla.set_data(self.cost_time, curve)
+                else:
+                    self.ms_line_lla.set_data([], [])
+            for name, line in self.ms_lines_gen.items():
+                curve = self._gen_m_step_curve(name)
+                if self.show_m_step and self.show_general and curve is not None:
+                    line.set_data(self.cost_time, curve)
+                else:
+                    line.set_data([], [])
+            self._autoscale_axis_y(
+                self.ax_mstep,
+                [self.ms_line_lla, *self.ms_lines_gen.values()]
+            )
+
+        self._refresh_mpc_error_lines()
+
+    def _refresh_mpc_error_lines(self):
+        if getattr(self, "ax_mpc_error", None) is None or self.mpc_error_time is None:
+            return
+        if self.mpc_error_line is None:
+            return
+
+        curve = self._mpc_error_curve()
+        if curve is not None:
+            self.mpc_error_line.set_data(self.mpc_error_time, curve)
+        else:
+            self.mpc_error_line.set_data([], [])
+        self._autoscale_axis_y(self.ax_mpc_error, [self.mpc_error_line])
+
+    def _update_cost_cursor(self, frame_idx):
+        if getattr(self, "ax_cost", None) is None or self.cost_time is None:
+            return
+        ridx = min(frame_idx, self.rollout_len - 1)
+        ct = float(self.time[ridx])
+
+        self.cost_cursor.set_xdata([ct, ct])
+
+        rs = max(0, ridx - self.window_P + 1)
+        t_start = float(self.time[rs])
+        self.cost_window_span.set_x(t_start)
+        self.cost_window_span.set_width(max(ct - t_start, 1e-9))
+
+        if self.cost_dot_lla is not None:
+            curve = self._lla_cost_curve()
+            if self.show_lla and curve is not None:
+                self.cost_dot_lla.set_data([ct], [curve[ridx]])
+            else:
+                self.cost_dot_lla.set_data([], [])
+        for name, dot in self.cost_dots_gen.items():
+            if self.show_general:
+                dot.set_data([ct], [self._gen_cost_curve(name)[ridx]])
+            else:
+                dot.set_data([], [])
+
+        self.onestep_cursor.set_xdata([ct, ct])
+        if self.os_dot_lla is not None:
+            curve = self._lla_onestep_curve()
+            if self.show_lla and curve is not None:
+                self.os_dot_lla.set_data([ct], [curve[ridx]])
+            else:
+                self.os_dot_lla.set_data([], [])
+        for name, dot in self.os_dots_gen.items():
+            if self.show_general:
+                dot.set_data([ct], [self._gen_onestep_curve(name)[ridx]])
+            else:
+                dot.set_data([], [])
+
+        if getattr(self, "ax_mstep", None) is not None and self.mstep_cursor is not None:
+            self.mstep_cursor.set_xdata([ct, ct])
+            if self.ms_dot_lla is not None:
+                curve = self._lla_m_step_curve()
+                if self.show_m_step and self.show_lla and curve is not None:
+                    self.ms_dot_lla.set_data([ct], [curve[ridx]])
+                else:
+                    self.ms_dot_lla.set_data([], [])
+            for name, dot in self.ms_dots_gen.items():
+                curve = self._gen_m_step_curve(name)
+                if self.show_m_step and self.show_general and curve is not None:
+                    dot.set_data([ct], [curve[ridx]])
+                else:
+                    dot.set_data([], [])
+
+        self._update_mpc_error_cursor(frame_idx)
+
+    def _update_mpc_error_cursor(self, frame_idx):
+        if getattr(self, "ax_mpc_error", None) is None or self.mpc_error_time is None:
+            return
+        ridx = min(frame_idx, len(self.mpc_error_time) - 1)
+        if ridx < 0:
+            return
+        ct = float(self.mpc_error_time[ridx])
+
+        if self.mpc_error_cursor is not None:
+            self.mpc_error_cursor.set_xdata([ct, ct])
+
+        if self.mpc_error_dot is not None:
+            curve = self._mpc_error_curve()
+            if curve is not None and ridx < len(curve):
+                self.mpc_error_dot.set_data([ct], [curve[ridx]])
+            else:
+                self.mpc_error_dot.set_data([], [])
+
+    @staticmethod
+    def _as_points(arr):
+        arr = np.asarray(arr, dtype=float)
+
+        if arr.ndim == 1:
+            return arr.reshape(1, -1)
+
+        if arr.ndim != 2:
+            raise ValueError(f"unexpected ref/rollout ndim={arr.ndim}")
+
+        rows, cols = arr.shape
+        state_widths = (2, 3)
+
+        if cols in state_widths:
+            return arr
+        if rows in state_widths:
+            return arr.T
+
+        return arr
+
+    def _clear_yaw_arrows(self, arrow_list):
+        for arrow in arrow_list:
+            if arrow in self.ax.patches:
+                arrow.remove()
+        arrow_list.clear()
+
+    def _draw_yaw_arrows(self, arr, color, arrow_list, yaw_len=0.15):
+        pts = self._as_points(arr)
+        if pts.shape[1] < 3:
+            return
+
+        xs, ys, yaws = pts[:, 0], pts[:, 1], pts[:, 2]
+
+        for x, y, yaw in zip(xs, ys, yaws):
+            if yaw == 0.0:
+                continue
+            arrow = FancyArrow(
+                x, y,
+                yaw_len * np.cos(yaw),
+                yaw_len * np.sin(yaw),
+                head_width=0.06, head_length=0.05,
+                fc=color, ec=color, alpha=0.8, zorder=5
+            )
+            self.ax.add_patch(arrow)
+            arrow_list.append(arrow)
+
+    def _extract_xy(self, arr):
+        pts = self._as_points(arr)
+        return pts[:, 0], pts[:, 1]
+
+    @staticmethod
+    def _break_segments(pts, idx_start, interval):
+        if len(pts) == 0:
+            return np.array([]), np.array([])
+        xs = np.asarray(pts[:, 0], dtype=float)
+        ys = np.asarray(pts[:, 1], dtype=float)
+        if not interval or interval <= 0:
+            return xs, ys
+        out_x, out_y = [], []
+        for i in range(len(xs)):
+            if i > 0 and (idx_start + i) % interval == 0:
+                out_x.append(np.nan)
+                out_y.append(np.nan)
+            out_x.append(xs[i])
+            out_y.append(ys[i])
+        return np.asarray(out_x), np.asarray(out_y)
+
+    def _lla_interval(self):
+        if self.model_mode == 'one_step':
+            return None
+        return None if self.full_open_loop else self.ol_reset_interval
+
+    def _gen_interval(self):
+        if self.model_mode == "one_step":
+            return None
+        return None if self.full_open_loop else self.ol_reset_interval
+
+    def _set_heading_bar(self, art, x, y, theta, length=0.5):
+        art.set_data([x, x + length * np.cos(theta)],
+                     [y, y + length * np.sin(theta)])
+
+    def _update_model_overlays(self, frame_idx):
+        if self.rollout_len == 0:
+            if self.lla_point is not None:
+                self.lla_trail.set_data([], [])
+                self.lla_point.set_data([], [])
+                if self.lla_heading is not None:
+                    self.lla_heading.set_data([], [])
+            for a in self.model_artists.values():
+                a["trail"].set_data([], [])
+                a["point"].set_data([], [])
+                a["heading"].set_data([], [])
+            return
+
+        ridx = min(frame_idx, self.rollout_len - 1)
+
+        if self.lla_traj is not None:
+            traj = self._active_lla_traj()
+            if self.show_lla and traj is not None:
+                r = min(ridx, len(traj) - 1)
+                xs, ys = self._break_segments(traj[:r + 1], 0, self._lla_interval())
+                self.lla_trail.set_data(xs, ys)
+                self.lla_point.set_data([traj[r, 0]], [traj[r, 1]])
+                if self.lla_heading is not None:
+                    self._set_heading_bar(self.lla_heading,
+                                          traj[r, 0], traj[r, 1], traj[r, 2])
+            else:
+                self.lla_trail.set_data([], [])
+                self.lla_point.set_data([], [])
+                if self.lla_heading is not None:
+                    self.lla_heading.set_data([], [])
+
+        for name, a in self.model_artists.items():
+            if self.show_general:
+                traj = self.general_trajs[name][self.model_mode]
+                r = min(ridx, len(traj) - 1)
+                xs, ys = self._break_segments(traj[:r + 1], 0, self._gen_interval())
+                a["trail"].set_data(xs, ys)
+                a["point"].set_data([traj[r, 0]], [traj[r, 1]])
+                self._set_heading_bar(a["heading"], traj[r, 0], traj[r, 1], traj[r, 2])
+            else:
+                a["trail"].set_data([], [])
+                a["point"].set_data([], [])
+                a["heading"].set_data([], [])
+
+    def _update_window_overlays(self, frame_idx):
+        P = self.window_P
+
+        start = max(0, frame_idx - P + 1)
+        self.window_true.set_data(self.x[start:frame_idx + 1], self.y[start:frame_idx + 1])
+
+        if self.rollout_len == 0:
+            if self.window_lla is not None:
+                self.window_lla.set_data([], [])
+            for art in self.window_models.values():
+                art.set_data([], [])
+            return
+
+        ridx = min(frame_idx, self.rollout_len - 1)
+
+        if self.lla_traj is not None and self.window_lla is not None:
+            traj = self._active_lla_traj()
+            if self.show_lla and traj is not None:
+                r = min(ridx, len(traj) - 1)
+                rs = max(0, r - P + 1)
+                xs, ys = self._break_segments(traj[rs:r + 1], rs, self._lla_interval())
+                self.window_lla.set_data(xs, ys)
+            else:
+                self.window_lla.set_data([], [])
+
+        for name, art in self.window_models.items():
+            if self.show_general:
+                traj = self.general_trajs[name][self.model_mode]
+                r = min(ridx, len(traj) - 1)
+                rs = max(0, r - P + 1)
+                xs, ys = self._break_segments(traj[rs:r + 1], rs, self._gen_interval())
+                art.set_data(xs, ys)
+            else:
+                art.set_data([], [])
+
+    def _maybe_expand_trajectory_view(self):
+        xs_all, ys_all = [], []
+
+        for art in (self.lla_trail, self.lla_point, self.window_lla):
+            if art is None:
+                continue
+            xd = np.asarray(art.get_xdata(), dtype=float)
+            yd = np.asarray(art.get_ydata(), dtype=float)
+            mask = np.isfinite(xd) & np.isfinite(yd)
+            if mask.any():
+                xs_all.append(xd[mask])
+                ys_all.append(yd[mask])
+
+        for a in self.model_artists.values():
+            for art in (a["trail"], a["point"]):
+                xd = np.asarray(art.get_xdata(), dtype=float)
+                yd = np.asarray(art.get_ydata(), dtype=float)
+                mask = np.isfinite(xd) & np.isfinite(yd)
+                if mask.any():
+                    xs_all.append(xd[mask])
+                    ys_all.append(yd[mask])
+
+        if not xs_all:
+            return
+
+        data_xmin = float(np.min(np.concatenate(xs_all)))
+        data_xmax = float(np.max(np.concatenate(xs_all)))
+        data_ymin = float(np.min(np.concatenate(ys_all)))
+        data_ymax = float(np.max(np.concatenate(ys_all)))
+
+        cur_xmin, cur_xmax = self.ax.get_xlim()
+        cur_ymin, cur_ymax = self.ax.get_ylim()
+
+        pad = max(0.5, 0.1 * max(data_xmax - data_xmin, data_ymax - data_ymin, 1.0))
+
+        new_xmin = min(cur_xmin, data_xmin - pad)
+        new_xmax = max(cur_xmax, data_xmax + pad)
+        new_ymin = min(cur_ymin, data_ymin - pad)
+        new_ymax = max(cur_ymax, data_ymax + pad)
+
+        if (new_xmin, new_xmax, new_ymin, new_ymax) != (cur_xmin, cur_xmax, cur_ymin, cur_ymax):
+            self.ax.set_xlim(new_xmin, new_xmax)
+            self.ax.set_ylim(new_ymin, new_ymax)
+
+    def update_frame(self, frame_idx):
+        frame_idx = int(frame_idx)
+        self.current_frame = frame_idx
+
+        self.trail.set_data(self.x[:frame_idx + 1], self.y[:frame_idx + 1])
+        self.point.set_data([self.x[frame_idx]], [self.y[frame_idx]])
+
+        self._update_model_overlays(frame_idx)
+        self._maybe_expand_trajectory_view()
+        self._update_window_overlays(frame_idx)
+
+        self._clear_yaw_arrows(self.rollout_yaw_arrows)
+        if self.show_rollout and self.mpc_rollout is not None and frame_idx < len(self.mpc_rollout):
+            current_rollout = self.mpc_rollout[frame_idx]
+            if len(current_rollout) > 0:
+                xs, ys = self._extract_xy(current_rollout)
+                self.rollout_line.set_data(xs, ys)
+                self.rollout_points.set_data(xs, ys)
+                self._draw_yaw_arrows(current_rollout, 'magenta', self.rollout_yaw_arrows)
+            else:
+                self.rollout_line.set_data([], [])
+                self.rollout_points.set_data([], [])
+        else:
+            self.rollout_line.set_data([], [])
+            self.rollout_points.set_data([], [])
+
+        self._clear_yaw_arrows(self.ref_traj_yaw_arrows)
+        if self.ref_trajectory is not None and frame_idx < len(self.ref_trajectory):
+            current_ref_traj = self.ref_trajectory[frame_idx]
+            if len(current_ref_traj) > 0:
+                xs, ys = self._extract_xy(current_ref_traj)
+                self.ref_traj_line.set_data(xs, ys)
+                self.ref_traj_points.set_data(xs, ys)
+                self._draw_yaw_arrows(current_ref_traj, 'lime', self.ref_traj_yaw_arrows)
+            else:
+                self.ref_traj_line.set_data([], [])
+                self.ref_traj_points.set_data([], [])
+        else:
+            self.ref_traj_line.set_data([], [])
+            self.ref_traj_points.set_data([], [])
+
+        line_length = 0.5
+        end_x = self.x[frame_idx] + line_length * np.cos(self.theta[frame_idx])
+        end_y = self.y[frame_idx] + line_length * np.sin(self.theta[frame_idx])
+        self.heading_line.set_data([self.x[frame_idx], end_x], [self.y[frame_idx], end_y])
+
+        if self.x_vel_arrow and self.x_vel_arrow in self.ax.patches:
+            self.x_vel_arrow.remove()
+        if self.y_vel_arrow and self.y_vel_arrow in self.ax.patches:
+            self.y_vel_arrow.remove()
+        if self.accel_arrow and self.accel_arrow in self.ax.patches:
+            self.accel_arrow.remove()
+
+        dx_arrow = self.dx[frame_idx] * np.cos(self.theta[frame_idx])
+        dy_arrow = self.dx[frame_idx] * np.sin(self.theta[frame_idx])
+        if self.show_velocity and abs(self.dx[frame_idx]) > 0.01:
+            self.x_vel_arrow = FancyArrow(
+                self.x[frame_idx], self.y[frame_idx],
+                dx_arrow, dy_arrow,
+                head_width=0.15, head_length=0.1,
+                fc='blue', ec='blue', alpha=0.7, zorder=3
+            )
+            self.ax.add_patch(self.x_vel_arrow)
+
+        if self.show_velocity and abs(self.dy[frame_idx]) > 0.01:
+            self.y_vel_arrow = FancyArrow(
+                self.x[frame_idx], self.y[frame_idx],
+                self.dy[frame_idx] * -np.sin(self.theta[frame_idx]),
+                self.dy[frame_idx] * np.cos(self.theta[frame_idx]),
+                head_width=0.1, head_length=0.08,
+                fc='green', ec='green', alpha=0.7, zorder=3
+            )
+            self.ax.add_patch(self.y_vel_arrow)
+
+        if self.show_velocity and abs(self.accel[frame_idx]) > 0.01:
+            self.accel_arrow = FancyArrow(
+                self.x[frame_idx], self.y[frame_idx],
+                self.accel[frame_idx] * np.cos(self.theta[frame_idx]),
+                self.accel[frame_idx] * np.sin(self.theta[frame_idx]),
+                head_width=0.1, head_length=0.08,
+                fc='red', ec='red', alpha=0.7, zorder=3
+            )
+            self.ax.add_patch(self.accel_arrow)
+
+        solve_time_str = "n/a"
+        if self.solve_time is not None and frame_idx < len(self.solve_time):
+            solve_time_str = f"{self.solve_time[frame_idx]:.2f} ms"
+
+        known_str = "n/a"
+        if self.known_params is not None and frame_idx < len(self.known_params):
+            kp = self.known_params[frame_idx]
+            if kp is not None:
+                kp_arr = np.atleast_1d(np.asarray(kp, dtype=float))
+                if kp_arr.size > 0:
+                    known_str = ", ".join(f"{v:.3f}" for v in kp_arr)
+
+        time_str = f"Time: {self.time[frame_idx]:.3f}s"
+        info = (f"Frame: {frame_idx}/{self.n_frames-1}\n{time_str}\n"
+                f"\u03b8: {self.theta[frame_idx]:.3f} rad\n"
+                f"vx: {self.dx[frame_idx]:.3f} m/s\n"
+                f"vy: {self.dy[frame_idx]:.3f} m/s\n"
+                f"\u03c9: {self.omega[frame_idx]:.3f} rad/s\n"
+                f"accel: {self.accel[frame_idx]:.3f}\n"
+                f"steer: {self.steer[frame_idx]:.3f}\n"
+                f"solve: {solve_time_str}\n"
+                f"known: {known_str}\n"
+                f"Model: {self.model_idx[frame_idx]}")
+        self.info_text.set_text(info)
+
+        current_time = self.time[frame_idx]
+
+        for vline in self.param_vlines:
+            if vline in vline.axes.lines:
+                vline.remove()
+        self.param_vlines = []
+
+        for idx, (ax_p, point) in enumerate(zip(self.ax_params, self.param_points)):
+            vline = ax_p.axvline(x=current_time, color='red', linestyle='--',
+                                 linewidth=1.5, alpha=0.7, zorder=3)
+            self.param_vlines.append(vline)
+
+            param_val = self.params[idx][frame_idx]
+            point.set_data([current_time], [param_val])
+
+        if getattr(self, "ax_mu", None) is not None and self.mu_est is not None:
+            self.mu_vline.set_xdata([current_time, current_time])
+            if frame_idx < len(self.mu_est):
+                self.mu_point.set_data([current_time], [self.mu_est[frame_idx]])
+            else:
+                self.mu_point.set_data([], [])
+
+        self._update_cost_cursor(frame_idx)
+
+        self.fig.canvas.draw_idle()
+        if getattr(self, "fig_diag", None) is not None:
+            self.fig_diag.canvas.draw_idle()
+
+    def setup_controls(self):
+        plt.figure(self.fig.number)
+        bottom_margin = 0.08
+
+        ax_slider = plt.axes([0.2, bottom_margin + 0.02, 0.6, 0.02])
+        self.slider = Slider(
+            ax_slider, 'Frame', 0, self.n_frames - 1,
+            valinit=0, valstep=1, valfmt='%d'
+        )
+        self.slider.on_changed(self.on_slider_change)
+
+        ax_play = plt.axes([0.25, bottom_margin - 0.03, 0.08, 0.03])
+        self.btn_play = Button(ax_play, 'Play')
+        self.btn_play.on_clicked(self.toggle_play)
+
+        ax_reset = plt.axes([0.35, bottom_margin - 0.03, 0.08, 0.03])
+        self.btn_reset = Button(ax_reset, 'Reset')
+        self.btn_reset.on_clicked(self.reset)
+
+        ax_rollout = plt.axes([0.69, bottom_margin - 0.03, 0.12, 0.03])
+        self.btn_rollout = Button(ax_rollout, 'Rollout: ON')
+        self.btn_rollout.on_clicked(self.toggle_rollout)
+        self.show_rollout = True
+
+        ax_vel = plt.axes([0.52, bottom_margin - 0.03, 0.13, 0.03])
+        self.btn_velocity = Button(ax_vel, 'Velocity: ON')
+        self.btn_velocity.on_clicked(self.toggle_velocity)
+
+        ax_lla = plt.axes([0.83, bottom_margin - 0.03, 0.13, 0.03])
+        self.btn_lla = Button(ax_lla, 'LLA: ON')
+        self.btn_lla.on_clicked(self.toggle_lla)
+
+        ax_general = plt.axes([0.69, bottom_margin - 0.07, 0.12, 0.03])
+        self.btn_general = Button(ax_general, 'Others: ON')
+        self.btn_general.on_clicked(self.toggle_general)
+
+        ax_mode = plt.axes([0.83, bottom_margin - 0.07, 0.13, 0.03])
+        mode_label = 'Gen: OL' if self.model_mode == 'open_loop' else 'Gen: 1-step'
+        self.btn_mode = Button(ax_mode, mode_label)
+        self.btn_mode.on_clicked(self.toggle_mode)
+
+        if self._has_m_step:
+            ax_mstep_btn = plt.axes([0.55, bottom_margin - 0.07, 0.12, 0.03])
+            self.btn_m_step = Button(ax_mstep_btn, 'M-step: ON')
+            self.btn_m_step.on_clicked(self.toggle_m_step)
+
+        self.timer = self.fig.canvas.new_timer(interval=50)
+        self.timer.add_callback(self.animate_step)
+
+    def on_slider_change(self, val):
+        self.update_frame(val)
+
+    def toggle_velocity(self, event):
+        self.show_velocity = not self.show_velocity
+        self.btn_velocity.label.set_text(
+            'Velocity: ON' if self.show_velocity else 'Velocity: OFF')
+        self.update_frame(self.current_frame)
+
+    def toggle_play(self, event):
+        self.playing = not self.playing
+        if self.playing:
+            self.btn_play.label.set_text('Pause')
+            self.timer.start()
+        else:
+            self.btn_play.label.set_text('Play')
+            self.timer.stop()
+
+    def toggle_rollout(self, event):
+        self.show_rollout = not self.show_rollout
+        label = 'Rollout: ON' if self.show_rollout else 'Rollout: OFF'
+        self.btn_rollout.label.set_text(label)
+        if not self.show_rollout:
+            self.rollout_line.set_data([], [])
+            self.rollout_points.set_data([], [])
+            self._clear_yaw_arrows(self.rollout_yaw_arrows)
+        self.update_frame(self.current_frame)
+
+    def toggle_lla(self, event):
+        self.show_lla = not self.show_lla
+        self.btn_lla.label.set_text('LLA: ON' if self.show_lla else 'LLA: OFF')
+        self._refresh_cost_lines()
+        self.update_frame(self.current_frame)
+
+    def toggle_general(self, event):
+        self.show_general = not self.show_general
+        self.btn_general.label.set_text('Others: ON' if self.show_general else 'Others: OFF')
+        self._refresh_cost_lines()
+        self.update_frame(self.current_frame)
+
+    def toggle_mode(self, event):
+        self.model_mode = 'one_step' if self.model_mode == 'open_loop' else 'open_loop'
+        label = 'Mode: 1-step' if self.model_mode == 'one_step' else 'Mode: OL'
+        self.btn_mode.label.set_text(label)
+        self._refresh_cost_lines()
+        self.update_frame(self.current_frame)
+
+    def toggle_m_step(self, event):
+        self.show_m_step = not self.show_m_step
+        self.btn_m_step.label.set_text(
+            'M-step: ON' if self.show_m_step else 'M-step: OFF')
+        self._refresh_cost_lines()
+        self.update_frame(self.current_frame)
+
+    def animate_step(self):
+        if self.playing:
+            next_frame = self.current_frame + 1
+            if next_frame >= self.n_frames:
+                next_frame = 0
+            self.slider.set_val(next_frame)
+
+    def reset(self, event):
+        self.playing = False
+        self.btn_play.label.set_text('Play')
+        self.timer.stop()
+        self.slider.set_val(0)
+
+    def show(self):
+        self.update_frame(0)
+        plt.show()
+
+
+def _parse_args():
+    dir_path = os.path.dirname(os.path.abspath(__file__))
+    default_ref = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_turnfastbank.npz')
+
+    parser = argparse.ArgumentParser(
+        description="Interactive state-trajectory visualizer."
+    )
+    parser.add_argument(
+        "filepath",
+        nargs="?",
+        default=os.path.join(dir_path, 'newllaovalplastic3noadapt.npz'),
+        help="Path to the recorded trajectory .npz file to visualize "
+             "(default: nomovalrubber4nonadapt.npz next to this script).",
+    )
+    parser.add_argument(
+        "--ref",
+        "--ref-filepath",
+        dest="ref_filepath",
+        default=default_ref,
+        help="Path to the reference raceline .npz file "
+             "(default: tracks/mocap_square2fast.npz relative to this script's parent dir). "
+             "Pass an empty string to disable.",
+    )
+    args = parser.parse_args()
+    return args
+
+def main():
+    """Main entry point."""
+    args = _parse_args()
+    filepath = args.filepath
+    ref_filepath = args.ref_filepath or None
+
+    if not os.path.exists(filepath):
+        dir_path = os.path.dirname(os.path.abspath(__file__))
+        candidate = os.path.join(dir_path, filepath)
+        if os.path.exists(candidate):
+            filepath = candidate
+        else:
+            raise FileNotFoundError(
+                f"Trajectory file not found: {filepath} "
+                f"(also checked {candidate})"
+            )
+
+    param_names = {
+        0: 'Cf',
+        1: 'Cr',
+        2: 'muf',
+        3: 'mur',
+        4: 'Cro',
+    }
+
+    obstacles = []
+
+    # obstacles = [
+    #     (np.array([1.75, -1.0]), 0.75),
+    #     # (np.array([-1, 1.7]), 0.5),
+    #     (np.array([0.5, 0.5]), 0.5)
+    # ]
+    r_car = 0.04
+
+
+    general_models = {
+    "nominal": {
+        'Cf': 250,
+        'Cr': 225,
+        'muf': 0.6,
+        'mur': 0.6,
+        'Cro': 0.0,
+    },
+        # rank 1  |  model index 842  |  selected 252x (14.9%)
+        # rank 1  |  model index 842  |  selected 252x (14.9%)
+    # "model_842": {
+    #     'Cf': 225.000000,  # std=0.0000
+    #     'Cr': 225.000000,  # std=0.0000
+    #     'muf': 0.266667,  # std=0.0000
+    #     'mur': 0.266667,  # std=0.0000
+    #     'Cro': 0.000000,  # std=0.0000
+    # },
+    # # rank 2  |  model index 9  |  selected 217x (12.8%)
+    # "model_9": {
+    #     'Cf': 175.000000,  # std=0.0000
+    #     'Cr': 150.000000,  # std=0.0000
+    #     'muf': 0.266667,  # std=0.0000
+    #     'mur': 0.266667,  # std=0.0000
+    #     'Cro': 0.000000,  # std=0.0000
+    # },
+    # # rank 3  |  model index 310  |  selected 141x (8.3%)
+    # "model_310": {
+    #     'Cf': 175.000000,  # std=0.0000
+    #     'Cr': 300.000000,  # std=0.0000
+    #     'muf': 0.433333,  # std=0.0000
+    #     'mur': 0.266667,  # std=0.0000
+    #     'Cro': 0.000000,  # std=0.0000
+    # },
+    # # rank 4  |  model index 303  |  selected 109x (6.4%)
+    # "model_303": {
+    #     'Cf': 175.000000,  # std=0.0000
+    #     'Cr': 300.000000,  # std=0.0000
+    #     'muf': 0.266667,  # std=0.0000
+    #     'mur': 0.266667,  # std=0.0000
+    #     'Cro': 0.000000,  # std=0.0000
+    # },
+    # # rank 5  |  model index 1724  |  selected 102x (6.0%)
+    # "model_1724": {
+    #     'Cf': 300.000000,  # std=0.0000
+    #     'Cr': 150.000000,  # std=0.0000
+    #     'muf': 0.266667,  # std=0.0000
+    #     'mur': 0.266667,  # std=0.0000
+    #     'Cro': 0.000000,  # std=0.0000
+    # },
+
+
+
+    }
+
+
+    visualizer = StateVisualizer(
+        filepath,
+        ref_filepath=ref_filepath,
+        n_params_to_show=range(5),
+        params_per_column=5,
+        param_names=param_names,
+        obstacles=obstacles,
+        r_car=r_car,
+        general_models=general_models,
+        compute_rollouts=True,
+        dt=1.0 / 25.0,
+        ol_reset_interval=4,
+        full_open_loop=False,
+        window_P=40,
+        cost_form=np.array([10.0, 10.0, 20.0, 1.0, 10.0, 0.1]),
+        compute_m_step=False,    # set False to skip the slow M-step computation
+        m_step_M=10,
+        # Weights for the accumulated-MPC-error graph: actual state vs.
+        # reference node 0 (x, y, theta, vx, vy, omega), NMPC solves only.
+        mpc_state_weights=np.array([40.0, 40.0, 0.0, 10.0, 0.0, 0.0]),
+        # Weight per control-rate channel in d_ctrl (e.g. [slew_rate,
+        # steer_vel]); defaults to 1.0 each if left as None.
+        mpc_ctrl_weights=[0, 0.1],
+        # Weight per actual-applied-control channel (accel, steer); defaults
+        # to 1.0 each if left as None.
+        mpc_last_ctrl_weights=[0.01, 0.1],
+    )
+    visualizer.show()
+
+
+if __name__ == "__main__":
+    main()

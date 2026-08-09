@@ -51,15 +51,29 @@ private:
   // conversion gain and offset
   double speed_to_erpm_gain_, speed_to_erpm_offset_;
   double steering_to_servo_gain_, steering_to_servo_offset_;
+  double duty_cycle_min_;
+  double duty_cycle_max_;
+  double current_min_;
+  double current_max_;
 
-  /** @todo consider also providing an interpolated look-up table conversion */
-
-  // ROS services
+  // ROS publishers
   rclcpp::Publisher<Float64>::SharedPtr erpm_pub_;
   rclcpp::Publisher<Float64>::SharedPtr servo_pub_;
+  
+  /** * @brief New publisher for Duty Cycle (PWM) 
+   * Used when jerk flag is detected in the Ackermann message
+   */
+  rclcpp::Publisher<Float64>::SharedPtr duty_cycle_pub_;
+  rclcpp::Publisher<Float64>::SharedPtr current_pub_;
+
+  // ROS subscription
   rclcpp::Subscription<AckermannDriveStamped>::SharedPtr ackermann_sub_;
 
   // ROS callbacks
+  /**
+   * @brief Callback for incoming Ackermann commands
+   * Switches between ERPM and Duty Cycle based on the 'jerk' field
+   */
   void ackermannCmdCallback(const AckermannDriveStamped::SharedPtr cmd);
 };
 

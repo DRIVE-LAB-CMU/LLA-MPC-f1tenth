@@ -19,7 +19,7 @@ from llampc.params import F110
 from llampc.rollout.rk6 import rk6Factory
 import jax
 
-OL_reset_interval = 10
+OL_reset_interval = 40
 
 # Create a custom logger
 logger = logging.getLogger("BatchOptimization")
@@ -65,7 +65,7 @@ def simulate_batched_trajectories(total, recording, all_best_params, params_car,
         all_best_params[:, 4], all_best_params[:, 5], # Df, Dr
         np.full(num_models, fixed_params['Cro']), 
         np.full(num_models, fixed_params['Cd']),
-        all_best_params[:, 6], all_best_params[:, 7], # Ce, Cm
+        all_best_params[:, 6], np.full(num_models, fixed_params['Cm']), # Ce, Cm
         0, 0, num_models 
     )
 
@@ -120,7 +120,7 @@ def simulate_dynamic_rollout(total, recording, optimal_params_over_time, params_
         optimal_params_over_time[:, 4], optimal_params_over_time[:, 5],
         np.full(num_steps, fixed_params['Cro']), 
         np.full(num_steps, fixed_params['Cd']),
-        optimal_params_over_time[:, 6], optimal_params_over_time[:, 7],
+        optimal_params_over_time[:, 6], np.full(num_steps, fixed_params['Cm']),
         0, 0, num_steps 
     )
     
@@ -263,7 +263,7 @@ def main():
     # --- CONFIGURATION FLAGS ---
     lla = True          # Enable dynamic parameters over time
     multi_step = True   # Enable multi-step window if LLA is False
-    full_open_loop_sim = True  # <-- NEW FLAG: Set to True for full uninterrupted open-loop simulation
+    full_open_loop_sim = False # <-- NEW FLAG: Set to True for full uninterrupted open-loop simulation
     
     setup_logger(lla, multi_step)
 
@@ -278,12 +278,12 @@ def main():
         'Cr': [1.1, 1.9],
         'Df': [0.1, 2.0 * mass * g],
         'Dr': [0.1, 2.0 * mass * g],
-        'Ce': [0.0, 1.0],
-        'Cm': [0, 1.0/10]
+        'Ce': [0.0, 20.0],
+        
     }
 
-    fixed_params = {'Cro': 0.0, 'Cd': 0.0}
-    discretization = 8
+    fixed_params = {'Cro': 0.0, 'Cd': 0.0, 'Cm': 0}
+    discretization = 5
     
     param_series = {k: np.linspace(v[0], v[1], discretization + 1, dtype=np.float32) for k, v in params_range.items()}
     num_total_models = (discretization + 1) ** len(params_range)
@@ -294,7 +294,7 @@ def main():
     grid_iterator = itertools.product(*param_series.values())
 
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(dir_path, 'run_visualizer', 'rec_nsh3.npz')
+    filepath = os.path.join(dir_path, 'run_visualizer', 'sysid_trimmed.npz')
 
     recording = np.load(filepath, allow_pickle=True)
     total = len(recording["time"]) - 1  # -1 to protect ok_time[t+1]
@@ -323,7 +323,7 @@ def main():
             batch_params[:, 0], batch_params[:, 1], batch_params[:, 2], batch_params[:, 3],
             batch_params[:, 4], batch_params[:, 5], 
             np.full(current_batch_count, fixed_params['Cro']), np.full(current_batch_count, fixed_params['Cd']),
-            batch_params[:, 6], batch_params[:, 7], 
+            batch_params[:, 6], np.full(current_batch_count, fixed_params['Cm']), 
             0, 0, current_batch_count
         )
 
@@ -334,9 +334,9 @@ def main():
         # ROUTING LOGIC based on flags
         cost_form = np.array([10.0, 10.0, 10, 10.0, 0.0, 0.0])
         if lla:
-            N = OL_reset_interval
+            N = 10
             lb_history = history.LBHistory(
-                current_batch_count, 20, 1/40, cost_form,
+                current_batch_count, 80, 1/40, cost_form,
                 6, rk6Factory, db_batch, dynamics.diffequation, buffer_size=[0, 0]
             )
             
@@ -403,7 +403,7 @@ def main():
     if lla:
         logger.info("Comparing costs across all batches to build global optimal parameter sequence...")
         
-        global_optimal_params_over_time = np.zeros((total, 8))
+        global_optimal_params_over_time = np.zeros((total, 7))
         global_optimal_costs_over_time = np.zeros(total)
         all_batches_costs_arr = np.array(all_batches_costs) 
         
@@ -440,7 +440,7 @@ def main():
     all_traj_open_loop_list = [d["traj_open_loop"] for d in batch_best_trajectories]
     all_traj_one_step_list = [d["traj_one_step"] for d in batch_best_trajectories]
     
-    save_path = os.path.join("llampc", "utils", "run_visualizer", "traj_nsht_ol.npz")
+    save_path = os.path.join("llampc", "utils", "run_visualizer", "sysid_ol2.npz")
     save_data = {
         "batch": batches,
         "params": all_params,

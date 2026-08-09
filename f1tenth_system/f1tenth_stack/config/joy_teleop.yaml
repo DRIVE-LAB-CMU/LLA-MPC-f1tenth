@@ -8,41 +8,34 @@ joy:
 
 joy_teleop:
   ros__parameters:
+    # 0 STATE (Stop): Active when holding 4. 
+    # Because it's Priority 10 in Mux, it blocks the MPC.
     default:
       type: topic
       interface_type: ackermann_msgs/msg/AckermannDriveStamped
-      topic_name: teleop
-      deadman_buttons: [3]
+      topic_name: safety
+      deadman_axes: [4]
       axis_mappings:
-        drive-speed:
-          axis: 2
-          scale: 0.0
-          offset: 0.0
-        drive-steering_angle:
-          axis: 3
-          scale: 0.0
-          offset: 0.0
+        drive-speed: {axis: 1, scale: 0.0, offset: 0.0}
+        drive-steering_angle: {axis: 2, scale: 0.0, offset: 0.0}
 
+    # HUMAN CONTROL: Active when holding 6. 
+    # Also blocks the MPC.
     human_control:
       type: topic
       interface_type: ackermann_msgs/msg/AckermannDriveStamped
       topic_name: teleop
       deadman_buttons: [6]
       axis_mappings:
-        drive-speed:
-          axis: 1
-          scale: 5.0
-          offset: 0.0
-        drive-steering_angle:
-          axis: 2
-          scale: 0.34
-          offset: 0.0
+        drive-speed: {axis: 1, scale: 5.0, offset: 0.0}
+        drive-steering_angle: {axis: 2, scale: 0.34, offset: 0.0}
 
+    # MPC ENABLE: Button 7. 
+    # By sending this to /dev/null, /teleop becomes SILENT.
+    # When /teleop is silent, the Mux finally lets the MPC (/drive) through.
     autonomous_control:
       type: topic
       interface_type: std_msgs/msg/Int8
       topic_name: /dev/null
       deadman_buttons: [7]
-      message_value:
-        data:
-          value: 0
+      message_value: {data: {value: 0}}

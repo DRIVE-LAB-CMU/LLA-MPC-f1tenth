@@ -15,13 +15,26 @@ class Track:
 
     def __init__(self, file_name):
         file_path = os.path.join(os.path.dirname(__file__), 'tracks', file_name)
-        raceline = np.load(file_path)
+        raceline = np.load(file_path, allow_pickle=True)
         n_samples = raceline['x'].size
-        self._load_raceline(
+        print(list(raceline.keys()))
+
+        if not 'vs' in list(raceline.keys()):
+            self._load_raceline(
                 wx=raceline['x'],
                 wy=raceline['y'],
                 n_samples=n_samples,
                 v=raceline['speed'],
+            )
+
+        else:
+            self._load_raceline(
+                wx=raceline['x'],
+                wy=raceline['y'],
+                n_samples=n_samples,
+                v=raceline['speed'],
+                vs = raceline["vs"],
+                mus = raceline["mus"]
             )
 
 
@@ -29,14 +42,11 @@ class Track:
         """	load raceline and fit cubic splines
         """
         x, y, theta = self._fit_cubic_splines(
-            wx=wx, 
-            wy=wy, 
+            wx=wx,
+            wy=wy,
             n_samples=n_samples
             )
-        # theta = np.cumsum(np.linalg.norm(np.diff(np.array([x,y])), 2, axis=0))
-        # theta = np.concatenate([np.array([0]), theta])
         self.spline = Spline2D(wx, wy)
-        # print(wx,wy)
         x, y = wx, wy
         theta = self.spline.s
 
@@ -44,19 +54,24 @@ class Track:
         self.y_raceline = np.array(y)
         self.raceline = np.array([x, y])
 
-        if vs is not None :
+        # Always defined, so callers can test for them without try/getattr.
+        # spline_v is the per-mu bank (adaptive planning only); spline_v_single
+        # is the single speed profile every track has.
+        self.v = None
+        self.v_raceline = None
+        self.mus = None
+        self.spline_v = None
+        self.spline_v_single = None
+
+        if vs is not None:
             self.v_raceline = vs
             self.mus = mus
-            # self.t_raceline = t
-            self.spline_v = []
-            for vi in vs :
-                # print(len(vi))
-                # print(len(theta))
-                self.spline_v.append(Spline(theta, vi))
+            self.spline_v = [Spline(theta, vi) for vi in vs]
+            self.v = v
+
         elif v is not None:
-            self.v_raceline = v
-            # self.t_raceline = t
-            self.spline_v = Spline(theta, v)
+            self.v = np.asarray(v)
+            self.spline_v_single = Spline(theta, self.v)
 
     def _fit_cubic_splines(self, wx, wy, n_samples):
         """	fit cubic splines on waypoints
@@ -104,10 +119,48 @@ class Track:
         for idl in range(n_waypoints-1):
             line = [raceline[:,idl], raceline[:,idl+1]]
             proj[:,idl], dist[idl] = Projection(point, line)
-        optidx = np.argmin(dist)
+        optidx = np.nanargmin(dist)
         optxy = proj[:,optidx]
         
         # print(f"new xy: {optxy}")
+        return optxy, optidx
+
+
+    def project_fast_vectorized(self, x, y, raceline):
+        """ Finds projection for (x,y) on a raceline using pure vectorization.
+        """
+        # Origin points (A) and destination points (B) for all segments
+        A = raceline[:, :-1]  # Shape: (2, n_waypoints - 1)
+        B = raceline[:, 1:]   # Shape: (2, n_waypoints - 1)
+        
+        # Target point P reshaped for broadcasting
+        P = np.array([[x], [y]])  # Shape: (2, 1)
+        
+        # Vectors
+        AB = B - A  # Vector from A to B
+        AP = P - A  # Vector from A to P
+        
+        # Project AP onto AB using dot products (sum along axis 0)
+        # t represents the fraction along the segment where the projection lands
+        num = np.sum(AP * AB, axis=0)
+        denom = np.sum(AB * AB, axis=0)
+        
+        # Avoid division by zero if two sequential waypoints are identical
+        denom = np.where(denom == 0, 1e-6, denom)
+        
+        # Clamp t to [0.0, 1.0] to ensure the projection stays ON the segment
+        t = np.clip(num / denom, 0.0, 1.0)
+        
+        # Compute the actual projection coordinates for all segments
+        all_proj = A + t * AB  # Shape: (2, n_waypoints - 1)
+        
+        # Compute squared distances from P to all projection points
+        dists_sq = np.sum((P - all_proj) ** 2, axis=0)
+        
+        # Find the segment with the minimum distance
+        optidx = np.argmin(dists_sq)
+        optxy = all_proj[:, optidx]
+        
         return optxy, optidx
     
     def plot_raceline(self):

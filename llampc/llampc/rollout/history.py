@@ -21,8 +21,9 @@ gpu = jax.devices("cpu")[0]
 
 @jax.jit
 def get_lookback_error(last_predicted_states, x_t, cost_weights):
-    cost = jnp.sum(jnp.square(x_t[None, :] - last_predicted_states) * cost_weights[None, :], axis = 1)
-    
+    error = x_t[None, :] - last_predicted_states
+    error = error.at[:, 2].set((error[:, 2] + jnp.pi) % (2 * jnp.pi) - jnp.pi)
+    cost = jnp.sum(jnp.square(error) * cost_weights[None, :], axis=1)
 
     return cost
 
@@ -39,6 +40,7 @@ def _step_bank(last_predicted_states, cost_history, running_cost, queue_index, x
     best_model = jnp.argmin(running_cost)
 
 
+
     return cost, cost_history, running_cost, best_model
 
 @jax.jit
@@ -48,7 +50,8 @@ def find_best_model(running_cost):
 
 class LBHistory:
 
-    def __init__(self, num_models, history_length, dt, cost_weights, state_size, integrator_factory, dynamics_bank, diffeq,
+    def __init__(self, num_models, history_length, dt, 
+                 cost_weights, state_size, integrator_factory, dynamics_bank, diffeq,
                  buffer_size = None, control_size = 2):
         self.num_models = num_models
         self.history_length = history_length
@@ -121,6 +124,7 @@ class LBHistory:
         t0 = time.perf_counter_ns()
         gpu_x = jax.device_put(jnp.array(x_t, dtype = 'float32'), device = gpu)
         t1 = time.perf_counter_ns()
+
         cost, self.cost_history, self.running_cost, self.current_best_model = _step_bank(
             self.last_predicted_states,
             self.cost_history,
@@ -129,6 +133,7 @@ class LBHistory:
             gpu_x,
             self.cost_weights
         )
+        print(self.current_best_model)
         # Advance queue_index
         self.queue_index = (self.queue_index + 1) % self.history_length
         t2 = time.perf_counter_ns()

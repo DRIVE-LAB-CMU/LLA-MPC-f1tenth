@@ -57,12 +57,25 @@ ament_python_install_package(${PROJECT_NAME})
 
 # Install Python executables
 install(PROGRAMS
-  scripts/llampc_node.py
+  scripts/llampc_pwm.py
   scripts/particle_filter_init.py
   scripts/step_response_test.py
   scripts/lla_manual.py
-  scripts/imu_zupt_prep.py      # <--- ADD THIS LINE
+  scripts/imu_zupt_prep.py
   scripts/test_accel.py
+  scripts/vesc_safety_bridge.py
+  scripts/optitrack_node.py
+  scripts/llampc_node.py
+  scripts/llampc_node_ipopt.py
+  scripts/llampc_cbf.py
+  scripts/dfz_observer.py
+  scripts/drive_relay.py
+  scripts/desktop_ping.py
+  scripts/car_pong.py
+  scripts/llampc_pid.py
+  scripts/llampc_fiala.py
+  scripts/multi_llampc_fiala.py
+  scripts/llampc_fiala_fixed.py
   DESTINATION lib/${PROJECT_NAME}
 )
 if(BUILD_TESTING)
@@ -75,7 +88,5 @@ if(BUILD_TESTING)
   #set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
-
-
 
 ament_package()

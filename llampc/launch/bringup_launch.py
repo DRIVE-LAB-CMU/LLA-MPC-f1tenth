@@ -59,8 +59,6 @@ def generate_launch_description():
             ('/set_pose', '/initialpose') # <--- Routes RViz directly into the EKF's reset switch
         ]
     )
-
-
     # =================================================================
     # 3. Return the LaunchDescription
     # =================================================================

@@ -331,7 +331,7 @@ def main():
     
     # Just pass in your interval here (e.g., 50 means a reset every 50 frames)
     # visualizer = GridSearchVisualizer(os.path.join(dir_path, 'rec_circle.npz'), os.path.join(dir_path, 'traj_circle.npz'))
-    visualizer = GridSearchVisualizer(os.path.join(dir_path, 'nshtrack.npz'), os.path.join(dir_path, 'traj_nsh_theta1.npz'), 20)
+    visualizer = GridSearchVisualizer(os.path.join(dir_path, 'mocap_square2.npz'), os.path.join(dir_path, 'traj_nsh_theta1.npz'), 20)
     # visualizer = GridSearchVisualizer(os.path.join(dir_path, 'hall.npz'), os.path.join(dir_path, 'traj_8.npz')) # ol
     # visualizer = GridSearchVisualizer(os.path.join(dir_path, 'hall.npz'), os.path.join(dir_path, 'traj_6.npz')) # 20 reset
     visualizer.show()

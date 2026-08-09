@@ -1,0 +1,65 @@
+ekf_filter_node:
+  ros__parameters:
+    frequency: 40.0
+    two_d_mode: true          # Essential for ground vehicles (locks Z, Roll, Pitch to 0)
+    publish_tf: true          # EKF publishes odom -> base_link
+    print_diagnostics: true
+    predict_to_current_time: true
+
+
+                              # [x    y    z    roll pitch yaw  vx   vy   vz   vroll vpitch vyaw  ax   ay   az]
+    process_noise_covariance: [0.05, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,   0.0,   0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.05, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,   0.0,   0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.06, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,   0.0,   0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.03, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,   0.0,   0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.03, 0.0,  0.0,  0.0,  0.0,  0.0,   0.0,   0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.06, 0.0,  0.0,  0.0,  0.0,   0.0,   0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.15, 0.0,  0.0,  0.0,   0.0,   0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.15, 0.0,  0.0,   0.0,   0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.04, 0.0,   0.0,   0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.01,  0.0,   0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,   0.01,  0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,   0.0,   0.02, 0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,   0.0,   0.0,  0.01, 0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,   0.0,   0.0,  0.0,  0.01, 0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,   0.0,   0.0,  0.0,  0.0,  0.015]
+
+
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: cg
+    world_frame: map
+
+    # ---------------------------------------------------------
+    # INPUT 1: OptiTrack mocap (Absolute Location)
+    # ---------------------------------------------------------
+    odom0: /optitrack/odom
+    odom0_config: [true,  true,  false,
+                   false, false, true,
+                   true, true, false,    # Vx, Vy off until twist is enabled
+                   false, false, true,
+                   false, false, false]
+    odom0_differential: false
+
+
+    # ---------------------------------------------------------
+    # INPUT 2: Cleaned VESC IMU (Drift & Momentum)
+    # ---------------------------------------------------------
+    imu0: /sensors/imu/data
+    imu0_config: [false, false, false,
+                  false, false, false,
+                  false, false, false,
+                  false, false, true,    # Yaw Velocity (Gyro Z)
+                  true,  true,  false]   # X, Y Acceleration (Drift detection!)
+    imu0_relative: true
+    imu0_linear_acceleration_rejection_threshold: 0.5
+
+    # ---------------------------------------------------------
+    # INPUT 3: ZUPT (Anti-Phantom Drift)
+    # ---------------------------------------------------------
+    twist0: /zupt
+    twist0_config: [false, false, false,
+                    false, false, false,
+                    true,  true,  false,  # Locks Vx, Vy to 0 when parked
+                    false, false, true,   # Locks Vyaw to 0 when parked
+                    false, false, false]

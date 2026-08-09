@@ -13,6 +13,8 @@ def generate_launch_description():
         'ekf.yaml'
     ])
 
+    base_link_frame: cg
+
     # Define the EKF Node
     ekf_node = Node(
         package='robot_localization',

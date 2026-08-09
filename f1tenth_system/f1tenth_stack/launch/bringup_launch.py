@@ -126,6 +126,21 @@ def generate_launch_description():
         name='static_baselink_to_laser',
         arguments=['0.27', '0.0', '0.11', '0.0', '0.0', '0.0', 'base_link', 'laser']
     )
+    cg_tf_node = Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='static_baselink_to_cg',
+            arguments=['0.15', '0.0', '0.0', '0.0', '0.0', '0.0', 'base_link', 'cg']
+        )
+    
+    imu_tf_node = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='static_baselink_to_imu',
+        arguments=['0.065', '0.0', '0.09', '0.0', '0.0', '0.0', 'base_link', 'imu_link']
+    )
+    
+    
 
     # finalize
     ld.add_action(joy_node)
@@ -137,5 +152,7 @@ def generate_launch_description():
     ld.add_action(urg_node)
     ld.add_action(ackermann_mux_node)
     ld.add_action(static_tf_node)
+    ld.add_action(cg_tf_node)
+    ld.add_action(imu_tf_node)
 
     return ld
