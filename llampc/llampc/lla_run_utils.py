@@ -158,7 +158,7 @@ class LLASolver():
 
 
 class LLALogger():
-    def __init__(self, out_file = None):
+    def __init__(self, out_file = None, obstacles =[]):
         if not out_file is None:
             ros_log_root = os.path.expanduser("~/.ros/log")
             os.makedirs(ros_log_root, exist_ok=True)
@@ -183,6 +183,7 @@ class LLALogger():
                 "solve_time": [],     # NEW
                 "mu_est": [],
             }
+            self.obstacles = obstacles
 
 
     def log_lla_data(self, current_state, params, model_index, last_control,
@@ -246,4 +247,5 @@ class LLALogger():
             known_params=pack("known_params"),
             solve_time=pack("solve_time"),
             mu_est=pack("mu_est"),
+            obstacles =pack(self.obstacles)
         )

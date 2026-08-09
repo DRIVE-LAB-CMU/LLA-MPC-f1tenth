@@ -127,6 +127,12 @@ class MPCNode(Node):
         self.lla_reset_interval = 0
         self.lla_window = 60
 
+        self.obstacles = [
+            (0, 0, 5),
+            (0, 0, 10)
+            (0, 0, 3)
+        ]
+
 
         self.N = 30 #steps (for nmpc)
         self.hz = 40 #control frequency
@@ -152,7 +158,7 @@ class MPCNode(Node):
 
         if(self.log_data):
             out_file =  self.get_parameter('out_file').get_parameter_value().string_value
-            self.lla_logger = LLALogger(out_file)
+            self.lla_logger = LLALogger(out_file, self.obstacles)
 
     def fiala_setup(self):
         self.get_logger().info("Regular MPC Initialized")
@@ -391,8 +397,11 @@ class MPCNode(Node):
             self.lla_solver.prepare_mpc_solve()
 
             control_params = selected_model_params if self.adaptive_control else self.mean_params
-            set_horizon_params(self.lla_solver.solver, self.N,
-                               control_params, ref_segment, aug_state)
+            set_horizon_params(
+                self.lla_solver.solver, self.N,
+                control_params, 
+                ref_segment[:6, :self.N+1].T, 
+                self.obs)
             
             
             mpc_solver, status = self.lla_solver.mpc_solve(aug_state)
@@ -488,7 +497,7 @@ class MPCNode(Node):
                 d_ctrl,
                 mpc_states, 
                 record_ref_trajectory,
-                mu_est)
+                mu_est,)
 
     def publish_ref_trajectory(self, ref_trajectory):
         ref_msg = PoseArray()
