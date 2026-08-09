@@ -48,22 +48,23 @@ class LLASolver():
         full_params[:, self.lla_p:self.lla_p+6] = ref_segment[:6, :self.N+1].T #reference x, y, theta
         return full_params
     
-    def mpc_solve(self, state, params):
+    def mpc_solve(self, state, params= None):
         self.solver.set(0, "lbx", state)
         self.solver.set(0, "ubx", state)
         
+        if not params is None:
+            for i in range(self.N+1):
+                self.solver.set(i, "p", params[i])
 
-        for i in range(self.N+1):
-            self.solver.set(i, "p", params[i])
-
-            if(i == 0 or self.first_control):
-                self.solver.set(i, "x", state)
+                if(i == 0 or self.first_control):
+                    self.solver.set(i, "x", state)
         
         self.first_control = False
         status = self.solver.solve()
 
         return self.solver, status
 
+    
     def prepare_mpc_solve(self):
         if self.first_control:
             return
