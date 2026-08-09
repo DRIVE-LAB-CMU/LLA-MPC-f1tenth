@@ -67,8 +67,9 @@ class Track:
             self.v_raceline = vs
             self.mus = mus
             self.spline_v = [Spline(theta, vi) for vi in vs]
+            self.v = v
 
-        if v is not None:
+        elif v is not None:
             self.v = np.asarray(v)
             self.spline_v_single = Spline(theta, self.v)
 

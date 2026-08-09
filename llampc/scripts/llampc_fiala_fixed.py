@@ -121,7 +121,7 @@ class MPCNode(Node):
         self.get_logger().info("F1tenth MPC Initialized")
 
     def declare_params(self):
-        self.with_lla = False
+        self.with_lla = True
         self.adaptive_planning = False
         self.adaptive_control = True
         self.lla_reset_interval = 0
@@ -139,7 +139,7 @@ class MPCNode(Node):
 
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'blevel_turn_fast.npz')
+        self.declare_parameter('track_file_name', 'mocap_fig8fastbank.npz')
         self.declare_parameter('odom_topic', '/odometry/filtered')
         # self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
