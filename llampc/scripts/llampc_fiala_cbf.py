@@ -391,7 +391,7 @@ class MPCNode(Node):
                 self.lla_solver.solver, self.N,
                 control_params, 
                 ref_segment[:6, :self.N+1].T, 
-                self.obs)
+                self.obstacles)
             
             
             mpc_solver, status = self.lla_solver.mpc_solve(aug_state)
