@@ -128,9 +128,7 @@ class MPCNode(Node):
         self.lla_window = 60
 
         self.obstacles = [
-            (0, 0, 5),
-            (0, 0, 10)
-            (0, 0, 3)
+            (1, 1, 0.5),
         ]
 
 
