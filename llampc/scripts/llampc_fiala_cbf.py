@@ -192,14 +192,6 @@ class MPCNode(Node):
             'mur': 10,  
             'Cro': 0.0,
         }
-        # stuff with blevel
-        # discretization_dict = {
-        #     'Cf': 5,   
-        #     'Cr': 5,   
-        #     'muf': 7,  
-        #     'mur': 7,  
-        #     'Cro': 0.0,
-        # }
 
         param_dict = get_param_dict_grid(mean_dict, variation_dict, 
                                          discretization=discretization_dict, ground_truth=True,
