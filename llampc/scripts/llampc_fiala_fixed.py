@@ -444,11 +444,11 @@ class MPCNode(Node):
         if status == 0 or (status == 2):  # Success
             # Get optimal control
             self.apply_control(u_opt) # Apply control
-
-            self.dynamics_bank.update_known_params(self.omega_w)            
-            self.lb_history.predict_states(
-                self.current_state, u_opt, self.lla_reset_counter == 0
-            )
+            if self.lla_solver.current_mode:
+                self.dynamics_bank.update_known_params(self.omega_w)       
+                self.lb_history.predict_states(
+                    self.current_state, u_opt, self.lla_reset_counter == 0
+                )
                 
         else:
             print(f"\n--- SOLVER FAILED WITH STATUS {status} ---")

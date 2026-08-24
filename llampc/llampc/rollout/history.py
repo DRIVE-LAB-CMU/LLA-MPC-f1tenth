@@ -133,7 +133,7 @@ class LBHistory:
             gpu_x,
             self.cost_weights
         )
-        print(self.current_best_model)
+        # print(self.current_best_model)
         # Advance queue_index
         self.queue_index = (self.queue_index + 1) % self.history_length
         t2 = time.perf_counter_ns()

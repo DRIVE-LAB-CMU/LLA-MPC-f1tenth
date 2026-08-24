@@ -190,8 +190,8 @@ def create_ocp(model, params_car, steps, horizon,
                n_obs=N_OBS_SLOTS, body_discs=None, car_width=None,
                cbf_alpha=2.0, w_slack_obs=1e4, w_slack_obs_l1=1e3,
                w_slack_psi=1e2, w_slack_psi_l1=1e1,
-               integrator='IRK', sim_method_num_steps=5,
-               nlp_solver_type='SQP', nlp_solver_max_iter=None,
+               integrator='ERK', sim_method_num_steps=3,
+               nlp_solver_type='SQP', nlp_solver_max_iter=20,
                globalization=None):
     from acados_template import AcadosOcp
     check_params(params_car)
@@ -211,8 +211,12 @@ def create_ocp(model, params_car, steps, horizon,
 
     # ── cost (unchanged tuning) ───────────────────────────────────────
     ocp.cost.cost_type = ocp.cost.cost_type_e = 'NONLINEAR_LS'
-    w_x = w_y = w_xe = w_ye = 40.0
-    w_theta, w_vx, w_omega = 0.0, 1.0, 1.0
+
+    w_x = w_y = 40.0
+    w_xe = w_ye  = 40.0
+    w_theta=0.0
+    w_vx=10.0
+    w_omega =1.0
     w_current, w_steer = 0.01, 0.5
     w_slew, w_steer_v = 0.0, 0.5
 

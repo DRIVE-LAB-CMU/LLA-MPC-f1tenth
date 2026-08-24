@@ -99,7 +99,8 @@ class MPCNode(Node):
 
         self.cmd_pub = self.create_publisher(
             AckermannDriveStamped,
-            '/mpc/drive',
+            # '/mpc/drive',
+            '/drive',
             10
         )
 
@@ -132,7 +133,7 @@ class MPCNode(Node):
         ]
 
 
-        self.N = 30 #steps (for nmpc)
+        self.N = 20 #steps (for nmpc)
         self.hz = 40 #control frequency
         
         self.dt = 1/self.hz
@@ -143,9 +144,9 @@ class MPCNode(Node):
 
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'mocap_fig8fastbank.npz')
-        self.declare_parameter('odom_topic', '/odometry/filtered')
-        # self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        self.declare_parameter('track_file_name', 'blevel_ovalslow.npz')
+        # self.declare_parameter('odom_topic', '/odometry/filtered')
+        self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
         self.lla_reset_counter = 0
         
@@ -260,7 +261,6 @@ class MPCNode(Node):
         self.get_logger().info("LLA BANK COMPILED")
 
     def odom_callback(self, msg):    
-        # print("hello")    
         x = msg.pose.pose.position.x
         y = msg.pose.pose.position.y
         
@@ -298,6 +298,8 @@ class MPCNode(Node):
     def control_callback(self):
         self.checkpoint[0] = time.perf_counter_ns()
         print(f"CURSTATE: {self.current_state}")
+
+        print(f"TRACK: {self.track}")
         if self.track is None or self.current_state is None:
             return
         
@@ -383,6 +385,7 @@ class MPCNode(Node):
             record_ref_trajectory = []
             if self.publish_trajectories:
                 record_ref_trajectory = ref_segment.T
+                self.publish_ref_trajectory(ref_segment)
 
             self.lla_solver.prepare_mpc_solve()
 
@@ -396,12 +399,12 @@ class MPCNode(Node):
             
             mpc_solver, status = self.lla_solver.mpc_solve(aug_state)
             u_opt = mpc_solver.get(1, "x")[-2:] # pwm, delta
+            nextstate = mpc_solver.get(1, "x")[:] 
+            u_opt_pseudo = [nextstate[3], nextstate[-1]] # pwm, delta TODO:FIX
             d_ctrl = mpc_solver.get(0, "u")[:]
 
             self.lla_solver.current_mode = True
-
-
-            print(f"CONTROL: {u_opt}")       
+  
         
             if(self.publish_trajectories):
                 for i in range(self.N + 1):
@@ -437,15 +440,19 @@ class MPCNode(Node):
         # eq_tol = 1e-2 if vx > 0.1 else 0.1   # much looser at low speed
         
         self.checkpoint[5] = time.perf_counter_ns()
+
+        print(f"CONTROL: {u_opt}")     
         
         if status == 0 or (status == 2):  # Success
             # Get optimal control
-            self.apply_control(u_opt) # Apply control
+            self.apply_control(u_opt_pseudo) # Apply control 
 
-            self.dynamics_bank.update_known_params(self.omega_w)            
-            self.lb_history.predict_states(
-                self.current_state, u_opt, self.lla_reset_counter == 0
-            )
+            self.dynamics_bank.update_known_params(self.omega_w)     
+
+            if self.lla_solver.current_mode:       
+                self.lb_history.predict_states(
+                    self.current_state, u_opt, self.lla_reset_counter == 0
+                )
                 
         else:
             print(f"\n--- SOLVER FAILED WITH STATUS {status} ---")
@@ -463,7 +470,8 @@ class MPCNode(Node):
 
             self.lla_solver.current_mode = False
             self.lla_solver.first_control = True
-            
+
+
 
         self.checkpoint[6] = time.perf_counter_ns()
         self.count = (self.count + 1) % self.time_window
@@ -471,7 +479,7 @@ class MPCNode(Node):
         self.time_history[-1, self.count] = (self.checkpoint[-1] - self.checkpoint[0])
     
         if(self.count == 0):
-            print(np.max(self.time_history*1e-6, axis = 1))
+            print(f"MAX TIME {np.max(self.time_history*1e-6, axis = 1)}")
 
         known_params = np.array(self.dynamics_bank.get_known_params())
 
@@ -494,7 +502,7 @@ class MPCNode(Node):
         ref_msg.header.stamp = self.get_clock().now().to_msg()
         ref_msg.header.frame_id = "map"
 
-        # print(len(ref_trajectory))
+        print(len(ref_trajectory))
         for x, y in (ref_trajectory[:2].T):
             point = Pose()
             point.position.x = x
@@ -515,6 +523,12 @@ class MPCNode(Node):
         drive_msg.header.frame_id = "base_link"
 
         drive_msg.drive.speed = 0.0
+
+        if not self.lla_solver.current_mode:
+            drive_msg.drive.speed = 0.2
+        else:
+            drive_msg.drive.speed = u_opt[0] # TODO:FIX
+        
         drive_msg.drive.jerk = 2.0 if self.lla_solver.current_mode else 1.0
         drive_msg.drive.acceleration = cur
         drive_msg.drive.steering_angle = steer
