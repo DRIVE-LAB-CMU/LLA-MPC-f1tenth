@@ -4,4 +4,4 @@ LLA-MPC-f1tenth is an implementation the LLA-MPC (https://github.com/DRIVE-LAB-C
 The framework has been deployed on an F1Tenth with a Single-Track Bicycle Model integrated with Fiala Tire dynamics, and has been validated by both a standard 
 Model Predictive Control task and a Safe Model Predictive Control task. 
 
-This repository is developed by Henry Liao in collaboration with Maitham Al-Sunni. Please contact hzl@andrew.cmu.edu or maitham@cmu.edu if you have questions.
+This repository is developed by Henry Liao in collaboration with Maitham F. Al-Sunni. Please contact hzl@andrew.cmu.edu or maitham@cmu.edu if you have questions.
