@@ -42,8 +42,8 @@ bridge:
     scan_beams: 1080
 
     # map parameters
-    map_path: '/lla_ws/src/particle_filter/maps/blevel2'
-    map_img_ext: '.png'
+    map_path: '/workspaces/lla_drive_ws/src/f1tenth_gym_ros/maps/blevel2'
+    map_img_ext: '.pgm'
 
     # opponent parameters
     num_agent: 1

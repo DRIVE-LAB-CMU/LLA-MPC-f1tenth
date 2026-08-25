@@ -190,8 +190,8 @@ def create_ocp(model, params_car, steps, horizon,
                n_obs=N_OBS_SLOTS, body_discs=None, car_width=None,
                cbf_alpha=2.0, w_slack_obs=1e4, w_slack_obs_l1=1e3,
                w_slack_psi=1e2, w_slack_psi_l1=1e1,
-               integrator='ERK', sim_method_num_steps=3,
-               nlp_solver_type='SQP', nlp_solver_max_iter=20,
+               integrator='IRK', sim_method_num_steps=2,
+               nlp_solver_type='SQP', nlp_solver_max_iter=10,
                globalization=None):
     from acados_template import AcadosOcp
     check_params(params_car)

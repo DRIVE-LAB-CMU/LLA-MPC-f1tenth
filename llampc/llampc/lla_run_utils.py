@@ -48,21 +48,23 @@ class LLASolver():
         full_params[:, self.lla_p:self.lla_p+6] = ref_segment[:6, :self.N+1].T #reference x, y, theta
         return full_params
     
-    def mpc_solve(self, state, params= None):
+    def mpc_solve(self, state, params=None):
         self.solver.set(0, "lbx", state)
         self.solver.set(0, "ubx", state)
-        
-        if not params is None:
+        if params is not None:
             for i in range(self.N+1):
                 self.solver.set(i, "p", params[i])
 
-                if(i == 0 or self.first_control):
-                    self.solver.set(i, "x", state)
-        
-        self.first_control = False
-        status = self.solver.solve()
+        if self.first_control:
+            for i in range(self.N + 1):
+                self.solver.set(i, "x", state)
+            for i in range(self.N):
+                self.solver.set(i, "u", np.zeros(2))
+        else:
+            self.solver.set(0, "x", state)
 
-        return self.solver, status
+        self.first_control = False
+        return self.solver, self.solver.solve()
 
     
     def prepare_mpc_solve(self):
@@ -80,18 +82,19 @@ class LLASolver():
         self.solver.set(self.N - 1, "u", self.solver.get(self.N - 2, "u"))
         self.solver.set(self.N, "x", self.solver.get(self.N - 1, "x"))
         
-        for i in range(self.N):
-            # Overwrite the saved dual variables for the dynamics
-            num_pi = len(self.solver.get(i, "pi"))
-            self.solver.set(i, "pi", np.zeros(num_pi))
+        # for i in range(self.N):
+        #     # Overwrite the saved dual variables for the dynamics
+        #     num_pi = len(self.solver.get(i, "pi"))
+        #     self.solver.set(i, "pi", np.zeros(num_pi))
             
-            # Overwrite the saved dual variables for the bounds/constraints
-            num_lam = len(self.solver.get(i, "lam"))
-            self.solver.set(i, "lam", np.zeros(num_lam))
+        #     # Overwrite the saved dual variables for the bounds/constraints
+        #     num_lam = len(self.solver.get(i, "lam"))
+        #     self.solver.set(i, "lam", np.zeros(num_lam))
             
-        # Terminal node constraints
-        num_lam_e = len(self.solver.get(self.N, "lam"))
-        self.solver.set(self.N, "lam", np.zeros(num_lam_e))
+        # # Terminal node constraints
+        # num_lam_e = len(self.solver.get(self.N, "lam"))
+        # self.solver.set(self.N, "lam", np.zeros(num_lam_e))
+        # THIS IS FIXED BY WARM START =1
 
 
     def pid_long_control(self, ref_v, vx):
@@ -212,6 +215,9 @@ class LLALogger():
 
 
     def save_log(self):
+        if getattr(self, "log_file", None) is None:
+            return
+
         print(f"Saving data to {self.log_file}")
 
         def pack(key):
@@ -222,12 +228,20 @@ class LLALogger():
             (read back with np.load(..., allow_pickle=True)).
             """
             vals = self.log_buffer[key]
+            if len(vals) == 0:
+                return np.empty(0)
             try:
-                return np.array(vals)
-            except ValueError:
-                out = np.empty(len(vals), dtype=object)
-                out[:] = vals
-                return out
+                arr = np.array(vals)
+                if arr.dtype != object:
+                    return arr
+            except (ValueError, TypeError):
+                pass
+            out = np.empty(len(vals), dtype=object)
+            out[:] = vals
+            return out
+
+        obstacles = (np.asarray(self.obstacles, dtype=float)
+                     if len(self.obstacles) else np.empty((0, 3)))
 
         np.savez(
             self.log_file,
@@ -247,5 +261,5 @@ class LLALogger():
             known_params=pack("known_params"),
             solve_time=pack("solve_time"),
             mu_est=pack("mu_est"),
-            obstacles =pack(self.obstacles)
+            obstacles=obstacles,
         )

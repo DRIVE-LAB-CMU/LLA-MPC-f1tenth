@@ -443,7 +443,7 @@ class MPCNode(Node):
         
         if status == 0 or (status == 2):  # Success
             # Get optimal control
-            self.apply_control(u_opt) # Apply control
+            self.apply_control(u_opt, write_control = False) # Apply control
             if self.lla_solver.current_mode:
                 self.dynamics_bank.update_known_params(self.omega_w)       
                 self.lb_history.predict_states(
@@ -506,7 +506,7 @@ class MPCNode(Node):
 
         self.ref_pub.publish(ref_msg)
 
-    def apply_control(self, u_opt):
+    def apply_control(self, u_opt, write_control = True):
         """Apply optimal control to the vehicle"""
 
         cur = float(u_opt[0])
@@ -525,7 +525,8 @@ class MPCNode(Node):
         self.cmd_pub.publish(drive_msg) 
 
         self.last_drive_command = np.array([cur, steer])
-        self.last_control = np.array([cur, steer])
+        if write_control:
+            self.last_control = np.array([cur, steer])
         self.last_v = self.current_state[3]
         
     def publish_predicted_trajectory(self, predicted_states):

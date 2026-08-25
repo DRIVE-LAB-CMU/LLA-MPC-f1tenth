@@ -134,7 +134,7 @@ class MPCNode(Node):
 
 
         self.N = 20 #steps (for nmpc)
-        self.hz = 40 #control frequency
+        self.hz = 25 #control frequency
         
         self.dt = 1/self.hz
         self.Tf = self.N * self.dt # total time horizon (for nmpc)
@@ -144,7 +144,7 @@ class MPCNode(Node):
 
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'blevel_ovalslow.npz')
+        self.declare_parameter('track_file_name', 'blevel_ovalfast.npz')
         # self.declare_parameter('odom_topic', '/odometry/filtered')
         self.declare_parameter('odom_topic', '/ego_racecar/odom')
         self.declare_parameter('out_file', 'out')
@@ -246,7 +246,7 @@ class MPCNode(Node):
 
         
         self.lla_solver = LLASolver(
-            setup_mpc(self.N, self.Tf, build=True), lla_p=5, N = self.N)
+            setup_mpc(self.N, self.Tf, build=True, n_obs = 1, ), lla_p=5, N = self.N)
         self.get_logger().info("SOLVER COMPILED, WARM STARTING")
         
         self.lb_history.predict_states(
@@ -364,12 +364,16 @@ class MPCNode(Node):
             record_ref_trajectory = [ref_point]
 
             u_opt = self.lla_solver.pure_pursuit_control(self.current_state, ref_point)
+            u_opt_pseudo = u_opt
             status = 0
 
             self.lla_solver.current_mode = False
 
             self.lla_solver.first_control=True
         else:
+
+            self.omega_w = self.current_state[3] / self.params_car['rw']
+
             aug_state = np.concatenate(
                 [self.current_state, 
                 [self.omega_w], 
@@ -394,7 +398,8 @@ class MPCNode(Node):
                 self.lla_solver.solver, self.N,
                 control_params, 
                 ref_segment[:6, :self.N+1].T, 
-                self.obstacles)
+                self.obstacles,
+                n_obs = 1)
             
             
             mpc_solver, status = self.lla_solver.mpc_solve(aug_state)
@@ -441,11 +446,11 @@ class MPCNode(Node):
         
         self.checkpoint[5] = time.perf_counter_ns()
 
-        print(f"CONTROL: {u_opt}")     
+        print(f"CONTROL: {u_opt_pseudo}")     
         
         if status == 0 or (status == 2):  # Success
             # Get optimal control
-            self.apply_control(u_opt_pseudo) # Apply control 
+            self.apply_control(u_opt_pseudo, self.lla_solver.current_mode) # Apply control 
 
             self.dynamics_bank.update_known_params(self.omega_w)     
 
@@ -511,7 +516,7 @@ class MPCNode(Node):
 
         self.ref_pub.publish(ref_msg)
 
-    def apply_control(self, u_opt):
+    def apply_control(self, u_opt, write_control = True):
         """Apply optimal control to the vehicle"""
 
         cur = float(u_opt[0])
@@ -536,7 +541,10 @@ class MPCNode(Node):
         self.cmd_pub.publish(drive_msg) 
 
         self.last_drive_command = np.array([cur, steer])
-        self.last_control = np.array([cur, steer])
+
+        if write_control:
+            self.last_control = np.array([cur, steer])
+
         self.last_v = self.current_state[3]
         
     def publish_predicted_trajectory(self, predicted_states):
