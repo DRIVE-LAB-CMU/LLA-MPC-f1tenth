@@ -111,9 +111,7 @@ class StateVisualizer:
 
         self.r_car = r_car
         self.obstacles = []
-        if obstacles:
-            for p_obs, r_obs in obstacles:
-                self.obstacles.append((np.asarray(p_obs, dtype=float), float(r_obs)))
+        self._add_obstacles(obstacles)
 
         # --- Rollout config ---
         self.compute_rollouts = compute_rollouts
@@ -222,6 +220,15 @@ class StateVisualizer:
             kp = data["known_params"]
             if len(kp) > 0:
                 self.known_params = kp
+
+        for key in ("obstacles", "obs", "obstacle_list"):
+            if key in data:
+                before = len(self.obstacles)
+                self._add_obstacles(data[key])
+                added = len(self.obstacles) - before
+                if added:
+                    print(f"[visualizer] loaded {added} obstacle(s) from '{key}'")
+                break
 
         self.solve_time = None
         if "solve_time" in data:
@@ -338,6 +345,40 @@ class StateVisualizer:
         self._compute_cost_curves()
         self._compute_m_step_curves()
         self._compute_mpc_error_curve()
+
+    @staticmethod
+    def _normalize_obstacle(entry):
+        """Accept ((x, y), r) or (x, y, r) -> (np.array([x, y]), float(r))."""
+        if len(entry) == 2:
+            p, r = entry
+            return np.asarray(p, dtype=float).ravel()[:2], float(r)
+        if len(entry) == 3:
+            arr = np.asarray(entry, dtype=float).ravel()
+            return arr[:2], float(arr[2])
+        raise ValueError(f"unexpected obstacle entry of length {len(entry)}")
+
+    def _add_obstacles(self, raw):
+        """Append obstacles, de-duplicating against ones already registered."""
+        if raw is None:
+            return
+        # A bare (x, y, r) row rather than a list of them.
+        if (isinstance(raw, np.ndarray) and raw.dtype != object
+                and raw.ndim == 1 and raw.size == 3):
+            raw = [raw]
+
+        seen = {(round(float(p[0]), 6), round(float(p[1]), 6), round(float(r), 6))
+                for p, r in self.obstacles}
+        for entry in raw:
+            try:
+                p, r = self._normalize_obstacle(entry)
+            except Exception as e:
+                print(f"[visualizer] skipping malformed obstacle {entry!r}: {e}")
+                continue
+            key = (round(float(p[0]), 6), round(float(p[1]), 6), round(r, 6))
+            if key in seen:
+                continue
+            seen.add(key)
+            self.obstacles.append((p, r))
 
     def _step_cost_components(self, traj):
         T = min(len(traj), self.rollout_len)
@@ -1692,7 +1733,7 @@ class StateVisualizer:
 
 def _parse_args():
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    default_ref = os.path.join(os.path.dirname(dir_path), 'tracks', 'mocap_turnfastbank.npz')
+    default_ref = os.path.join(os.path.dirname(dir_path), 'tracks', 'blevel_ovalslow.npz')
 
     parser = argparse.ArgumentParser(
         description="Interactive state-trajectory visualizer."

@@ -130,6 +130,8 @@ class MPCNode(Node):
 
         self.obstacles = [
             (1, 1, 0.5),
+            (3, 0, 0.5),
+            (4, 1, 0.5)
         ]
 
 
@@ -246,7 +248,8 @@ class MPCNode(Node):
 
         
         self.lla_solver = LLASolver(
-            setup_mpc(self.N, self.Tf, build=True, n_obs = 1, ), lla_p=5, N = self.N)
+            setup_mpc(self.N, self.Tf, build=True, n_obs = len(self.obstacles), ), 
+            lla_p=5, N = self.N)
         self.get_logger().info("SOLVER COMPILED, WARM STARTING")
         
         self.lb_history.predict_states(
@@ -399,7 +402,7 @@ class MPCNode(Node):
                 control_params, 
                 ref_segment[:6, :self.N+1].T, 
                 self.obstacles,
-                n_obs = 1)
+                n_obs = len(self.obstacles))
             
             
             mpc_solver, status = self.lla_solver.mpc_solve(aug_state)
