@@ -99,8 +99,8 @@ class MPCNode(Node):
 
         self.cmd_pub = self.create_publisher(
             AckermannDriveStamped,
-            # '/mpc/drive',
-            '/drive',
+            '/mpc/drive',
+            # '/drive',TODO:FIX
             10
         )
 
@@ -129,9 +129,9 @@ class MPCNode(Node):
         self.lla_window = 60
 
         self.obstacles = [
-            (1, 1, 0.5),
-            (3, 0, 0.5),
-            (4, 1, 0.5)
+            (1, 0, 0.5),
+            (-2, -1, 0.5),
+            # (4, 1, 0.5)
         ]
 
 
@@ -146,9 +146,9 @@ class MPCNode(Node):
 
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'blevel_ovalfast.npz')
-        # self.declare_parameter('odom_topic', '/odometry/filtered')
-        self.declare_parameter('odom_topic', '/ego_racecar/odom')
+        self.declare_parameter('track_file_name', 'mocap_square2fast.npz')
+        self.declare_parameter('odom_topic', '/odometry/filtered')
+        # self.declare_parameter('odom_topic', '/ego_racecar/odom') TODO:FIX
         self.declare_parameter('out_file', 'out')
         self.lla_reset_counter = 0
         
@@ -367,7 +367,7 @@ class MPCNode(Node):
             record_ref_trajectory = [ref_point]
 
             u_opt = self.lla_solver.pure_pursuit_control(self.current_state, ref_point)
-            u_opt_pseudo = u_opt
+            # u_opt_pseudo = u_opt
             status = 0
 
             self.lla_solver.current_mode = False
@@ -375,7 +375,7 @@ class MPCNode(Node):
             self.lla_solver.first_control=True
         else:
 
-            self.omega_w = self.current_state[3] / self.params_car['rw']
+            # self.omega_w = self.current_state[3] / self.params_car['rw'] TODO:FIX
 
             aug_state = np.concatenate(
                 [self.current_state, 
@@ -407,8 +407,8 @@ class MPCNode(Node):
             
             mpc_solver, status = self.lla_solver.mpc_solve(aug_state)
             u_opt = mpc_solver.get(1, "x")[-2:] # pwm, delta
-            nextstate = mpc_solver.get(1, "x")[:] 
-            u_opt_pseudo = [nextstate[3], nextstate[-1]] # pwm, delta TODO:FIX
+            # nextstate = mpc_solver.get(1, "x")[:] 
+            # u_opt_pseudo = [nextstate[3], nextstate[-1]] # pwm, delta TODO:FIX
             d_ctrl = mpc_solver.get(0, "u")[:]
 
             self.lla_solver.current_mode = True
@@ -449,11 +449,11 @@ class MPCNode(Node):
         
         self.checkpoint[5] = time.perf_counter_ns()
 
-        print(f"CONTROL: {u_opt_pseudo}")     
+        print(f"CONTROL: {u_opt}")     
         
         if status == 0 or (status == 2):  # Success
             # Get optimal control
-            self.apply_control(u_opt_pseudo, self.lla_solver.current_mode) # Apply control 
+            self.apply_control(u_opt, self.lla_solver.current_mode) # Apply control 
 
             self.dynamics_bank.update_known_params(self.omega_w)     
 
@@ -532,10 +532,10 @@ class MPCNode(Node):
 
         drive_msg.drive.speed = 0.0
 
-        if not self.lla_solver.current_mode:
-            drive_msg.drive.speed = 0.2
-        else:
-            drive_msg.drive.speed = u_opt[0] # TODO:FIX
+        # if not self.lla_solver.current_mode:
+        #     drive_msg.drive.speed = 0.2
+        # else:
+        #     drive_msg.drive.speed = u_opt[0] # TODO:FIX
         
         drive_msg.drive.jerk = 2.0 if self.lla_solver.current_mode else 1.0
         drive_msg.drive.acceleration = cur

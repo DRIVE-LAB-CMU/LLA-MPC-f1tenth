@@ -4,14 +4,14 @@
             xsi:schemaLocation="https://cdds.io/config https://raw.githubusercontent.com/eclipse-cyclonedds/cyclonedds/master/etc/cyclonedds.xsd">
   <Domain Id="any">
     <General>
-      <NetworkInterfaceAddress>172.26.100.199</NetworkInterfaceAddress>
+      <NetworkInterfaceAddress>172.26.87.254</NetworkInterfaceAddress>
       <AllowMulticast>false</AllowMulticast>
     </General>
 
     <Discovery>
       <ParticipantIndex>auto</ParticipantIndex>
       <Peers>
-        <Peer Address="172.26.112.71"/>   <Peer Address="172.26.100.199"/>  </Peers>
+        <Peer Address="172.26.58.21"/>   <Peer Address="172.26.87.254"/>  </Peers>
       <MaxAutoParticipantIndex>20</MaxAutoParticipantIndex>
     </Discovery>
 
