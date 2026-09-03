@@ -212,13 +212,22 @@ def create_ocp(model, params_car, steps, horizon,
     # ── cost (unchanged tuning) ───────────────────────────────────────
     ocp.cost.cost_type = ocp.cost.cost_type_e = 'NONLINEAR_LS'
 
-    w_x = w_y = 40.0
-    w_xe = w_ye  = 40.0
+
+    w_x = w_y = 20.0
+    w_xe = w_ye  = 0.0
     w_theta=0.0
-    w_vx=10.0
-    w_omega =1.0
-    w_current, w_steer = 0.01, 0.5
-    w_slew, w_steer_v = 0.0, 0.5
+    w_vx=1.0 #other
+    w_omega =0.1
+    w_current, w_steer = 0.01, 0.1
+    w_slew, w_steer_v = 0.0, 0.1
+
+    # w_x = w_y = 10.0
+    # w_xe = w_ye  = 10.0
+    # w_theta=0.0
+    # w_vx=1.0
+    # w_omega =0.1
+    # w_current, w_steer = 0.01, 0.5
+    # w_slew, w_steer_v = 0.0, 0.5
 
     Q_flat = [w_x, w_y, w_theta, w_vx, 0.0, w_omega, w_current, w_steer]
     R_flat = [w_slew, w_steer_v]

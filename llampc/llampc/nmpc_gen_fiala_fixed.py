@@ -241,19 +241,19 @@ def create_ocp(model, params_car, steps, horizon):
     # w_steer_v = 0.8 # 0.01 0.1 0.8
     
     # FAST
-    # w_x = 40.0 #20  40  40
-    # w_y = 40.0 # 20  40 40
-    # w_xe = 0.0 # 20  40 0
-    # w_ye = 0.0 # 20 40  0
-    # w_theta = 0
-    # w_vx = 0.1  #  10 10 
+    w_x = 40.0 #20  40  40
+    w_y = 40.0 # 20  40 40
+    w_xe = 0.0 # 20  40 0
+    w_ye = 0.0 # 20 40  0
+    w_theta = 0
+    w_vx = 0.1  #  10 10 
 
 
-    # w_omega = 1.0
-    # w_current = 0.01
-    # w_steer = 0.1 # 0.1 0.01 0.8
-    # w_slew = 0.0
-    # w_steer_v = 0.1 # 0.01 0.1 0.8
+    w_omega = 0.
+    w_current = 0.01
+    w_steer = 0.5 # 0.1 0.01 0.8
+    w_slew = 0.0
+    w_steer_v = 0.5 # 0.01 0.1 0.8
 
     # CRAZY
     # w_x = 40.0 #20  40  40
@@ -270,18 +270,18 @@ def create_ocp(model, params_car, steps, horizon):
     # w_slew = 0.0
     # w_steer_v = 0.1 # 0.01 0.1 0.8
 
-    w_x = 40.0 #20  40  40
-    w_y = 40.0 # 20  40 40
-    w_xe = 40.0 # 20  40 0
-    w_ye = 40.0 # 20 40  0
-    w_theta = 0
-    w_vx = 10.0  #  10 10 
+    # w_x = 40.0 #20  40  40
+    # w_y = 40.0 # 20  40 40
+    # w_xe = 40.0 # 20  40 0
+    # w_ye = 40.0 # 20 40  0
+    # w_theta = 0
+    # w_vx = 10.0  #  10 10 
 
-    w_omega = 0.1
-    w_current = 0.01
-    w_steer = 0.1 # 0.1 0.01 0.8
-    w_slew = 0.0
-    w_steer_v = 0.1 # 0.01 0.1 0.8
+    # w_omega = 0.1
+    # w_current = 0.01
+    # w_steer = 0.1 # 0.1 0.01 0.8
+    # w_slew = 0.0
+    # w_steer_v = 0.1 # 0.01 0.1 0.8
     
     
     

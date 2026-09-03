@@ -122,17 +122,25 @@ class MPCNode(Node):
         self.get_logger().info("F1tenth MPC Initialized")
 
     def declare_params(self):
-        self.with_lla = True
+        self.with_lla = False
         self.adaptive_planning = False
         self.adaptive_control = True
         self.lla_reset_interval = 0
         self.lla_window = 60
 
+        # self.obstacles = [
+        #     (1, 0, 0.5),
+        #     (-2, -1, 0.5),
+        #     (-1.8, -1.5, 0.5)
+        # ]
+        # oval
+
         self.obstacles = [
-            (1, 0, 0.5),
-            (-2, -1, 0.5),
-            # (4, 1, 0.5)
+            (-.75, -.25, 0.5),
+            (-.75, -2.5, 0.5),
+
         ]
+        #fig8
 
 
         self.N = 20 #steps (for nmpc)
@@ -146,7 +154,7 @@ class MPCNode(Node):
 
         self.declare_parameter('solver_config', 'default')
         self.declare_parameter('json_file', 'f1tenth_acados_ocp.json')
-        self.declare_parameter('track_file_name', 'mocap_square2fast.npz')
+        self.declare_parameter('track_file_name', 'mocap_fig8fastbank.npz')
         self.declare_parameter('odom_topic', '/odometry/filtered')
         # self.declare_parameter('odom_topic', '/ego_racecar/odom') TODO:FIX
         self.declare_parameter('out_file', 'out')
