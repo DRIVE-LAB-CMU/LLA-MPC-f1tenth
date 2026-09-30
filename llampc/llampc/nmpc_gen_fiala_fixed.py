@@ -84,8 +84,8 @@ def export_model(params_car, exact = False):
         # --- drive torque on rear wheel ---
         tau_drive = gear_ratio * 1.5 * pole_pairs * lam *current
 
-        # --- realized longitudinal chassis force drives load transfer ---
-        Fx_chassis = Frx + Ffx*ca.cos(delta) - Ffy*ca.sin(delta)
+        # # --- realized longitudinal chassis force drives load transfer ---
+        # Fx_chassis = Frx + Ffx*ca.cos(delta) - Ffy*ca.sin(delta)
 
         # --- dynamics ---
         dx0 = x[3]*ca.cos(x[2]) - x[4]*ca.sin(x[2])
@@ -241,15 +241,15 @@ def create_ocp(model, params_car, steps, horizon):
     # w_steer_v = 0.8 # 0.01 0.1 0.8
     
     # FAST
-    w_x = 40.0 #20  40  40
-    w_y = 40.0 # 20  40 40
+    w_x = 20.0 #20  40  40
+    w_y = 20.0 # 20  40 40
     w_xe = 0.0 # 20  40 0
     w_ye = 0.0 # 20 40  0
     w_theta = 0
-    w_vx = 0.1  #  10 10 
+    w_vx = 0.01  #  10 10 
 
 
-    w_omega = 0.
+    w_omega = 1.0
     w_current = 0.01
     w_steer = 0.5 # 0.1 0.01 0.8
     w_slew = 0.0

@@ -443,7 +443,7 @@ class MPCNode(Node):
         
         if status == 0 or (status == 2):  # Success
             # Get optimal control
-            self.apply_control(u_opt, write_control = False) # Apply control
+            self.apply_control(u_opt, write_control = True) # Apply control
             if self.lla_solver.current_mode:
                 self.dynamics_bank.update_known_params(self.omega_w)       
                 self.lb_history.predict_states(
