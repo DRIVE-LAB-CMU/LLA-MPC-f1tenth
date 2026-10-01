@@ -3405,12 +3405,6 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.show_grid:
             self._draw_grid(painter, w, h)
 
-        if self.ref is not None and self.ref.n > 0 and self.show_ref:
-            ref_range = (0, self.ref.n - 1)
-            self._draw_path(painter, w, h, self.ref, ref_range,
-                            self.ref_segments, self.ref_color, self.ref_width,
-                            dotted=True)
-
         cur_samples = []   # [(entry, idx), ...] for the info bar
         for t in self.trajs:
             src = t["path"]
@@ -3429,6 +3423,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 if idx is not None and (win is None or win[0] <= idx <= win[1]):
                     cur_samples.append((t, idx))
                     self._draw_point(painter, w, h, src, idx, t["color"])
+
+        # the reference goes on top of every trajectory (only the legend and
+        # timestamp overlays sit above it)
+        if self.ref is not None and self.ref.n > 0 and self.show_ref:
+            ref_range = (0, self.ref.n - 1)
+            self._draw_path(painter, w, h, self.ref, ref_range,
+                            self.ref_segments, self.ref_color, self.ref_width,
+                            dotted=True)
 
         self._draw_legend(painter, w, h)
         self._draw_timestamp(painter, w, h)
