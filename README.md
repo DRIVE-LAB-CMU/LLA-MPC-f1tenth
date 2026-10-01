@@ -1,5 +1,8 @@
 # LLA-MPC-f1tenth
 
+**See the update repository here**: link (https://github.com/LLA-Control/LLA-MPC-embedded/tree/main).
+
+
 LLA-MPC-f1tenth is an implementation the LLA-MPC (https://github.com/DRIVE-LAB-CMU/LLA-MPC) framework that is modularized to accept different dynamics, integrators, and model-based robotics tasks.
 The framework has been deployed on an F1Tenth with a Single-Track Bicycle Model integrated with Fiala Tire dynamics, and has been validated by both a standard 
 Model Predictive Control task and a Safe Model Predictive Control task. 
