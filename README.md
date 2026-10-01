@@ -1,6 +1,6 @@
 # LLA-MPC-f1tenth
 
-**See the update repository here**: [link](https://github.com/LLA-Control/LLA-MPC-embedded/tree/main)].
+**See the update repository here**: [link](https://github.com/LLA-Control/LLA-MPC-embedded/tree/main).
 
 
 LLA-MPC-f1tenth is an implementation the [LLA-MPC](https://github.com/DRIVE-LAB-CMU/LLA-MPC) framework that is modularized to accept different dynamics, integrators, and model-based robotics tasks.
